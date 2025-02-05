@@ -4,7 +4,7 @@ on:
   workflow_call:
 
 jobs:
-  static-analysis:
+  static-analysis-run:
     name: 'Static Analysis (PHPStan, PHPMD, PHPCS, Rector)'
     runs-on: [self-hosted, dind]
     container:
@@ -54,7 +54,7 @@ jobs:
   checkout:
     name: 'Checkout'
     runs-on: self-hosted
-    needs: static-analysis
+    needs: static-analysis-run
     if: always()
     steps:
       - uses: actions/checkout@v4

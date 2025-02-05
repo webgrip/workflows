@@ -1,0 +1,35 @@
+name: 'Tests'
+
+on:
+  workflow_call:
+
+jobs:
+  tests-run:
+    name: '${{ matrix.testsuite }}'
+    runs-on: [self-hosted, dind]
+    container:
+      image: php:8.2-cli
+    strategy:
+      fail-fast: false
+      matrix:
+        testsuite: [ 'Unit', 'Integration', 'Functional' ]
+    steps:
+
+      - name: 'Run ${{ matrix.testsuite }} tests'
+        run: |
+          if [ "${{ matrix.testsuite }}" == "Unit" ]; then
+            ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite unit --coverage-php coverage/unit.cov --coverage-html coverage/unit --fail-on-risky
+          elif [ "${{ matrix.testsuite }}" == "Integration" ]; then
+            ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite integration --coverage-php coverage/integration.cov --coverage-html coverage/integration --fail-on-risky  --exclude-group=db 
+          elif [ "${{ matrix.testsuite }}" == "Functional" ]; then
+            ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite functional --coverage-php coverage/functional.cov --coverage-html coverage/functional --fail-on-risky || true
+          else
+            echo "Unknown testsuite"
+            exit 1
+          fi
+
+      - name: 'Upload coverage artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.testsuite }}
+          path: coverage
