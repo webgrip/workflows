@@ -44,13 +44,13 @@ jobs:
 #      - name: 'Install dependencies'
 #        run: composer install --prefer-dist --no-interaction
 #
-#  php-test:
-#    name: 'PHP test'
-#    runs-on: [self-hosted, dind]
-#    container:
-#      image: php:8.2-cli
-#    steps:
-#      - name: echo version
-#        shell: bash
-#        run: |
-#         echo "PHP Version: $(php -v)"
+  php-test:
+    name: 'PHP test'
+    runs-on: [self-hosted, dind]
+    container:
+      image: php:8.2-cli
+    steps:
+      - name: echo version
+        shell: bash
+        run: |
+         echo "PHP Version: $(php -v)"
