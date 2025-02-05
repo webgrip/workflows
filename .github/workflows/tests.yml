@@ -16,7 +16,6 @@ jobs:
     steps:
 
       - name: 'Run ${{ matrix.testsuite }} tests'
-        shell: bash
         run: |
           case "${{ matrix.testsuite }}" in
             "Unit")
