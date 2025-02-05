@@ -16,12 +16,20 @@ jobs:
       - run: |
           ls -la
 
+      - uses : actions/cache@v4
+        with:
+          path: vendor
+          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
+
+      - run: |
+          ls -la
+          ls -la vendor
+
       - uses: webgrip/workflows/.github/php/8.2/actions/composer-install@main
 
-#      - uses : actions/cache/save@v4
-#        with:
-#          path: .
-#          key: "checkout-${{ hashFiles('**/composer.lock') }}-${{ github.sha }}"
+      - run: |
+          ls -la vendor
+
 
 #  composer-install-on-container:
 #    name: 'Composer install on container'
