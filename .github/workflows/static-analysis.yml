@@ -6,8 +6,7 @@ on:
 jobs:
   static-analysis:
     name: 'Static Analysis (PHPStan, PHPMD, PHPCS, Rector)'
-    runs-on: self-hosted
-    environment: ${{ inputs.github-environment }}
+    runs-on: [self-hosted, dind]
     container:
         image: php:8.2-cli
     steps:
@@ -24,11 +23,6 @@ jobs:
 
       - run: |
           ls -la
-#      - name: Retrieve cache from build
-#        uses: actions/cache@v4
-#        with:
-#          path: ./vendor
-#          key: composer-${{ hashFiles('**/composer.lock') }}-${{ github.sha }}
 
       - name: Run phpcs
         run: ./vendor/bin/phpcs -q -s --standard=./phpcs.xml ./src --report=full --exclude=Generic.Files.LineLength
@@ -68,6 +62,7 @@ jobs:
     name: 'Checkout'
     runs-on: self-hosted
     needs: static-analysis
+    if: always()
     steps:
       - uses: actions/checkout@v4
       - run: |
