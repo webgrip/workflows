@@ -9,25 +9,32 @@ jobs:
     runs-on: [self-hosted, dind]
     steps:
       - uses: actions/checkout@v4
+
       - uses: webgrip/workflows/.github/php/8.2/actions/composer-install@main
 
-  composer-install-on-container:
-    name: 'Composer install on container'
-    runs-on: [self-hosted, dind]
-    container:
-      image: composer:2.8.5
-    steps:
-      - uses: actions/checkout@v4
-      - name: 'Install dependencies'
-        run: composer install --prefer-dist --no-interaction
+      - uses : actions/cache/save@v4
+        with:
+          path: .
+          key: "checkout-${{ hashFiles('**/composer.lock') }}-${{ github.sha }}"
 
-  php-test:
-    name: 'PHP test'
-    runs-on: [self-hosted, dind]
-    container:
-      image: php:8.2-cli
-    steps:
-      - name: echo version
-        shell: bash
-        run: |
-         echo "PHP Version: $(php -v)"
+
+#  composer-install-on-container:
+#    name: 'Composer install on container'
+#    runs-on: [self-hosted, dind]
+#    container:
+#      image: composer:2.8.5
+#    steps:
+#      - uses: actions/checkout@v4
+#      - name: 'Install dependencies'
+#        run: composer install --prefer-dist --no-interaction
+#
+#  php-test:
+#    name: 'PHP test'
+#    runs-on: [self-hosted, dind]
+#    container:
+#      image: php:8.2-cli
+#    steps:
+#      - name: echo version
+#        shell: bash
+#        run: |
+#         echo "PHP Version: $(php -v)"

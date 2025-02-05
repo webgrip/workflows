@@ -1,0 +1,57 @@
+name: 'Static Analysis'
+
+on:
+  workflow_call:
+
+jobs:
+  static-analysis:
+    name: 'Static Analysis (PHPStan, PHPMD, PHPCS, Rector)'
+    runs-on: self-hosted
+    environment: ${{ inputs.github-environment }}
+    container:
+        image: php:8.2-cli
+    steps:
+      - uses: actions/cache/restore@v4
+        with:
+          path: .
+          key: "checkout-${{ hashFiles('**/composer.lock') }}-${{ github.sha }}"
+
+#      - name: Retrieve cache from build
+#        uses: actions/cache@v4
+#        with:
+#          path: ./vendor
+#          key: composer-${{ hashFiles('**/composer.lock') }}-${{ github.sha }}
+
+      - name: Run phpcs
+        run: ./vendor/bin/phpcs -q -s --standard=./phpcs.xml ./src --report=full --exclude=Generic.Files.LineLength
+        continue-on-error: true
+
+      - name: Run phpcs (Full)
+        run: ./vendor/bin/phpcs -q -s --standard=./phpcs.xml ./src --report=full --ignore-annotations
+        if: always()
+        continue-on-error: true
+
+      - name: Run phpmd
+        run: ./vendor/bin/phpmd --strict --color ./src text ./phpmd.xml
+        if: always()
+        continue-on-error: true
+
+      - name: Run phpstan
+        run: ./vendor/bin/phpstan --configuration=./phpstan.neon analyse ./src --level 8 --error-format=table
+        if: always()
+        continue-on-error: true
+
+      - name: Run psalm
+        run: php ./psalm.phar --config=psalm.xml --output-format=compact --generate-json-map=psalm-output.json
+        if: always()
+        continue-on-error: true
+
+      - name: Run rector
+        run: ./vendor/bin/rector --config=./rector.php process ./src --dry-run
+        if: always()
+        continue-on-error: true
+
+      - name: Run composer-normalize
+        run: composer normalize
+        if: always()
+        continue-on-error: true
