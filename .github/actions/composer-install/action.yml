@@ -1,0 +1,12 @@
+name: "[Action] Composer Install"
+description: "Checks out the code and runs composer install"
+author: "WebGrip"
+
+runs:
+  using: 'docker'
+  image: docker://composer:2.8.5
+  args:
+    - install
+    - --no-interaction
+    - --prefer-dist
+    - --ignore-platform-reqs

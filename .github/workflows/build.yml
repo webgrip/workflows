@@ -1,0 +1,32 @@
+name: 'Build'
+
+on:
+  workflow_call:
+    secrets:
+      COMPOSER_TOKEN:
+        description: 'Composer packagist token'
+        required: true
+
+env:
+  PHP_VERSION: ${{ vars.PHP_VERSION }}
+
+jobs:
+  composer-install:
+    name: 'Composer install'
+    runs-on: [self-hosted, dind]
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: webgrip/workflows/.github/actions/composer-install@main
+
+  composer-install-on-container:
+    name: 'Composer install'
+    runs-on: [self-hosted, dind]
+    environment: production
+    container:
+      image: composer:2.8.5
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'Install dependencies'
+        run: composer install --prefer-dist --no-interaction
