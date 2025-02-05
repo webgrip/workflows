@@ -28,5 +28,6 @@ jobs:
       image: php:8.2-cli
     steps:
       - name: echo version
+        shell: bash
         run: |
          echo "PHP Version: $(php -v)"
