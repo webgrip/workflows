@@ -23,12 +23,12 @@ jobs:
 
       - run: |
           ls -la
-          ls -la vendor
+          ls -la vendor || true
 
       - uses: webgrip/workflows/.github/php/8.2/actions/composer-install@main
 
       - run: |
-          ls -la vendor
+          ls -la vendor || true
 
 
 #  composer-install-on-container:

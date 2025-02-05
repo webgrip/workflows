@@ -15,7 +15,7 @@ jobs:
 
       - run: |
           ls -la
-          ls -la vendor
+          ls -la vendor || true
 
       - name: Run phpcs
         run: ./vendor/bin/phpcs -q -s --standard=./phpcs.xml ./src --report=full --exclude=Generic.Files.LineLength
