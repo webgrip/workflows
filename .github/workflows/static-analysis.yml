@@ -67,6 +67,7 @@ jobs:
   checkout:
     name: 'Checkout'
     runs-on: self-hosted
+    needs: static-analysis
     steps:
       - uses: actions/checkout@v4
       - run: |
