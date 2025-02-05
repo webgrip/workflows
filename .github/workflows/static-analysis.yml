@@ -12,17 +12,10 @@ jobs:
     steps:
       - run: |
           echo "PHP Version: $(php -v)"
-      - run: |
-            echo "Composer Version: $(composer -v)"
-      - run: |
-          ls -la
-      - uses: actions/cache/restore@v4
-        with:
-          path: .
-          key: "checkout-${{ hashFiles('**/composer.lock') }}-${{ github.sha }}"
 
       - run: |
           ls -la
+          ls -la vendor
 
       - name: Run phpcs
         run: ./vendor/bin/phpcs -q -s --standard=./phpcs.xml ./src --report=full --exclude=Generic.Files.LineLength
