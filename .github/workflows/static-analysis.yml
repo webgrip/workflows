@@ -63,3 +63,12 @@ jobs:
         run: composer normalize
         if: always()
         continue-on-error: true
+
+  checkout:
+    name: 'Checkout'
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          echo "Checkout"
+          ls -la
