@@ -2,13 +2,6 @@ name: 'Build'
 
 on:
   workflow_call:
-    secrets:
-      COMPOSER_TOKEN:
-        description: 'Composer packagist token'
-        required: true
-
-env:
-  PHP_VERSION: ${{ vars.PHP_VERSION }}
 
 jobs:
   composer-install:
