@@ -47,6 +47,7 @@ jobs:
   php-test:
     name: 'PHP test'
     runs-on: [self-hosted, dind]
+    needs: composer-install
     container:
       image: php:8.2-cli
     steps:

@@ -4,7 +4,7 @@ on:
   workflow_call:
 
 jobs:
-  tests-run:
+  tests-run: #TODO I think we can have 3 jobs, one for each testsuite. Use action is the step, to run the tests on php 8.2-cli on docker
     name: '${{ matrix.testsuite }}'
     runs-on: [self-hosted, dind]
     container:
