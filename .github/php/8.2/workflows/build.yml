@@ -18,7 +18,7 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-      - uses: webgrip/workflows/.github/actions/composer-install@main
+      - uses: webgrip/workflows/.github/php/8.2/actions/composer-install@main
 
   composer-install-on-container:
     name: 'Composer install'
