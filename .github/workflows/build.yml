@@ -7,8 +7,6 @@ jobs:
   composer-install:
     name: 'Composer install'
     runs-on: [self-hosted, dind]
-    environment: production
-
     steps:
       - uses: actions/checkout@v4
       - uses: webgrip/workflows/.github/php/8.2/actions/composer-install@main
@@ -16,7 +14,6 @@ jobs:
   composer-install-on-container:
     name: 'Composer install on container'
     runs-on: [self-hosted, dind]
-    environment: production
     container:
       image: composer:2.8.5
     steps:
@@ -27,9 +24,9 @@ jobs:
   php-test:
     name: 'PHP test'
     runs-on: [self-hosted, dind]
-    environment: production
     container:
       image: php:8.2-cli
     steps:
       - name: echo version
-        run: php -v
+        run: |
+         echo "PHP Version: $(php -v)"
