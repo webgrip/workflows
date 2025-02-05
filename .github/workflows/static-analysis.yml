@@ -11,11 +11,19 @@ jobs:
     container:
         image: php:8.2-cli
     steps:
+      - run: |
+          echo "PHP Version: $(php -v)"
+      - run: |
+            echo "Composer Version: $(composer -v)"
+      - run: |
+          ls -la
       - uses: actions/cache/restore@v4
         with:
           path: .
           key: "checkout-${{ hashFiles('**/composer.lock') }}-${{ github.sha }}"
 
+      - run: |
+          ls -la
 #      - name: Retrieve cache from build
 #        uses: actions/cache@v4
 #        with:
