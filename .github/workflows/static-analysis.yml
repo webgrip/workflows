@@ -53,7 +53,7 @@ jobs:
 
   checkout:
     name: 'Checkout'
-    runs-on: self-hosted
+    runs-on: [self-hosted, dind]
     needs: static-analysis-run
     if: always()
     steps:
