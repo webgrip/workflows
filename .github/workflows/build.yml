@@ -43,6 +43,7 @@ jobs:
       - run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
       - run: ls -la
       - uses: actions/checkout@v4
+      - run: ls -la
       - name: 'Install dependencies'
         run: composer install --prefer-dist --no-interaction
       - run: | 
