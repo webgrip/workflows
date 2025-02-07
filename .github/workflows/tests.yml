@@ -16,9 +16,15 @@ jobs:
     steps:
       - run: |
           echo "PHP Version: $(php -v)"
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: vendor
+          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
 
       - run: |
           ls -la
+          ls -la vendor || true
 
       - name: 'Run ${{ matrix.testsuite }} tests'
         run: |
