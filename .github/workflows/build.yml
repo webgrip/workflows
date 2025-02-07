@@ -45,6 +45,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: 'Install dependencies'
         run: composer install --prefer-dist --no-interaction
+      - run: | 
+          ls -la
+          ls -la vendor || true
 #
   php-test:
     name: 'PHP test'
