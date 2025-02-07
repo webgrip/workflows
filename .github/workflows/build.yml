@@ -48,14 +48,80 @@ jobs:
       - run: | 
           ls -la
           ls -la vendor || true
-#
+
   php-test:
     name: 'PHP test'
     runs-on: arc-runner-set
-    needs: composer-install
     container:
       image: php:8.2-cli
     steps:
+      - name: echo version
+        shell: bash
+        run: |
+         echo "PHP Version: $(php -v)"
+
+  php-test0:
+    name: 'PHP test'
+    runs-on: arc-runner-set
+    container:
+      image: php:8.2-cli
+    steps:
+      - name: echo version
+        shell: bash
+        run: |
+         echo "PHP Version: $(php -v)"
+
+  php-test2:
+    name: 'PHP test'
+    runs-on: arc-runner-set
+    container:
+      image: php:8.2-cli
+    steps:
+      - name: echo version
+        shell: bash
+        run: |
+         echo "PHP Version: $(php -v)"
+
+  php-test3:
+    name: 'PHP test'
+    runs-on: arc-runner-set
+    container:
+      image: php:8.2-cli
+    steps:
+      - name: echo version
+        shell: bash
+        run: |
+         echo "PHP Version: $(php -v)"
+
+  php-test4:
+    name: 'PHP test'
+    runs-on: arc-runner-set
+    container:
+      image: php:8.2-cli
+    steps:
+      - name: echo version
+        shell: bash
+        run: |
+         echo "PHP Version: $(php -v)"
+
+  php-test5:
+    name: 'PHP test'
+    runs-on: arc-runner-set
+    container:
+      image: php:8.2-cli
+    steps:
+      - name: echo version
+        shell: bash
+        run: |
+         echo "PHP Version: $(php -v)"
+
+  php-test6:
+    name: 'PHP test'
+    runs-on: arc-runner-set
+    container:
+      image: php:8.2-cli
+    steps:
+      - uses: actions/checkout@v4
       - name: echo version
         shell: bash
         run: |
