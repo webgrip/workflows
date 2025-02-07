@@ -13,6 +13,13 @@ jobs:
       - run: |
           echo "PHP Version: $(php -v)"
 
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: vendor
+          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
+
       - run: |
           ls -la
           ls -la vendor || true
@@ -46,18 +53,18 @@ jobs:
         if: always()
         continue-on-error: true
 
-      - name: Run composer-normalize
-        run: composer normalize
-        if: always()
-        continue-on-error: true
-
-  checkout:
-    name: 'Checkout'
+  composer-normalize:
+    name: 'Composer Normalize'
     runs-on: arc-runner-set
-    needs: static-analysis-run
-    if: always()
+    container:
+        image: composer:2.8.5
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: vendor
+          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
       - run: |
-          echo "Checkout"
           ls -la
+          ls -la vendor || true
+      - run: composer normalize
