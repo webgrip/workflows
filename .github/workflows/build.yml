@@ -41,6 +41,7 @@ jobs:
       image: composer:2.8.5
     steps:
       - run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
+      - run: ls -la
       - uses: actions/checkout@v4
       - name: 'Install dependencies'
         run: composer install --prefer-dist --no-interaction
