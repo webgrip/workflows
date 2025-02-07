@@ -6,7 +6,7 @@ on:
 jobs:
   static-analysis-run:
     name: 'Static Analysis (PHPStan, PHPMD, PHPCS, Rector)'
-    runs-on: [self-hosted, dind]
+    runs-on: arc-runner-set
     container:
         image: php:8.2-cli
     steps:
@@ -53,7 +53,7 @@ jobs:
 
   checkout:
     name: 'Checkout'
-    runs-on: [self-hosted, dind]
+    runs-on: arc-runner-set
     needs: static-analysis-run
     if: always()
     steps:

@@ -6,7 +6,7 @@ on:
 jobs:
   composer-install:
     name: 'Composer install'
-    runs-on: [self-hosted, dind]
+    runs-on: arc-runner-set
     steps:
       - run: |
           pwd
@@ -34,19 +34,19 @@ jobs:
           ls -la vendor || true
 
 
-#  composer-install-on-container:
-#    name: 'Composer install on container'
-#    runs-on: [self-hosted, dind]
-#    container:
-#      image: composer:2.8.5
-#    steps:
-#      - uses: actions/checkout@v4
-#      - name: 'Install dependencies'
-#        run: composer install --prefer-dist --no-interaction
+  composer-install-on-container:
+    name: 'Composer install on container'
+    runs-on: arc-runner-set
+    container:
+      image: composer:2.8.5
+    steps:
+      - uses: actions/checkout@v4
+      - name: 'Install dependencies'
+        run: composer install --prefer-dist --no-interaction
 #
   php-test:
     name: 'PHP test'
-    runs-on: [self-hosted, dind]
+    runs-on: arc-runner-set
     needs: composer-install
     container:
       image: php:8.2-cli
