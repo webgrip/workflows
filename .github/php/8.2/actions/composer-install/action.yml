@@ -2,6 +2,12 @@ name: "[Action] Composer Install"
 description: "Checks out the code and runs composer install"
 author: "WebGrip"
 
+inputs:
+  composer_auth:
+    description: 'JSON string for COMPOSER_AUTH'
+    required: false
+    default: ''
+
 runs:
   using: 'docker'
   image: docker://composer:2.8.5
