@@ -12,10 +12,12 @@ on:
         type: string
         description: 'Docker context'
         required: true
+        default: '.'
       docker-file:
         type: string
         description: 'Dockerfile path from the context'
         required: true
+        default: 'Dockerfile'
       docker-tags:
         type: string
         description: 'Docker tags'
