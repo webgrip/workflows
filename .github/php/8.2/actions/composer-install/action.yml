@@ -5,6 +5,8 @@ author: "WebGrip"
 runs:
   using: 'docker'
   image: docker://composer:2.8.5
+  env:
+    COMPOSER_AUTH: ${{ inputs.composer_auth }}
   args:
     - install
     - --no-interaction

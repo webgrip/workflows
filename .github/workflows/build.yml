@@ -2,6 +2,10 @@ name: 'Build'
 
 on:
   workflow_call:
+    secrets:
+      COMPOSER_TOKEN:
+        description: 'Composer packagist token. Required to authenticate with for example private packagist. (packagist.com)'
+        required: false
 
 jobs:
   composer-install:
@@ -19,7 +23,7 @@ jobs:
       - run: |
           ls -la
 
-      - uses : actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: vendor
           key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
@@ -29,9 +33,16 @@ jobs:
           ls -la vendor || true
 
       - uses: webgrip/workflows/.github/php/8.2/actions/composer-install@main
-
-      - run: |
-          ls -la vendor || true
+        with:
+          composer_auth: >
+            {
+              "http-basic": {
+                "repo.packagist.com": {
+                  "username": "token",
+                  "password": "${{ secrets.COMPOSER_TOKEN }}"
+                }
+              }
+            }
 
 
   composer-install-on-container:
