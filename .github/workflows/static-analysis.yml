@@ -10,19 +10,12 @@ jobs:
     container:
         image: php:8.2-cli
     steps:
-      - run: |
-          echo "PHP Version: $(php -v)"
-
       - uses: actions/checkout@v4
 
       - uses: actions/cache@v4
         with:
           path: vendor
           key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
-
-      - run: |
-          ls -la
-          ls -la vendor || true
 
       - name: Run phpcs
         run: ./vendor/bin/phpcs -q -s --standard=./phpcs.xml ./src --report=full --exclude=Generic.Files.LineLength
@@ -64,7 +57,4 @@ jobs:
         with:
           path: vendor
           key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
-      - run: |
-          ls -la
-          ls -la vendor || true
       - run: composer normalize
