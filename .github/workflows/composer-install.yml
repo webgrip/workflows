@@ -6,7 +6,6 @@ on:
       COMPOSER_TOKEN:
         description: 'Composer packagist token. Required to authenticate with for example private packagist. (packagist.com)'
         required: false
-        default: ''
 
 jobs:
   composer-install-on-container:
