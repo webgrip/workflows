@@ -21,6 +21,8 @@ on:
         description: 'Docker tags'
         required: true
 
+run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
+
 jobs:
   build:
     name: "Build Docker Image"
