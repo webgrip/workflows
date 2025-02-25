@@ -3,7 +3,7 @@ on:
 
 jobs:
   set-job-summary:
-    runs-on: self-hosted
+    runs-on: arc-runner-set
     steps:
       - name: Set job summary
         id: set-job-summary
