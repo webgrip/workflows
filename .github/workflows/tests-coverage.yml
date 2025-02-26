@@ -4,7 +4,7 @@ on:
   workflow_call:
 
 jobs:
-  tests-run: #TODO I think we can have 3 jobs, one for each testsuite. Use action is the step, to run the tests on php 8.2-cli on docker
+  tests-run:
     name: '${{ matrix.testsuite }}'
     runs-on: arc-runner-set
     container:
@@ -25,16 +25,23 @@ jobs:
         run: |
           case "${{ matrix.testsuite }}" in
             "Unit")
-              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite unit --fail-on-risky 
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite unit --fail-on-risky --coverage-php coverage/unit.cov --coverage-html coverage/unit 
               ;;
             "Integration")
-              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite integration --fail-on-risky --exclude-group=db 
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite integration --fail-on-risky --exclude-group=db --coverage-php coverage/integration.cov --coverage-html coverage/integration 
               ;;
             "Functional")
-              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite functional --fail-on-risky || true
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite functional --fail-on-risky --coverage-php coverage/functional.cov --coverage-html coverage/functional || true
               ;;
             *)
               echo "Unknown testsuite"
               exit 1
               ;;
           esac
+
+      - name: 'Upload coverage artifact'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.testsuite }}
+          path: coverage
+          retention-days: 1
