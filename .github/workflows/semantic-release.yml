@@ -2,16 +2,26 @@ name: 'Semantic Release'
 
 on:
   workflow_call:
+    outputs:
+      version:
+        description: 'The new version number'
+        value: ${{ jobs.semantic-release.outputs.version }}
 
 jobs:
   semantic-release:
     runs-on: arc-runner-set
     permissions:
-      contents: write
-      pull-requests: write
+      contents: write # For pushing commits/tags
+      pull-requests: write # If referencing or updating PRs
+      issues: write # Needed to comment on issues/PRs
+      statuses: write # (Optional) If you need to set commit statuses
+    outputs:
+      version: ${{ steps.semantic-release.outputs.version }}
     steps:
       - name: Check out repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # semantic-release requires all commits/tags
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -19,6 +29,7 @@ jobs:
           node-version: '22'
 
       - name: Run semantic-release
+        id: semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -28,5 +39,6 @@ jobs:
             -p @semantic-release/git \
             -p @semantic-release/github \
             -p @semantic-release/changelog \
+            -p @semantic-release/exec \
             semantic-release
 
