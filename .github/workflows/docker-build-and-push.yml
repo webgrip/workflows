@@ -27,7 +27,7 @@ run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
 
 jobs:
   build:
-    name: "Build Docker Image"
+    name: "Docker Build and Push"
     runs-on: arc-runner-set
     steps:
       - uses: actions/checkout@v4
