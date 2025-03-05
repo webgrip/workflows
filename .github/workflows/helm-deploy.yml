@@ -19,7 +19,7 @@ on:
 
 jobs:
   deploy-helm:
-    name: Deploy Helm Chart and Record Stats
+    name: 'Deploy Helm Charts'
     runs-on: arc-runner-set
     outputs:
       deploymentStats: ${{ steps.collect-stats.outputs.stats }}
