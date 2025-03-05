@@ -16,6 +16,10 @@ on:
         description: 'Path to the Helm chart you wish to deploy'
         type: string
         required: true
+      tag:
+        description: 'Tag to deploy'
+        type: string
+        required: false
 
 jobs:
   deploy-helm:
@@ -86,12 +90,21 @@ jobs:
           echo "Deploying chart '$chartName' to namespace '$namespace'..."
           start=$(date +%s)
 
-          if helm dependency update "$chartDir" && \
-             helm upgrade --install "$chartName" "$chartDir" \
-               --namespace "$namespace" \
-               --create-namespace \
-               --values "$chartDir/values.yaml" \
-               --wait --timeout 10m --force; then
+          # Start by updating dependencies
+          helm dependency update "$chartDir"
+
+          # Build the Helm install/upgrade command, ignoring the tag override if inputs.tag is empty
+          helmCmd="helm upgrade --install \"$chartName\" \"$chartDir\" \
+            --namespace \"$namespace\" \
+            --create-namespace \
+            --values \"$chartDir/values.yaml\" \
+            --wait --timeout 10m --force"
+
+          if [ -n "${{ inputs.tag }}" ]; then
+            helmCmd="$helmCmd --set n8n.image.tag=${{ inputs.tag }}"
+          fi
+
+          if eval "$helmCmd"; then
             status="Success ✅"
             error=""
           else
