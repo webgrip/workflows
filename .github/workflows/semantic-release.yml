@@ -9,6 +9,7 @@ on:
 
 jobs:
   semantic-release:
+    name: 'Semantic Release'
     runs-on: arc-runner-set
     permissions:
       contents: write # For pushing commits/tags
