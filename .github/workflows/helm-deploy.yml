@@ -98,7 +98,8 @@ jobs:
             --namespace \"$namespace\" \
             --create-namespace \
             --values \"$chartDir/values.yaml\" \
-            --wait --timeout 10m --force"
+            --wait --timeout 10m --force \
+            --atomic --cleanup-on-fail"
 
           if [ -n "${{ inputs.tag }}" ]; then
             helmCmd="$helmCmd --set n8n.image.tag=${{ inputs.tag }}"
