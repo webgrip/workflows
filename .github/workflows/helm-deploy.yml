@@ -138,16 +138,11 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-  set-job-summary:
-    name: Create Detailed Job Summary
-    needs: deploy-helm
-    runs-on: arc-runner-set
-    steps:
+      # Generate the Job Summary in the same job using steps.*.outputs
       - name: Generate Job Summary with Deployment Stats
         uses: actions/github-script@v7
         with:
           script: |
-            // Retrieve CSV data and overall summary from environment variables
             const statsCSV = process.env.DEPLOYMENT_STATS || '';
             const overallStats = process.env.OVERALL_STATS || '';
 
@@ -173,5 +168,5 @@ jobs:
 
             await core.summary.write();
         env:
-          DEPLOYMENT_STATS: ${{ needs.deploy-helm.outputs.deploymentStats }}
-          OVERALL_STATS: ${{ needs.deploy-helm.outputs.overall }}
+          DEPLOYMENT_STATS: ${{ steps.collect-stats.outputs.stats }}
+          OVERALL_STATS: ${{ steps.collect-stats.outputs.overall }}
