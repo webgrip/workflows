@@ -35,6 +35,8 @@ runs:
       shell: bash
       id: semantic-release
       run: |
+        echo $RELEASE_TYPE
+        
         npx -p semantic-release \
           -p @semantic-release/commit-analyzer \
           -p @semantic-release/release-notes-generator \
