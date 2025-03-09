@@ -24,32 +24,6 @@ jobs:
     outputs:
       version: ${{ steps.semantic-release.outputs.version }}
     steps:
-      - name: Check out repo
-        uses: actions/checkout@v4
+      - uses: webgrip/workflows/.github/composite-actions/semantic-release@main
         with:
-          fetch-depth: 0  # semantic-release requires all commits/tags
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: use specific releaserc file
-        if: ${{ inputs.release-type }}
-        run: |
-          export RELEASE_TYPE="--extends ./releaserc.${{ inputs.release-type }}.js"
-
-      - name: Run semantic-release
-        id: semantic-release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          npx -p semantic-release \
-            -p @semantic-release/commit-analyzer \
-            -p @semantic-release/release-notes-generator \
-            -p @semantic-release/git \
-            -p @semantic-release/github \
-            -p @semantic-release/changelog \
-            -p @semantic-release/exec \
-            semantic-release $RELEASE_TYPE
-
+          release-type: ${{ inputs.release-type }}
