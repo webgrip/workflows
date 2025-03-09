@@ -22,8 +22,6 @@ inputs:
     required: false
     default: ''
 
-runs-on: arc-runner-set
-
 runs:
   using: "composite"
   steps:
