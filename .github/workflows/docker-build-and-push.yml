@@ -22,6 +22,11 @@ on:
         type: string
         description: 'Docker tags'
         required: true
+      docker-target:
+        type: string
+        description: 'Docker target'
+        required: false
+        default: ''
 
 run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
 
@@ -46,3 +51,4 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ inputs.docker-tags }}
+          target: ${{ inputs.docker-target }}
