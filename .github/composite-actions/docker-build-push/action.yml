@@ -21,14 +21,6 @@ inputs:
     description: 'Docker target'
     required: false
     default: ''
-  DOCKER_USERNAME:
-    type: string
-    description: 'DockerHub username'
-    required: true
-  DOCKER_TOKEN:
-    type: string
-    description: 'DockerHub token'
-    required: true
 
 runs-on: arc-runner-set
 
