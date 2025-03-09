@@ -8,6 +8,11 @@ on:
         description: 'The directory containing the techdocs files'
         required: false
         default: 'docs/techdocs'
+      cname:
+        type: string
+        description: 'The custom domain for the TechDocs site'
+        required: false
+        default: ''
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -77,3 +82,4 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./techdocs-site
+          cname: ${{ inputs.cname }}
