@@ -7,8 +7,6 @@ inputs:
     required: false
     type: string
 
-runs-on: arc-runner-set
-
 outputs:
   version:
     description: 'The new version number'
