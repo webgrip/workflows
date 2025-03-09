@@ -41,3 +41,6 @@ jobs:
           docker-file: ${{ inputs.docker-file }}
           docker-tags: ${{ inputs.docker-tags }}
           docker-target: ${{ inputs.docker-target }}
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
