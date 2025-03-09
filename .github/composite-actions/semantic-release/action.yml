@@ -30,7 +30,7 @@ runs:
       shell: bash
       run: |
         if [[ -n "${{ inputs.release-type }}" ]]; then
-          echo "release_config=--config .releaserc.${{ inputs.release-type }}.json" >> $GITHUB_OUTPUT
+          echo "release_config=--extends .releaserc.${{ inputs.release-type }}.json" >> $GITHUB_OUTPUT
         else
           echo "release_config=" >> $GITHUB_OUTPUT
         fi
@@ -47,4 +47,4 @@ runs:
           @semantic-release/changelog \
           @semantic-release/exec
         
-        npx semantic-release
+        npx semantic-release ${{ steps.set-config.outputs.release_config }}
