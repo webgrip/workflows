@@ -5,7 +5,6 @@ inputs:
   release-type:
     description: 'The type of release'
     required: false
-    type: string
 
 outputs:
   version:
