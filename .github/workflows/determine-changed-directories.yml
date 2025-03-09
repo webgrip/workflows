@@ -57,5 +57,7 @@ jobs:
           fi
 
           echo "Filtered changed directories: $JSON_DIRS"
-          echo "paths=$JSON_DIRS" >> $GITHUB_OUTPUT
+          echo "paths<<EOF" >> $GITHUB_OUTPUT
+          echo "$JSON_DIRS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
       
