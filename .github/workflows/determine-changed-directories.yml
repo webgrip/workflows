@@ -35,6 +35,7 @@ jobs:
               echo "No valid previous commit; defaulting to empty paths."
               echo "paths=[]" >> $GITHUB_OUTPUT
               exit 0
+            fi
           fi
 
           echo "Diffing against $PREVIOUS_COMMIT -> ${{ github.sha }}"
@@ -56,4 +57,5 @@ jobs:
           fi
 
           echo "Filtered changed directories: $JSON_DIRS"
-          echo "paths=$JSON_DIRS" >> $GITHUB_OUTPUT"
+          echo "paths=$JSON_DIRS" >> $GITHUB_OUTPUT
+      
