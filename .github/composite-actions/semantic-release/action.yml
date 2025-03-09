@@ -10,7 +10,9 @@ inputs:
 runs-on: arc-runner-set
 
 outputs:
-  version: ${{ steps.semantic-release.outputs.version }}
+  version:
+    description: 'The new version number'
+    value: ${{ steps.semantic-release.outputs.version }}
 
 runs:
   using: "composite"
