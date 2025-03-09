@@ -2,65 +2,46 @@ name: "[Call] Determine Changed Directories"
 
 on:
   workflow_call:
-    outputs:
-      changed-paths:
-        description: 'List of paths in JSON array format. e.g.: ["ops/secrets/010-cloudflare-dns/cloudflare-dns-token", ...]'
-        value: ${{ jobs.determine-changed-directories.outputs.changed-paths }}
     inputs:
       inside-dir:
         type: string
         required: true
-    secrets: {}
+    outputs:
+      changed-paths:
+        description: 'Changed directories inside the specified directory.'
+        value: ${{ jobs.determine-changed-directories.outputs.changed-paths }}
 
 jobs:
   determine-changed-directories:
-    name: 'Changed Dirs'
+    name: 'Determine Changed Directories'
     runs-on: self-hosted
     outputs:
       changed-paths: ${{ steps.get-changes.outputs.paths }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Determine previous commit
-        id: get-previous
-        run: |
-          # If 'before' is all zeros or not set, try using HEAD^
-          if [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" || -z "${{ github.event.before }}" ]]; then
-            echo "No valid 'before' commit found. Attempting HEAD^ ..."
-            if git rev-parse HEAD^ >/dev/null 2>&1; then
-              echo "before=$(git rev-parse HEAD^)" >> $GITHUB_OUTPUT
-            else
-              echo "before=" >> $GITHUB_OUTPUT
-            fi
-          else
-            echo "before=${{ github.event.before }}" >> $GITHUB_OUTPUT
-          fi
-
       - name: Get changed directories (ignore deleted ones)
         id: get-changes
         run: |
           PREVIOUS_COMMIT="${{ github.event.before }}"
-          # Fallback if 'before' is missing or invalid
           if [[ -z "$PREVIOUS_COMMIT" || "$PREVIOUS_COMMIT" == "0000000000000000000000000000000000000000" ]]; then
             if git rev-parse HEAD^ >/dev/null 2>&1; then
               PREVIOUS_COMMIT=$(git rev-parse HEAD^)
             else
-              echo "No valid previous commit; setting paths to empty."
+              echo "No valid previous commit; defaulting to empty paths."
               echo "paths=[]" >> $GITHUB_OUTPUT
               exit 0
-            fi
           fi
 
           echo "Diffing against $PREVIOUS_COMMIT -> ${{ github.sha }}"
-          RAW_DIRS=$(git diff --name-only "$PREVIOUS_COMMIT" ${{ github.sha }} | grep "^${{ inputs.inside-dir }}/" || true)
-          
-          # Use dirname to get the immediate parent directory (the "last" directory in the path)
+
+          RAW_DIRS=$(git diff --name-only "$PREVIOUS_COMMIT" "${{ github.sha }}" -- "${{ inputs.inside-dir }}" || true)
           CHANGED_DIRS=$(echo "$RAW_DIRS" | xargs -I{} dirname {} | sort -u || true)
-          
-          # Exclude directories that no longer exist
+
           VALID_DIRS=()
           for dir in $CHANGED_DIRS; do
             if [ -d "$dir" ]; then
@@ -68,10 +49,10 @@ jobs:
             fi
           done
 
-          # Convert the valid directories into a JSON array
-          JSON_DIRS=$(printf '%s\n' "${VALID_DIRS[@]}" | jq -R . | jq -s -c .)
-          if [[ ${#VALID_DIRS[@]} -eq 0 ]]; then
+          if [ ${#VALID_DIRS[@]} -eq 0 ]; then
             JSON_DIRS="[]"
+          else
+            JSON_DIRS=$(printf '%s\n' "${VALID_DIRS[@]}" | jq -R . | jq -s .)
           fi
 
           echo "Filtered changed directories: $JSON_DIRS"
