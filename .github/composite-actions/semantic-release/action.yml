@@ -25,20 +25,20 @@ runs:
       with:
         node-version: '22'
 
-    - name: use specific releaserc file
+    - name: Set semantic-release config file
+      id: set-config
       shell: bash
-      if: ${{ inputs.release-type }}
       run: |
-        echo "RELEASE_TYPE=--config .releaserc.${{ inputs.release-type }}.json" >> $GITHUB_ENV
+        if [[ -n "${{ inputs.release-type }}" ]]; then
+          echo "release_config=--config .releaserc.${{ inputs.release-type }}.json" >> $GITHUB_OUTPUT
+        else
+          echo "release_config=" >> $GITHUB_OUTPUT
+        fi
 
     - name: Run semantic-release
       shell: bash
       id: semantic-release
       run: |
-        echo $RELEASE_TYPE
-        echo $(ls -la)
-        echo $(cat .releaserc.builder.json)
-        
         npm install semantic-release \
           @semantic-release/commit-analyzer \
           @semantic-release/release-notes-generator \
@@ -47,4 +47,4 @@ runs:
           @semantic-release/changelog \
           @semantic-release/exec
         
-        npx semantic-release $RELEASE_TYPE
+        npx semantic-release ${{ steps.release_config.outputs.release_config }}
