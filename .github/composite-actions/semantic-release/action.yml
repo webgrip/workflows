@@ -28,11 +28,13 @@ runs:
         node-version: '22'
 
     - name: use specific releaserc file
+      shell: bash
       if: ${{ inputs.release-type }}
       run: |
         export RELEASE_TYPE="--extends ./releaserc.${{ inputs.release-type }}.js"
 
     - name: Run semantic-release
+      shell: bash
       id: semantic-release
       run: |
         npx -p semantic-release \
