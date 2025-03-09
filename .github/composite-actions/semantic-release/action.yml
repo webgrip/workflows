@@ -47,4 +47,4 @@ runs:
           @semantic-release/changelog \
           @semantic-release/exec
         
-        node semantic-release $RELEASE_TYPE
+        npx semantic-release $RELEASE_TYPE
