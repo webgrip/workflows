@@ -1,14 +1,6 @@
 name: 'Build and Push Docker Image'
 description: 'Builds and Pushes a docker image'
 
-secrets:
-  DOCKER_USERNAME:
-    description: 'DockerHub username'
-    required: true
-  DOCKER_TOKEN:
-    description: 'DockerHub token'
-    required: true
-
 inputs:
   docker-context:
     type: string
@@ -29,6 +21,12 @@ inputs:
     description: 'Docker target'
     required: false
     default: ''
+  DOCKER_USERNAME:
+    description: 'DockerHub username'
+    required: true
+  DOCKER_TOKEN:
+    description: 'DockerHub token'
+    required: true
 
 runs-on: arc-runner-set
 
