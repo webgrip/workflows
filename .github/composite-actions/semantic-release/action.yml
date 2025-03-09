@@ -47,4 +47,4 @@ runs:
           @semantic-release/changelog \
           @semantic-release/exec
         
-        node semantic-release ${{ steps.set-config.outputs.release_config }}
+        npx semantic-release ${{ steps.set-config.outputs.release_config }}
