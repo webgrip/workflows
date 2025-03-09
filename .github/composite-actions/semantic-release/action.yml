@@ -36,6 +36,8 @@ runs:
       id: semantic-release
       run: |
         echo $RELEASE_TYPE
+        echo $(ls -la)
+        echo $(cat .releaserc.builder.json)
         
         npx -p semantic-release \
           -p @semantic-release/commit-analyzer \
