@@ -32,7 +32,6 @@ runs:
       with:
         username: ${{ inputs.DOCKER_USERNAME }}
         password: ${{ inputs.DOCKER_TOKEN }}
-    - run: ls -la ${{ inputs.docker-context }}
     - uses: docker/build-push-action@v6
       with:
         context: ${{ inputs.docker-context }}
