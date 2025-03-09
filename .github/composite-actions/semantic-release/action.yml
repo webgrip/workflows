@@ -29,7 +29,7 @@ runs:
       shell: bash
       if: ${{ inputs.release-type }}
       run: |
-        echo "RELEASE_TYPE=--extends .releaserc.${{ inputs.release-type }}.js" >> $GITHUB_ENV
+        echo "RELEASE_TYPE=--extends .releaserc.${{ inputs.release-type }}.json" >> $GITHUB_ENV
 
     - name: Run semantic-release
       shell: bash
