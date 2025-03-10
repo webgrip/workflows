@@ -36,6 +36,9 @@ jobs:
           path: techdocs-site
           retention-days: 1
 
+      - run: |
+          apk add --no-cache git
+
       - name: GitHub Pages Deploy
         uses: peaceiris/actions-gh-pages@v4
         with:
