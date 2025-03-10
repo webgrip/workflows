@@ -3,9 +3,18 @@ name: Helm Deploy with Detailed Job Summary
 on:
   workflow_call:
     secrets:
+      DOCKER_USERNAME:
+        description: 'Docker Username'
+        required: true
+      DOCKER_TOKEN:
+        description: 'Docker Token'
+        required: true
       DIGITAL_OCEAN_API_KEY:
         description: 'DigitalOcean API Key'
         required: true
+      SOPS_AGE_KEY:
+        description: 'SOPS Age private key'
+        required: false
     inputs:
       environment:
         description: 'Environment to deploy to'
@@ -23,34 +32,21 @@ on:
 
 jobs:
   deploy-helm:
-    name: 'Deploy Helm Charts'
+    container:
+      image: webgrip/helm-deploy:latest
+      credentials:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_TOKEN }}
+    name: ${{ inputs.path }}
     runs-on: arc-runner-set
-    outputs:
-      deploymentStats: ${{ steps.collect-stats.outputs.stats }}
-      overallStats: ${{ steps.collect-stats.outputs.overall }}
     env:
       DO_CLUSTER_NAME: ${{ inputs.environment }}-doks-cluster
       DO_KUBECONFIG_FILE: './doks-kubeconfig'
-      DO_CLI_VERSION: '1.119.1'
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY || '' }}
 
     steps:
       - name: Check out code
         uses: actions/checkout@v4
-
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: latest
-
-      - name: Set up Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: latest
-
-      - name: Install doctl (DigitalOcean CLI)
-        run: |
-          curl -sL https://github.com/digitalocean/doctl/releases/download/v${{ env.DO_CLI_VERSION }}/doctl-${{ env.DO_CLI_VERSION }}-linux-amd64.tar.gz | tar -xz
-          sudo mv doctl /usr/local/bin
 
       - name: Authenticate doctl
         run: doctl auth init --access-token ${{ secrets.DIGITAL_OCEAN_API_KEY }}
@@ -62,44 +58,66 @@ jobs:
         run: |
           export KUBECONFIG=$DO_KUBECONFIG_FILE
 
-      - name: Install dependencies
+      - name: Decrypt SOPS file
+        if: ${{ env.SOPS_AGE_KEY }}
+        id: decrypt_sops
         run: |
-          sudo apt-get update
-          sudo apt-get install -y wget
+          chartDir="${{ inputs.path }}"
+          # Set the SOPS age key for decryption
+          export SOPS_AGE_KEY=${{ secrets.SOPS_AGE_KEY }}
+          if [ -f "$chartDir/values.sops.yaml" ]; then
+            echo "Decrypting SOPS file: $chartDir/values.sops.yaml"
+            sops --decrypt "$chartDir/values.sops.yaml" > "$chartDir/values.dec.yaml"
+          else
+            echo "No SOPS file found at $chartDir/values.sops.yaml, skipping."
+          fi
 
-      - name: Install yq
-        run: |
-          sudo wget https://github.com/mikefarah/yq/releases/download/v4.44.5/yq_linux_amd64 \
-            -O /usr/local/bin/yq
-          sudo chmod +x /usr/local/bin/yq
-
-      # Deploy the single chart given by inputs.path. Record timing and status as CSV.
       - name: Deploy the specified Helm chart
+        id: deploy
+        continue-on-error: true
         run: |
+          set +e  # Allow the script to continue on errors
+
           echo "Chart,Namespace,Time,Status,Error" > deployment-stats.csv
           chartDir="${{ inputs.path }}"
 
           if [ ! -d "$chartDir" ]; then
             echo "ERROR: Directory '$chartDir' does not exist."
-            exit 1
+            echo "paths=[]" >> $GITHUB_OUTPUT
+            echo "exit_code=1" >> $GITHUB_OUTPUT
+            echo "NonexistentDir,default,00:00:00,Failed ❌,Directory not found" >> deployment-stats.csv
+            exit 0
           fi
 
           chartName=$(basename "$chartDir")
-          namespace=$(yq e '.namespace' "$chartDir/values.yaml" || echo "default")
+          # Default to values.yaml for namespace unless a SOPS file is used
+          namespace=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || echo "default")
+
+          # Prefer the decrypted values file if it exists
+          if [ -f "$chartDir/values.dec.yaml" ]; then
+            namespace=$(yq e '.namespace' "$chartDir/values.dec.yaml" 2>/dev/null || echo "default")
+            valuesFile="$chartDir/values.dec.yaml"
+          elif [ -f "$chartDir/values.yaml" ]; then
+            valuesFile="$chartDir/values.yaml"
+          else
+            echo "WARNING: No values file found, continuing with Helm defaults."
+            valuesFile=""
+          fi
 
           echo "Deploying chart '$chartName' to namespace '$namespace'..."
           start=$(date +%s)
 
-          # Start by updating dependencies
           helm dependency update "$chartDir"
 
-          # Build the Helm install/upgrade command, ignoring the tag override if inputs.tag is empty
           helmCmd="helm upgrade --install \"$chartName\" \"$chartDir\" \
             --namespace \"$namespace\" \
             --create-namespace \
-            --values \"$chartDir/values.yaml\" \
             --wait --timeout 10m --force \
             --atomic --cleanup-on-fail"
+
+          if [ -n "$valuesFile" ]; then
+            helmCmd="$helmCmd --values \"$valuesFile\""
+          fi
 
           if [ -n "${{ inputs.tag }}" ]; then
             helmCmd="$helmCmd --set n8n.image.tag=${{ inputs.tag }}"
@@ -108,24 +126,29 @@ jobs:
           if eval "$helmCmd"; then
             status="Success ✅"
             error=""
+            exit_code=0
           else
             status="Failed ❌"
             error="Deployment failed"
+            exit_code=1
           fi
 
           end=$(date +%s)
           duration=$((end - start))
           duration_formatted=$(printf "%02d:%02d:%02d" $((duration/3600)) $(((duration%3600)/60)) $((duration%60)))
 
-          # Append CSV row
           echo "$chartName,$namespace,$duration_formatted,$status,$error" >> deployment-stats.csv
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
 
-          # For a single chart, overall time = this chart's time
-          echo "Overall, 1 chart deployed in $duration_formatted ⏱️" > overall-stats.txt
+          if [ $exit_code -eq 0 ]; then
+            echo "Overall, 1 chart deployed in $duration_formatted ⏱️" > overall-stats.txt
+          else
+            echo "Overall, 1 chart deployment failed after $duration_formatted ⏱️" > overall-stats.txt
+          fi
 
-      # Collect stats and expose them as outputs
       - name: Collect Deployment Stats
         id: collect-stats
+        if: always()
         run: |
           stats=$(cat deployment-stats.csv)
           overall=$(cat overall-stats.txt)
@@ -138,20 +161,20 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
-      # Generate the Job Summary in the same job using steps.*.outputs
       - name: Generate Job Summary with Deployment Stats
+        if: always()
         uses: actions/github-script@v7
         with:
           script: |
             const statsCSV = process.env.DEPLOYMENT_STATS || '';
             const overallStats = process.env.OVERALL_STATS || '';
-
+            
             core.summary
               .addHeading('Deployment Overview', 2)
               .addRaw(overallStats)
               .addEOL()
               .addSeparator();
-
+            
             if (!statsCSV) {
               core.summary
                 .addRaw('No deployment statistics available.')
@@ -160,13 +183,19 @@ jobs:
               const lines = statsCSV.trim().split('\n');
               const header = lines.shift().split(',');
               const dataRows = lines.map(line => line.split(','));
-
+            
               core.summary
                 .addHeading('Per-Chart Deployment Details', 3)
                 .addTable([header, ...dataRows]);
             }
-
+            
             await core.summary.write();
         env:
           DEPLOYMENT_STATS: ${{ steps.collect-stats.outputs.stats }}
           OVERALL_STATS: ${{ steps.collect-stats.outputs.overall }}
+
+      - name: Fail if Helm Failed
+        if: steps.deploy.outputs.exit_code == '1'
+        run: |
+          echo "Deployment was not successful. Marking job as failed."
+          exit 1
