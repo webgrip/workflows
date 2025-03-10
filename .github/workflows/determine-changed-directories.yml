@@ -8,56 +8,67 @@ on:
         required: true
     outputs:
       changed-paths:
-        description: 'Changed directories inside the specified directory.'
+        description: 'Changed directories (full paths) inside the specified directory.'
         value: ${{ jobs.determine-changed-directories.outputs.changed-paths }}
+      basenames:
+        description: 'Basenames (last path segment) of the changed directories.'
+        value: ${{ jobs.determine-changed-directories.outputs.basenames }}
+      matrix:
+        description: 'Composite matrix of changed directories (full path and basename).'
+        value: ${{ jobs.determine-changed-directories.outputs.matrix }}
 
 jobs:
   determine-changed-directories:
-    name: 'Determine Changed Directories'
-    runs-on: self-hosted
+    name: "Determine Changed Directories"
+    runs-on: arc-runner-set
     outputs:
-      changed-paths: ${{ steps.get-changes.outputs.paths }}
-
+      changed-paths: ${{ steps.set-output.outputs.changed-paths }}
+      basenames: ${{ steps.set-output.outputs.basenames }}
+      matrix: ${{ steps.set-output.outputs.matrix }}
     steps:
-      - name: Checkout
+      - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Get changed directories (ignore deleted ones)
-        id: get-changes
+      - name: Get Changed Directories
+        id: changed-dirs
+        uses: tj-actions/changed-files@v45
+        with:
+          dir_names: "true"
+          json: "true"
+          path: "${{ inputs.inside-dir }}"
+
+      - name: Set Outputs (Paths, Basenames & Matrix)
+        id: set-output
+        shell: bash
         run: |
-          PREVIOUS_COMMIT="${{ github.event.before }}"
-          if [[ -z "$PREVIOUS_COMMIT" || "$PREVIOUS_COMMIT" == "0000000000000000000000000000000000000000" ]]; then
-            if git rev-parse HEAD^ >/dev/null 2>&1; then
-              PREVIOUS_COMMIT=$(git rev-parse HEAD^)
-            else
-              echo "No valid previous commit; defaulting to empty paths."
-              echo "paths=[]" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-          fi
-
-          echo "Diffing against $PREVIOUS_COMMIT -> ${{ github.sha }}"
-
-          RAW_DIRS=$(git diff --name-only "$PREVIOUS_COMMIT" "${{ github.sha }}" -- "${{ inputs.inside-dir }}" || true)
-          CHANGED_DIRS=$(echo "$RAW_DIRS" | xargs -I{} dirname {} | sort -u || true)
-
-          VALID_DIRS=()
-          for dir in $CHANGED_DIRS; do
-            if [ -d "$dir" ]; then
-              VALID_DIRS+=("$dir")
-            fi
+          # Read the JSON array output from the changed-files action.
+          CHANGED=${{ steps.changed-dirs.outputs.all_changed_files }}
+          echo "Changed directories (relative): $CHANGED"
+          # Prepend the inside-dir (base) to each element to create full paths.
+          BASE=${{ inputs.inside-dir }}
+          FULL_PATHS=$(echo "$CHANGED" | jq --arg base "$BASE" 'map("\($base)/"+.)')
+          echo "Full changed paths: $FULL_PATHS"
+          # Use the multiline syntax to set the 'changed-paths' output.
+          echo "changed-paths<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$FULL_PATHS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          # Compute basenames from the full paths (last segment of each path).
+          BASES=$(echo "$FULL_PATHS" | jq -r 'map(split("/") | last) | tojson')
+          echo "Computed basenames: $BASES"
+          echo "basenames<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$BASES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          # Now create a composite matrix by zipping FULL_PATHS and BASES.
+          MATRIX="[]"
+          len=$(echo "$FULL_PATHS" | jq 'length')
+          for (( i=0; i<len; i++ )); do
+            path=$(echo "$FULL_PATHS" | jq -r ".[$i]")
+            base=$(echo "$BASES" | jq -r ".[$i]")
+            MATRIX=$(echo "$MATRIX" | jq --arg p "$path" --arg b "$base" '. + [{path: $p, basename: $b}]')
           done
-
-          if [ ${#VALID_DIRS[@]} -eq 0 ]; then
-            JSON_DIRS="[]"
-          else
-            JSON_DIRS=$(printf '%s\n' "${VALID_DIRS[@]}" | jq -R . | jq -s .)
-          fi
-
-          echo "Filtered changed directories: $JSON_DIRS"
-          echo "paths<<EOF" >> $GITHUB_OUTPUT
-          echo "$JSON_DIRS" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-      
+          echo "Composite matrix: $MATRIX"
+          echo "matrix<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$MATRIX" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
