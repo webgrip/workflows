@@ -32,6 +32,15 @@ runs:
       with:
         username: ${{ env.DOCKER_USERNAME }}
         password: ${{ env.DOCKER_TOKEN }}
+    - name: Get cache tag
+      id: cache-tag
+      shell: bash
+      run: |
+        # Split the docker-tags input by newline, ignore empty lines, and select the first tag.
+        primary=$(echo "${{ inputs.docker-tags }}" | grep -v '^\s*$' | head -n 1)
+        # Use :cache instead of :latest to avoid conflicts with the latest tag.
+        cache="${primary%:latest}:cache"
+        echo "cache_tag=$cache" >> "$GITHUB_OUTPUT"
     - uses: docker/build-push-action@v6
       with:
         context: ${{ inputs.docker-context }}
@@ -41,3 +50,5 @@ runs:
         tags: |
           ${{ inputs.docker-tags }}
         target: ${{ inputs.docker-target }}
+        cache-from: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }}
+        cache-to: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }},mode=max,compression=zstd
