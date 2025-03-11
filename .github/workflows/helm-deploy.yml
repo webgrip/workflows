@@ -40,7 +40,7 @@ jobs:
     name: ${{ inputs.path }}
     runs-on: self-hosted
     env:
-      DO_CLUSTER_NAME: ${{ inputs.environment }}-doks-cluster
+      DO_CLUSTER_NAME: webgrip-${{ inputs.environment }}-cluster
       DO_KUBECONFIG_FILE: './doks-kubeconfig'
       SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY || '' }}
 
