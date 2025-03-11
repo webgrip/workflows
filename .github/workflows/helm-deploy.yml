@@ -38,7 +38,7 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_TOKEN }}
     name: ${{ inputs.path }}
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     env:
       DO_CLUSTER_NAME: webgrip-${{ inputs.environment }}-cluster
       DO_KUBECONFIG_FILE: './doks-kubeconfig'
@@ -66,7 +66,7 @@ jobs:
           # Set the SOPS age key for decryption
           export SOPS_AGE_KEY=${{ secrets.SOPS_AGE_KEY }}
           if [ -f "$chartDir/values.sops.yaml" ]; then
-            echo "Decrypting SOPS file: $chartDir/values.sops.yaml"
+            echo "Decrypting SOPS file: $chartDir/values.sops1.yaml"
             sops --decrypt "$chartDir/values.sops.yaml" > "$chartDir/values.dec.yaml"
           else
             echo "No SOPS file found at $chartDir/values.sops.yaml, skipping."
