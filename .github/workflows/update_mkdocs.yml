@@ -27,8 +27,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - run: |
-          cd ${{ inputs.source-dir }}
-          mkdocs build --clean --site-dir mkdocs-site
+           techdocs-cli generate --no-docker --verbose --source-dir ${{ inputs.source-dir }} --output-dir mkdocs-site
 
       - name: Put in artifact
         uses: actions/upload-artifact@v4
