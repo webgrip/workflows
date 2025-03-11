@@ -34,7 +34,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mkdocs-site
-          path: ./${{ inputs.source-dir }}/mkdocs-site
+          path: ${{github.workspace}}/${{ inputs.source-dir }}/mkdocs-site
           retention-days: 1
 
       - run: |
@@ -44,5 +44,5 @@ jobs:
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./${{ inputs.source-dir }}/mkdocs-site
+          publish_dir: ${{github.workspace}}/${{ inputs.source-dir }}/mkdocs-site
           cname: ${{ inputs.cname }}
