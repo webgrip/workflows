@@ -5,12 +5,12 @@ on:
     inputs:
       source-dir:
         type: string
-        description: 'The directory containing the techdocs files'
+        description: 'The directory containing the mkdocs files'
         required: false
         default: 'docs/mkdocs'
       cname:
         type: string
-        description: 'The custom domain for the TechDocs site'
+        description: 'The custom domain for the MkDocs site'
         required: false
         default: ''
 
@@ -27,6 +27,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - run: |
+          cd ${{ inputs.source-dir }}
           mkdocs build --clean --site-dir mkdocs-site
 
       - name: Put in artifact
