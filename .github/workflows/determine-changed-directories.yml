@@ -6,11 +6,11 @@ on:
       inside-dir:
         type: string
         required: true
-    max-level:
-      type: string
-      required: false
-      description: 'Maximum depth level for directories (1 means direct children, 2 allows one nested level, etc.)'
-      default: 2
+      max-level:
+        type: string
+        required: false
+        description: 'Maximum depth level for directories (1 means direct children, 2 allows one nested level, etc.)'
+        default: 2
     outputs:
       changed-paths:
         description: 'Changed directories (full paths) inside the specified directory.'
