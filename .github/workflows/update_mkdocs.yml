@@ -1,0 +1,47 @@
+name: "Update MkDocs"
+
+on:
+  workflow_call:
+    inputs:
+      source-dir:
+        type: string
+        description: 'The directory containing the techdocs files'
+        required: false
+        default: 'docs/mkdocs'
+      cname:
+        type: string
+        description: 'The custom domain for the TechDocs site'
+        required: false
+        default: ''
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install-deps-generate-and-deploy:
+    name: "Install dependencies, generate with mkdocs, upload artifact and deploy to GitHub Pages"
+    runs-on: arc-runner-set
+    container: webgrip/mkdocs-runner:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: |
+          mkdocs build --clean --site-dir mkdocs-site
+
+      - name: Put in artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mkdocs-site
+          path: mkdocs-site
+          retention-days: 1
+
+      - run: |
+          apk add --no-cache git
+
+      - name: GitHub Pages Deploy
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./mkdocs-site
+          cname: ${{ inputs.cname }}
