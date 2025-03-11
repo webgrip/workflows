@@ -6,6 +6,11 @@ on:
       inside-dir:
         type: string
         required: true
+    max-level:
+      type: string
+      required: false
+      description: 'Maximum depth level for directories (1 means direct children, 2 allows one nested level, etc.)'
+      default: 2
     outputs:
       changed-paths:
         description: 'Changed directories (full paths) inside the specified directory.'
@@ -46,20 +51,39 @@ jobs:
           # Read the JSON array output from the changed-files action.
           CHANGED=${{ steps.changed-dirs.outputs.all_changed_files }}
           echo "Changed directories (relative): $CHANGED"
+          
+          # Get the max level input and compute allowed additional slashes (max-level - 1).
+          MAX_LEVEL=${{ inputs.max-level }}
+          ALLOWED=$(( MAX_LEVEL - 1 ))
+          echo "Max level: $MAX_LEVEL, allowed additional slashes: $ALLOWED"
+          
+          # Construct a regex that allows directories with 1 to MAX_LEVEL segments.
+          # For example, if MAX_LEVEL is 1: "^[^/]+$"
+          # if MAX_LEVEL is 2: "^[^/]+(?:/[^/]+){0,1}$", and so on.
+          REGEX="^[^/]+(?:/[^/]+){0,$ALLOWED}$"
+          echo "Using regex: $REGEX"
+          
+          # Filter to include only directories up to the specified depth.
+          FILTERED=$(echo "$CHANGED" | jq --arg regex "$REGEX" 'map(select(test($regex)))')
+          echo "Filtered changed directories: $FILTERED"
+          
           # Prepend the inside-dir (base) to each element to create full paths.
           BASE=${{ inputs.inside-dir }}
-          FULL_PATHS=$(echo "$CHANGED" | jq --arg base "$BASE" 'map("\($base)/"+.)')
+          FULL_PATHS=$(echo "$FILTERED" | jq --arg base "$BASE" 'map("\($base)/"+.)')
           echo "Full changed paths: $FULL_PATHS"
+          
           # Use the multiline syntax to set the 'changed-paths' output.
           echo "changed-paths<<EOF" >> "$GITHUB_OUTPUT"
           echo "$FULL_PATHS" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
+          
           # Compute basenames from the full paths (last segment of each path).
           BASES=$(echo "$FULL_PATHS" | jq -r 'map(split("/") | last) | tojson')
           echo "Computed basenames: $BASES"
           echo "basenames<<EOF" >> "$GITHUB_OUTPUT"
           echo "$BASES" >> "$GITHUB_OUTPUT"
           echo "EOF" >> "$GITHUB_OUTPUT"
+          
           # Now create a composite matrix by zipping FULL_PATHS and BASES.
           MATRIX="[]"
           len=$(echo "$FULL_PATHS" | jq 'length')
