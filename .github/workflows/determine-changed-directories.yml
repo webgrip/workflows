@@ -20,7 +20,7 @@ on:
 jobs:
   determine-changed-directories:
     name: "Determine Changed Directories"
-    runs-on: arc-runner-set
+    runs-on: self-hosted
     outputs:
       changed-paths: ${{ steps.set-output.outputs.changed-paths }}
       basenames: ${{ steps.set-output.outputs.basenames }}

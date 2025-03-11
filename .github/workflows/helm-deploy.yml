@@ -38,7 +38,7 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_TOKEN }}
     name: ${{ inputs.path }}
-    runs-on: arc-runner-set
+    runs-on: self-hosted
     env:
       DO_CLUSTER_NAME: ${{ inputs.environment }}-doks-cluster
       DO_KUBECONFIG_FILE: './doks-kubeconfig'
