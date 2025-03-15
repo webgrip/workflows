@@ -7,10 +7,10 @@ on:
         description: 'A matrix of paths to Helm charts to validate'
         type: string
         required: true
-    version:
-      description: 'Version of the Helm chart'
-      type: string
-      required: true
+      version:
+        description: 'Version of the Helm chart'
+        type: string
+        required: true
 
 jobs:
   helm-charts-push:
