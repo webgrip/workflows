@@ -22,4 +22,5 @@ jobs:
     uses: webgrip/workflows/.github/workflows/helm-chart-validate.yml@main
     with:
       path: ${{ matrix.path }}
+      basename: ${{ matrix.basename }}
       version: ${{ inputs.version }}
