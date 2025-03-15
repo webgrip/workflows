@@ -22,6 +22,8 @@ jobs:
     runs-on: arc-runner-set
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }} # Make sure we are on the tagged versioned commit
       - uses: azure/setup-helm@v4
       # validate again?
       - run: |
