@@ -1,0 +1,20 @@
+name: '[Call] Push Helm Chart'
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: 'Path to the Helm chart you wish to validate'
+        type: string
+        required: true
+
+jobs:
+  validate-helm-chart:
+    name: 'Validate Helm Chart'
+    runs-on: arc-runner-set
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      # validate again?
+      - run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username $GITHUB_ACTOR --password-stdin

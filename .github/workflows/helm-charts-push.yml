@@ -1,0 +1,20 @@
+name: '[Call] Validate Helm Chart'
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: 'A matrix of paths to Helm charts to validate'
+        type: string
+        required: true
+
+jobs:
+  validate-helm-charts:
+    name: 'Validate Helm Charts'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(inputs.paths) }}
+    uses: webgrip/workflows/.github/workflows/helm-chart-validate.yml@main
+    with:
+      path: ${{ matrix.path }}
