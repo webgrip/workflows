@@ -27,3 +27,5 @@ jobs:
       - uses: webgrip/workflows/.github/composite-actions/semantic-release@main
         with:
           release-type: ${{ inputs.release-type }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
