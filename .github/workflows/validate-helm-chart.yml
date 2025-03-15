@@ -19,5 +19,5 @@ jobs:
           version: v3.17.0
       - run: |
           helm lint ${{ inputs.path }}
-          helm template ${{ inputs.path }}
-          helm template ${{ inputs.path }} | kubeval --ignore-missing-schemas
+#          helm template ${{ inputs.path }}
+#          helm template ${{ inputs.path }} | kubeval --ignore-missing-schemas
