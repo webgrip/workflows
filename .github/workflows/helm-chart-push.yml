@@ -31,5 +31,5 @@ jobs:
       - run: |
           cd ${{ inputs.path }}
           helm package .
-          helm push . ghcr.io/${{ github.repository_owner }}/${{ inputs.name }}:${{ inputs.version }}
+          helm push . oci://ghcr.io/${{ github.repository_owner }}/${{ inputs.name }}:${{ inputs.version }}
 
