@@ -7,14 +7,18 @@ on:
         description: 'Path to the Helm chart you wish to validate'
         type: string
         required: true
+      name:
+        description: 'Name of the Helm chart'
+        type: string
+        required: true
       version:
         description: 'Version of the Helm chart'
         type: string
         required: true
 
 jobs:
-  validate-helm-chart:
-    name: 'Validate Helm Chart'
+  helm-chart-push:
+    name: 'Push Helm Chart'
     runs-on: arc-runner-set
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +28,6 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username $GITHUB_ACTOR --password-stdin
       - run: |
           cd ${{ inputs.path }}
-          helm chart save . ghcr.io/${{ github.repository }}/my-library-chart:${{ inputs.version }}
-          helm chart push ghcr.io/${{ github.repository }}/my-library-chart:${{ inputs.version }}
+          helm chart save . ghcr.io/${{ github.repository }}/${{inputs.name}}:${{ inputs.version }}
+          helm chart push ghcr.io/${{ github.repository }}/${{inputs.name}}:${{ inputs.version }}
 

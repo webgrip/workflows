@@ -9,7 +9,7 @@ on:
         required: true
 
 jobs:
-  validate-helm-charts:
+  helm-charts-validate:
     name: 'Validate Helm Charts'
     strategy:
       fail-fast: false

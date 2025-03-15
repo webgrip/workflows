@@ -7,10 +7,14 @@ on:
         description: 'A matrix of paths to Helm charts to validate'
         type: string
         required: true
+    version:
+      description: 'Version of the Helm chart'
+      type: string
+      required: true
 
 jobs:
-  validate-helm-charts:
-    name: 'Validate Helm Charts'
+  helm-charts-push:
+    name: 'Push Helm Charts'
     strategy:
       fail-fast: false
       matrix:
@@ -18,3 +22,4 @@ jobs:
     uses: webgrip/workflows/.github/workflows/helm-chart-validate.yml@main
     with:
       path: ${{ matrix.path }}
+      version: ${{ inputs.version }}

@@ -9,7 +9,7 @@ on:
         required: true
 
 jobs:
-  validate-helm-chart:
+  helm-chart-validate:
     name: 'Validate Helm Chart'
     runs-on: arc-runner-set
     steps:
