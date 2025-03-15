@@ -1,5 +1,5 @@
-name: 'Build and Push Docker Image'
-description: 'Builds and Pushes a docker image'
+name: '[Action] Semantic Release'
+description: 'Use semantic-release to automate versioning and releases'
 
 inputs:
   release-type:
@@ -37,6 +37,8 @@ runs:
     - name: Run semantic-release
       shell: bash
       id: semantic-release
+      env:
+        GITHUB_OUTPUT: $GITHUB_OUTPUT
       run: |
         npm install semantic-release \
           @semantic-release/changelog \
