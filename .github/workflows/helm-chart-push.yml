@@ -7,6 +7,10 @@ on:
         description: 'Path to the Helm chart you wish to validate'
         type: string
         required: true
+      version:
+        description: 'Version of the Helm chart'
+        type: string
+        required: true
 
 jobs:
   validate-helm-chart:
@@ -18,3 +22,8 @@ jobs:
       # validate again?
       - run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username $GITHUB_ACTOR --password-stdin
+      - run: |
+          cd ${{ inputs.path }}
+          helm chart save . ghcr.io/${{ github.repository }}/my-library-chart:${{ inputs.version }}
+          helm chart push ghcr.io/${{ github.repository }}/my-library-chart:${{ inputs.version }}
+
