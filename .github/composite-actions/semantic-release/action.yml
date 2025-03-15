@@ -41,10 +41,10 @@ runs:
         npm install semantic-release \
           @semantic-release/changelog \
           @semantic-release/commit-analyzer \
-          @semantic-release/exec
+          @semantic-release/exec \
           @semantic-release/git \
           @semantic-release/github \
           @semantic-release-helm3 \
-          @semantic-release/release-notes-generator \
+          @semantic-release/release-notes-generator
 
         npx semantic-release ${{ steps.set-config.outputs.release_config }}
