@@ -44,7 +44,7 @@ runs:
           @semantic-release/exec \
           @semantic-release/git \
           @semantic-release/github \
-          @semantic-release-helm3 \
+          semantic-release-helm3 \
           @semantic-release/release-notes-generator
 
         npx semantic-release ${{ steps.set-config.outputs.release_config }}
