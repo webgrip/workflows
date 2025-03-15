@@ -15,6 +15,6 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJson(inputs.paths) }}
-    uses: webgrip/workflows/.github/workflows/validate-helm-chart.yml@main
+    uses: webgrip/workflows/.github/workflows/helm-chart-validate.yml@main
     with:
       path: ${{ matrix.path }}
