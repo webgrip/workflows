@@ -1,0 +1,23 @@
+name: '[Call] Validate Helm Chart'
+
+on:
+  workflow_call:
+    inputs:
+      path:
+        description: 'Path to the Helm chart you wish to validate'
+        type: string
+        required: true
+
+jobs:
+  validate-helm-chart:
+    name: 'Validate Helm Chart'
+    runs-on: arc-runner-set
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.17.0
+      - run: |
+          helm lint ${{ inputs.path }}
+          helm template ${{ inputs.path }}
+          helm template ${{ inputs.path }} | kubeval --ignore-missing-schemas
