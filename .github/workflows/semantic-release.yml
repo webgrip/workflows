@@ -24,7 +24,8 @@ jobs:
     outputs:
       version: ${{ steps.semantic-release.outputs.version }}
     steps:
-      - uses: webgrip/workflows/.github/composite-actions/semantic-release@main
+      - id: semantic-release
+        uses: webgrip/workflows/.github/composite-actions/semantic-release@main
         with:
           release-type: ${{ inputs.release-type }}
         env:
