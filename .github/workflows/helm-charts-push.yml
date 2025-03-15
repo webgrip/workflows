@@ -22,5 +22,5 @@ jobs:
     uses: webgrip/workflows/.github/workflows/helm-chart-push.yml@main
     with:
       path: ${{ matrix.path }}
-      basename: ${{ matrix.basename }}
+      name: ${{ matrix.basename }}
       version: ${{ inputs.version }}
