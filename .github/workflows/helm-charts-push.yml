@@ -19,7 +19,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJson(inputs.paths) }}
-    uses: webgrip/workflows/.github/workflows/helm-chart-validate.yml@main
+    uses: webgrip/workflows/.github/workflows/helm-chart-push.yml@main
     with:
       path: ${{ matrix.path }}
       basename: ${{ matrix.basename }}
