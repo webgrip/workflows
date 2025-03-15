@@ -27,6 +27,8 @@ jobs:
       - run: |
           echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io --username $GITHUB_ACTOR --password-stdin
       - run: |
+          export HELM_EXPERIMENTAL_OCI=1
+      - run: |
           cd ${{ inputs.path }}
           helm chart save . ghcr.io/${{ github.repository }}/${{inputs.name}}:${{ inputs.version }}
           helm chart push ghcr.io/${{ github.repository }}/${{inputs.name}}:${{ inputs.version }}
