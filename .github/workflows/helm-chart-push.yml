@@ -30,6 +30,6 @@ jobs:
           export HELM_EXPERIMENTAL_OCI=1
       - run: |
           cd ${{ inputs.path }}
-          helm package . ghcr.io/${{ github.repository }}/${{inputs.name}}:${{ inputs.version }}
+          helm package . ghcr.io/${{ github.repository }}/${{inputs.name}}
           helm push ghcr.io/${{ github.repository }}/${{inputs.name}}:${{ inputs.version }}
 
