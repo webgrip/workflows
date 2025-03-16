@@ -48,24 +48,31 @@ jobs:
         id: set-output
         shell: bash
         run: |
-          # Read the JSON array output from the changed-files action.
+          # Read the JSON array of changed directories from the changed-files action.
           CHANGED=${{ steps.changed-dirs.outputs.all_changed_files }}
           echo "Changed directories (relative): $CHANGED"
 
-          # Get the max level input and compute allowed additional slashes (max-level - 1).
+          # Get the max level input.
           MAX_LEVEL=${{ inputs.max-level }}
-          ALLOWED=$(( MAX_LEVEL - 1 ))
-          echo "Max level: $MAX_LEVEL, allowed additional slashes: $ALLOWED"
+          echo "Requested max level: $MAX_LEVEL"
 
-          # Construct a regex that allows directories with 1 to MAX_LEVEL segments.
-          # For example, if MAX_LEVEL is 1: "^[^/]+$"
-          # if MAX_LEVEL is 2: "^[^/]+(?:/[^/]+){0,1}$", and so on.
-          REGEX="^[^/]+(?:/[^/]+){0,$ALLOWED}$"
-          echo "Using regex: $REGEX"
-
-          # Filter to include only directories up to the specified depth.
-          FILTERED=$(echo "$CHANGED" | jq --arg regex "$REGEX" 'map(select(test($regex)))')
-          echo "Filtered changed directories: $FILTERED"
+          # 1) For each directory in CHANGED:
+          #    - Split by slash
+          #    - If there's more than MAX_LEVEL pieces, truncate
+          #    - Re-join
+          # 2) De-duplicate the resulting directories.
+          FILTERED=$(echo "$CHANGED" | jq --arg max "$MAX_LEVEL" '
+            map(
+              split("/") as $parts
+              | if ($parts | length) > ($max | tonumber) then
+                  ($parts[0:($max | tonumber)] | join("/"))
+                else
+                  ($parts | join("/"))
+                end
+            )
+            | unique
+          ')
+          echo "Flattened (up to max-level) changed directories: $FILTERED"
 
           # Prepend the inside-dir (base) to each element to create full paths.
           BASE=${{ inputs.inside-dir }}
