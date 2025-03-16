@@ -25,7 +25,7 @@ on:
 jobs:
   determine-changed-directories:
     name: "Determine Changed Directories"
-    runs-on: arc-runner-set
+    runs-on: ubuntu-latest
     outputs:
       changed-paths: ${{ steps.set-output.outputs.changed-paths }}
       basenames: ${{ steps.set-output.outputs.basenames }}
