@@ -38,7 +38,7 @@ jobs:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_TOKEN }}
     name: ${{ inputs.path }}
-    runs-on: ubuntu-latest
+    runs-on: arc-runner-set
     env:
       DO_CLUSTER_NAME: webgrip-${{ inputs.environment }}-cluster
       DO_KUBECONFIG_FILE: './doks-kubeconfig'
@@ -168,13 +168,13 @@ jobs:
           script: |
             const statsCSV = process.env.DEPLOYMENT_STATS || '';
             const overallStats = process.env.OVERALL_STATS || '';
-            
+
             core.summary
               .addHeading('Deployment Overview', 2)
               .addRaw(overallStats)
               .addEOL()
               .addSeparator();
-            
+
             if (!statsCSV) {
               core.summary
                 .addRaw('No deployment statistics available.')
@@ -183,12 +183,12 @@ jobs:
               const lines = statsCSV.trim().split('\n');
               const header = lines.shift().split(',');
               const dataRows = lines.map(line => line.split(','));
-            
+
               core.summary
                 .addHeading('Per-Chart Deployment Details', 3)
                 .addTable([header, ...dataRows]);
             }
-            
+
             await core.summary.write();
         env:
           DEPLOYMENT_STATS: ${{ steps.collect-stats.outputs.stats }}
