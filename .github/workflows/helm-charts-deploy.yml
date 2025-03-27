@@ -1,0 +1,48 @@
+name: "[Action] Deploy Helm Templates"
+
+run-name: "Deploy Helm Templates"
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: 'List of paths in JSON array format. e.g.: [{"path": "ops/helm/010-cloudflare-dns/cloudflare-dns-token"}, ...]'
+        required: true
+        type: string
+    secrets:
+      DIGITAL_OCEAN_API_KEY:
+        description: 'Digital Ocean API Key'
+        required: true
+      DOCKER_USERNAME:
+        description: 'Docker Username'
+        required: true
+      DOCKER_TOKEN:
+        description: 'Docker Token'
+        required: true
+      SOPS_AGE_KEY:
+        description: 'SOPS Age private key'
+        required: false
+
+  workflow_dispatch:
+    inputs:
+      paths:
+        description: 'List of paths in JSON array format. e.g.: [{"path": "ops/secrets/010-cloudflare-dns/cloudflare-dns-token"}, ...]'
+        required: true
+        type: string
+
+jobs:
+  deploy-helm:
+    name: "Deploy Helm Charts"
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(inputs.paths) }}
+    uses: webgrip/workflows/.github/workflows/helm-deploy.yml@main
+    with:
+      environment: "staging"
+      path: ${{ matrix.path }}
+    secrets:
+      DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY || '' }}
