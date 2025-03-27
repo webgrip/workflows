@@ -66,7 +66,7 @@ jobs:
           # Set the SOPS age key for decryption
           export SOPS_AGE_KEY=${{ secrets.SOPS_AGE_KEY }}
           if [ -f "$chartDir/values.sops.yaml" ]; then
-            echo "Decrypting SOPS file: $chartDir/values.sops1.yaml"
+            echo "Decrypting SOPS file: $chartDir/values.sops.yaml"
             sops --decrypt "$chartDir/values.sops.yaml" > "$chartDir/values.dec.yaml"
           else
             echo "No SOPS file found at $chartDir/values.sops.yaml, skipping."
@@ -123,7 +123,11 @@ jobs:
             helmCmd="$helmCmd --set n8n.image.tag=${{ inputs.tag }}"
           fi
 
-          if eval "$helmCmd"; then
+          # Capture the Helm output (stdout + stderr)
+          helmOutput=$(eval "$helmCmd" 2>&1)
+          helmExitCode=$?
+
+          if [ $helmExitCode -eq 0 ]; then
             status="Success ✅"
             error=""
             exit_code=0
@@ -139,6 +143,12 @@ jobs:
 
           echo "$chartName,$namespace,$duration_formatted,$status,$error" >> deployment-stats.csv
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+
+          # Publish the Helm output for later steps
+          #  - Note: make sure to properly handle multi-line outputs.
+          echo "helm_output<<EOF" >> $GITHUB_OUTPUT
+          echo "$helmOutput" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
           if [ $exit_code -eq 0 ]; then
             echo "Overall, 1 chart deployed in $duration_formatted ⏱️" > overall-stats.txt
@@ -168,6 +178,7 @@ jobs:
           script: |
             const statsCSV = process.env.DEPLOYMENT_STATS || '';
             const overallStats = process.env.OVERALL_STATS || '';
+            const helmOutput = process.env.HELM_OUTPUT || '';
 
             core.summary
               .addHeading('Deployment Overview', 2)
@@ -189,10 +200,17 @@ jobs:
                 .addTable([header, ...dataRows]);
             }
 
+            if (helmOutput) {
+              core.summary
+                .addHeading('Helm Command Output', 3)
+                .addCodeBlock(helmOutput, 'bash');
+            }
+
             await core.summary.write();
         env:
           DEPLOYMENT_STATS: ${{ steps.collect-stats.outputs.stats }}
           OVERALL_STATS: ${{ steps.collect-stats.outputs.overall }}
+          HELM_OUTPUT: ${{ steps.deploy.outputs.helm_output }}
 
       - name: Fail if Helm Failed
         if: steps.deploy.outputs.exit_code == '1'

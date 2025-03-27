@@ -1,6 +1,6 @@
-name: "[Action] Deploy Helm Templates"
+name: "[Action] Deploy Helm Template(s)"
 
-run-name: "Deploy Helm Templates"
+run-name: "Deploy Helm Template(s)"
 
 on:
   workflow_call:
@@ -37,7 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJson(inputs.paths) }}
-    uses: webgrip/workflows/.github/workflows/helm-deploy.yml@main
+    uses: webgrip/workflows/.github/workflows/helm-chart-deploy.yml@main
     with:
       environment: "staging"
       path: ${{ matrix.path }}
