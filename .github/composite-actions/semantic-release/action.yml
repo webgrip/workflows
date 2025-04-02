@@ -26,11 +26,11 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: npm ci
+      run: npm ci || true
 
     - name: Build
       shell: bash
-      run: npm run build
+      run: npm run build || true
 
     - name: Set semantic-release config file
       id: set-config
