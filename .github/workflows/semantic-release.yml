@@ -15,7 +15,7 @@ on:
 jobs:
   semantic-release:
     name: 'Semantic Release'
-    runs-on: arc-runner-set
+    runs-on: ubuntu-latest
     permissions:
       contents: write # For pushing commits/tags
       pull-requests: write # If referencing or updating PRs

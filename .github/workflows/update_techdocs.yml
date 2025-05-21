@@ -21,7 +21,7 @@ concurrency:
 jobs:
   install-deps-generate-and-deploy:
     name: "Install dependencies, generate with mkdocs, upload artifact and deploy to GitHub Pages"
-    runs-on: arc-runner-set
+    runs-on: ubuntu-latest
     container: webgrip/techdocs-runner:latest
     steps:
       - uses: actions/checkout@v4

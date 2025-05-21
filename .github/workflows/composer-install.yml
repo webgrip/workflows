@@ -10,7 +10,7 @@ on:
 jobs:
   composer-install-on-container:
     name: 'Composer install on container'
-    runs-on: arc-runner-set
+    runs-on: ubuntu-latest
     container:
       image: composer:2.8.5
       env:
@@ -32,13 +32,13 @@ jobs:
           key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
       - name: 'Install dependencies'
         run: composer install --prefer-dist --no-interaction --ignore-platform-reqs
-      - run: | 
+      - run: |
           ls -la
           ls -la vendor || true
 
 #  composer-install-with-action:
 #    name: 'Composer install'
-#    runs-on: arc-runner-set
+#    runs-on: ubuntu-latest
 #    steps:
 #      - run: |
 #          pwd

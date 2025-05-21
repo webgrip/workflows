@@ -6,7 +6,7 @@ on:
 jobs:
   static-analysis-run:
     name: 'Static Analysis (PHPStan, PHPMD, PHPCS, Rector)'
-    runs-on: arc-runner-set
+    runs-on: ubuntu-latest
     container:
         image: php:8.2-cli
     steps:
@@ -48,7 +48,7 @@ jobs:
 
   composer-normalize:
     name: 'Composer Normalize'
-    runs-on: arc-runner-set
+    runs-on: ubuntu-latest
     container:
         image: composer:2.8.5
     steps:

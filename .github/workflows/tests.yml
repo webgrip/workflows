@@ -6,7 +6,7 @@ on:
 jobs:
   tests-run: #TODO I think we can have 3 jobs, one for each testsuite. Use action is the step, to run the tests on php 8.2-cli on docker
     name: '${{ matrix.testsuite }}'
-    runs-on: arc-runner-set
+    runs-on: ubuntu-latest
     container:
       image: php:8.2-cli
     strategy:
@@ -25,10 +25,10 @@ jobs:
         run: |
           case "${{ matrix.testsuite }}" in
             "Unit")
-              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite unit --fail-on-risky 
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite unit --fail-on-risky
               ;;
             "Integration")
-              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite integration --fail-on-risky --exclude-group=db 
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite integration --fail-on-risky --exclude-group=db
               ;;
             "Functional")
               ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite functional --fail-on-risky || true

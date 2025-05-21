@@ -33,7 +33,7 @@ run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
 jobs:
   build:
     name: "Docker Build and Push"
-    runs-on: arc-runner-set
+    runs-on: ubuntu-latest
     steps:
       - uses: webgrip/workflows/.github/composite-actions/docker-build-push@main
         with:
