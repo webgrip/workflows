@@ -37,7 +37,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJson(inputs.paths) }}
-    uses: webgrip/workflows/.github/workflows/helm-chart-deploy.yml@main
+    uses: webgrip/workflows/.github/workflows/helm-chart-deploy.yml@ubuntu-latest
     with:
       environment: "staging"
       path: ${{ matrix.path }}
