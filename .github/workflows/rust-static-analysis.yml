@@ -3,6 +3,9 @@ name: 'Static Analysis'
 on:
   workflow_call:
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   static-analysis-run:
     name: 'Static Analysis (fmt, Clippy, Audit, Deny, Udeps, Outdated)'

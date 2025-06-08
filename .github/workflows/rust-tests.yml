@@ -9,6 +9,9 @@ on:
         default: 'stable'
         type: string
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   tests:
     name: 'Cargo Tests'
