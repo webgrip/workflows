@@ -53,7 +53,7 @@ jobs:
 
       # ---------- Policy / licence / advisories ----------
       - name: cargo deny
-        run: cargo deny check --all-features
+        run: cargo deny --all-features check
         if: always()
         continue-on-error: true
 
