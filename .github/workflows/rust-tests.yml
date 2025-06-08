@@ -19,7 +19,7 @@ jobs:
 
     # Run inside the official Rust image so the workflow mirrors local builds
     container:
-      image: rust:${{ inputs.toolchain }}-slim-bullseye
+      image: webgrip/rust-ci-runner:latest
 
     steps:
       - uses: actions/checkout@v4
