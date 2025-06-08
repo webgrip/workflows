@@ -1,0 +1,66 @@
+name: '[Workflow] Semantic Release (Rust)'
+
+on:
+  workflow_call:
+    inputs:
+      release-type:
+        description: 'cargo release level (major | minor | patch | ...). Leave empty for auto.'
+        required: false
+        type: string
+    outputs:
+      version:
+        description: 'Published version'
+        value: ${{ jobs.semantic-release.outputs.version }}
+
+jobs:
+  semantic-release:
+    name: 'Semantic Release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      statuses: write
+    outputs:
+      version: ${{ steps.set-output.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0            # cargo-release and git-cliff want full history / tags
+
+      # ---------- Toolchain ----------
+      - uses: actions/setup-node@v4   # semantic-release itself is still Node
+        with:
+          node-version: '22'
+      - uses: actions/setup-go@v5     # git-cliff binary release needs Go (build script)
+        with:
+          go-version: 'stable'
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - run: cargo install --locked cargo-release git-cliff
+
+      # ---------- Install semantic-release + cargo plugin ----------
+      - name: Bootstrap semantic-release
+        run: |
+          npm install --no-save \
+            semantic-release \
+            @semantic-release/commit-analyzer \
+            @semantic-release/release-notes-generator \
+            @semantic-release/changelog \
+            @semantic-release/git \
+            semantic-release-cargo \
+            semantic-release-github-actions-tags \
+            @semantic-release/github
+
+      # ---------- Run semantic-release ----------
+      - id: run-sr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          npx semantic-release -e ./release-config-rust.json
+      - id: set-output
+        if: always()
+        run: echo "version=${{ steps.run-sr.outputs.nextRelease.version }}" >> $GITHUB_OUTPUT
