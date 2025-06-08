@@ -1,0 +1,59 @@
+name: 'Rust Tests'
+
+on:
+  workflow_call:
+    inputs:
+      toolchain:
+        description: 'Rust toolchain (stable, 1.87.0, nightly, …)'
+        required: false
+        default: 'stable'
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tests:
+    name: 'Cargo Tests'
+    runs-on: arc-runner-set
+
+    # Run inside the official Rust image so the workflow mirrors local builds
+    container:
+      image: webgrip/rust-ci-runner:latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------- cache crates & build artefacts ----------
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: |
+            cargo-${{ runner.os }}-${{ inputs.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
+
+      # ---------- install extra test tooling ----------
+      - name: Install nextest & tarpaulin
+        run: |
+          cargo install --locked cargo-nextest
+          cargo install --locked cargo-tarpaulin
+
+      # ---------- run tests (fast, parallel) ----------
+      - name: Run unit + integration tests
+        run: cargo nextest run --all-targets --all-features
+
+      # ---------- generate coverage (optional) ----------
+      - name: Generate coverage (Xml)
+        run: cargo tarpaulin --workspace --out Xml
+        continue-on-error: true
+
+      # ---------- upload coverage artefact ----------
+      - name: Upload coverage artefact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: code-coverage
+          path: cobertura.xml

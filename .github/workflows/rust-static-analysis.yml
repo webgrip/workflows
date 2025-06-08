@@ -1,0 +1,89 @@
+name: 'Static Analysis'
+
+on:
+  workflow_call:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  static-analysis-run:
+    name: 'Static Analysis (fmt, Clippy, Audit, Deny, Udeps, Outdated)'
+    runs-on: arc-runner-set
+
+    # Use an official slim image so the cache works exactly the same locally
+    container:
+      image: webgrip/rust-ci-runner:latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ---------- Cargo cache ----------
+      - name: Cache cargo registry + target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: "cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}"
+
+      # ---------- rustfmt (like phpcs) ----------
+      - name: rustfmt check
+        run: cargo fmt --all -- --check
+        continue-on-error: false          # fail fast on style
+
+      # ---------- Clippy (like PHPStan/Psalm) ----------
+      - name: cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        if: always()
+        continue-on-error: true           # let the other steps run
+
+      # ---------- Unit tests (closest to phpunit) ----------
+      - name: cargo test
+        run: cargo test --all
+        if: always()
+        continue-on-error: true
+
+      # ---------- Security CVE scan ----------
+      - name: cargo audit
+        run: cargo audit
+        if: always()
+        continue-on-error: true
+
+      # ---------- Policy / licence / advisories ----------
+      - name: cargo deny
+        run: cargo deny --all-features check
+        if: always()
+        continue-on-error: true
+
+      # ---------- Unused dependencies (nightly) ----------
+      - name: cargo udeps
+        run: cargo +nightly udeps --all-targets
+        if: always()
+        continue-on-error: true
+
+      # ---------- Outdated dependencies table ----------
+      - name: cargo outdated
+        run: cargo outdated --workspace --depth=1
+        if: always()
+        continue-on-error: true
+
+      # ---------- Minimum-supported Rust version (nice-to-have) ----------
+      - name: cargo msrv
+        run: cargo msrv verify
+        if: always()
+        continue-on-error: true
+
+  cargo-normalize:
+    name: 'Cargo Sort (normalize Cargo.toml)'
+    runs-on: arc-runner-set
+
+    container:
+      image: webgrip/rust-ci-runner:latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check Cargo.toml order
+        run: cargo sort --workspace --check
