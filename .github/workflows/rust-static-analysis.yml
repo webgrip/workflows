@@ -13,7 +13,7 @@ jobs:
 
     # Use an official slim image so the cache works exactly the same locally
     container:
-      image: rust:1.87.0-slim-bullseye
+      image: webgrip/rust-ci-runner:latest
 
     steps:
       - uses: actions/checkout@v4
@@ -27,19 +27,6 @@ jobs:
             ~/.cargo/git
             target
           key: "cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}"
-
-      # ---------- Dev dependencies we need ----------
-      - name: Install extra tooling
-        run: |
-          set -e
-          cargo install --locked cargo-audit          # vulnerabilities CVEs
-          cargo install --locked cargo-deny           # license / bans / advisories
-          cargo install --locked cargo-outdated       # outdated deps overview
-          cargo install --locked cargo-udeps          # unused dependencies (nightly)
-          cargo install --locked cargo-msrv           # minimum supported Rust version
-          rustup toolchain install nightly            # needed for udeps
-          rustup component add rustfmt clippy         # formatting + linter for stable
-          echo "Installed helper tools"
 
       # ---------- rustfmt (like phpcs) ----------
       - name: rustfmt check
@@ -93,19 +80,10 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: rust:1.87.0-slim-bullseye
+      image: webgrip/rust-ci-runner:latest
 
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-          key: "cargo-tools-${{ runner.os }}"
-
-      - name: Install cargo-sort
-        run: cargo install --locked cargo-sort
 
       - name: Check Cargo.toml order
         run: cargo sort --workspace --check
