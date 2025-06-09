@@ -85,7 +85,6 @@ runs:
     # Node.js (only when package.json present)
     # ---------------------------------------------------------
     - name: Set up Node.js
-      if: steps.detect.outputs.is_node == 'true'
       uses: actions/setup-node@v4
       with:
         node-version: "22"
