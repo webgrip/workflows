@@ -24,15 +24,15 @@ jobs:
       - uses: actions/checkout@v4
 
       # ---------- cache crates & build artefacts ----------
-      - name: Cache cargo registry + target
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: |
-            cargo-${{ runner.os }}-${{ inputs.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
+      # - name: Cache cargo registry + target
+      #   uses: actions/cache@v4
+      #   with:
+      #     path: |
+      #       ~/.cargo/registry
+      #       ~/.cargo/git
+      #       target
+      #     key: |
+      #       cargo-${{ runner.os }}-${{ inputs.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
 
       # ---------- run tests (fast, parallel) ----------
       - name: Run unit + integration tests
