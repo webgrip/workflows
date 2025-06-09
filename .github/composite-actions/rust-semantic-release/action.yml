@@ -14,19 +14,17 @@ outputs:
 runs:
   using: "composite"
   steps:
-    # -----------------------------------------------------------------
-    # 0. Detect languages        (✅ never exits non-zero now)
-    # -----------------------------------------------------------------
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0         # semantic-release needs the full history
+
     - id: detect
       shell: bash
       run: |
         if [[ -f Cargo.toml ]];     then echo "is_rust=true" >>"$GITHUB_OUTPUT"; fi
         if [[ -f package.json ]];   then echo "is_node=true" >>"$GITHUB_OUTPUT"; fi
-      # no continue-on-error needed any more
 
-    # -----------------------------------------------------------------
-    # 1. ALWAYS set up Node.js   (semantic-release needs it)
-    # -----------------------------------------------------------------
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
@@ -34,9 +32,6 @@ runs:
         # Only enable the npm cache when we actually have a lock-file
         cache: ${{ steps.detect.outputs.is_node == 'true' && 'npm' || '' }}
 
-    # -----------------------------------------------------------------
-    # 2. Project-level npm steps (only if package.json exists)
-    # -----------------------------------------------------------------
     - name: Install npm dependencies
       if: steps.detect.outputs.is_node == 'true'
       shell: bash
@@ -47,9 +42,6 @@ runs:
       shell: bash
       run: npm run build --if-present
 
-    # -----------------------------------------------------------------
-    # 3. semantic-release install (ALWAYS)
-    # -----------------------------------------------------------------
     - name: Install semantic-release & plugins
       shell: bash
       run: |
@@ -63,9 +55,6 @@ runs:
           semantic-release-github-actions-tags \
           semantic-release-cargo
 
-    # -----------------------------------------------------------------
-    # 4. Run semantic-release     (ALWAYS)
-    # -----------------------------------------------------------------
     - id: sr
       shell: bash
       env:
@@ -73,9 +62,6 @@ runs:
       run: |
         npx semantic-release ${{ steps.cfg.outputs.ARG }}
 
-    # ---------------------------------------------------------
-    # Expose version for callers
-    # ---------------------------------------------------------
     - id: set-version
       if: always()
       shell: bash
