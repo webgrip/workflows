@@ -20,8 +20,9 @@ runs:
     - id: detect
       shell: bash
       run: |
-        [[ -f Cargo.toml ]]  && echo "is_rust=true"  >> "$GITHUB_OUTPUT"
-        [[ -f package.json ]] && echo "is_node=true"  >> "$GITHUB_OUTPUT"
+        [[ -f Cargo.toml ]] && echo "is_rust=true" >> "$GITHUB_OUTPUT"
+        [[ -f package.json ]] && echo "is_node=true" >> "$GITHUB_OUTPUT"
+      continue-on-error: true
 
     # ---------------------------------------------------------
     # Full‑history checkout (semantic‑release needs tags)
