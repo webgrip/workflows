@@ -42,6 +42,16 @@ runs:
       shell: bash
       run: npm run build --if-present
 
+    - name: Set semantic-release config file
+      id: set-config
+      shell: bash
+      run: |
+        if [[ -n "${{ inputs.release-type }}" ]]; then
+          echo "release_config=--extends=./.releaserc.${{ inputs.release-type }}.json" >> $GITHUB_OUTPUT
+        else
+          echo "release_config=" >> $GITHUB_OUTPUT
+        fi
+
     - name: Install semantic-release & plugins
       shell: bash
       run: |
@@ -52,17 +62,19 @@ runs:
           @semantic-release/release-notes-generator \
           @semantic-release/git \
           @semantic-release/github \
+          semantic-release-cargo \
           semantic-release-github-actions-tags \
-          semantic-release-cargo
+          semantic-release-helm3
 
-    - id: sr
+    - name: Run semantic-release
       shell: bash
+      id: semantic-release
       env:
         GITHUB_OUTPUT: $GITHUB_OUTPUT
       run: |
-        npx semantic-release ${{ steps.cfg.outputs.ARG }}
+        npx semantic-release ${{ steps.set-config.outputs.release_config }}
 
     - id: set-version
       if: always()
       shell: bash
-      run: echo "version=${{ steps.sr.outputs.nextRelease.version }}" >> "$GITHUB_OUTPUT"
+      run: echo "version=${{ steps.semantic-release.outputs.nextRelease.version }}" >> "$GITHUB_OUTPUT"
