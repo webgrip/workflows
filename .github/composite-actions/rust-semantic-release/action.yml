@@ -59,9 +59,10 @@ runs:
           semantic-release \
           @semantic-release/changelog \
           @semantic-release/commit-analyzer \
-          @semantic-release/release-notes-generator \
+          @semantic-release/exec \
           @semantic-release/git \
           @semantic-release/github \
+          @semantic-release/release-notes-generator \
           semantic-release-cargo \
           semantic-release-github-actions-tags \
           semantic-release-helm3
