@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - id: release
-        uses: webgrip/workflows/.github/composite-actions/semantic-release@main
+        uses: webgrip/workflows/.github/composite-actions/rust-semantic-release@main
         with:
           release-type: ${{ inputs.release-type }}
         env:
