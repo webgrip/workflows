@@ -14,82 +14,29 @@ outputs:
 runs:
   using: "composite"
   steps:
-    # ---------------------------------------------------------
-    # Detect project language(s)
-    # ---------------------------------------------------------
+    # -----------------------------------------------------------------
+    # 0. Detect languages        (✅ never exits non-zero now)
+    # -----------------------------------------------------------------
     - id: detect
       shell: bash
       run: |
-        [[ -f Cargo.toml ]] && echo "is_rust=true" >> "$GITHUB_OUTPUT"
-        [[ -f package.json ]] && echo "is_node=true" >> "$GITHUB_OUTPUT"
-      continue-on-error: true
+        if [[ -f Cargo.toml ]];     then echo "is_rust=true" >>"$GITHUB_OUTPUT"; fi
+        if [[ -f package.json ]];   then echo "is_node=true" >>"$GITHUB_OUTPUT"; fi
+      # no continue-on-error needed any more
 
-    # ---------------------------------------------------------
-    # Full‑history checkout (semantic‑release needs tags)
-    # ---------------------------------------------------------
-    - name: Checkout repository
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    # ---------------------------------------------------------
-    # System tool‑chain for Rust (gcc, make, openssl‑dev)
-    # ---------------------------------------------------------
-    - name: Install build essentials (gcc/make)
-      if: steps.detect.outputs.is_rust == 'true'
-      shell: bash
-      run: |
-        if command -v apt-get &>/dev/null; then
-          sudo apt-get update -yq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libssl-dev ca-certificates
-        elif command -v apk &>/dev/null; then
-          sudo apk add --no-cache build-base pkgconf openssl-dev
-        fi
-
-    # ---------------------------------------------------------
-    # Cache Cargo registry + git checkouts
-    # ---------------------------------------------------------
-    - name: Cache Cargo
-      if: steps.detect.outputs.is_rust == 'true'
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cargo/registry
-          ~/.cargo/git
-        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-        restore-keys: |
-          ${{ runner.os }}-cargo-
-
-    # ---------------------------------------------------------
-    # Rust tool‑chain (stable, minimal profile)
-    # ---------------------------------------------------------
-    - name: Set up Rust
-      if: steps.detect.outputs.is_rust == 'true'
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        profile: minimal
-        override: true
-
-    # ---------------------------------------------------------
-    # Fast binary install of cargo‑release & git‑cliff
-    # ---------------------------------------------------------
-    - name: Install cargo‑release & git‑cliff (via cargo‑binstall)
-      if: steps.detect.outputs.is_rust == 'true'
-      uses: cargo-bins/cargo-binstall@v1.12.7
-      with:
-        bins: "cargo-release git-cliff"
-
-    # ---------------------------------------------------------
-    # Node.js (only when package.json present)
-    # ---------------------------------------------------------
+    # -----------------------------------------------------------------
+    # 1. ALWAYS set up Node.js   (semantic-release needs it)
+    # -----------------------------------------------------------------
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: "22"
-        cache: npm
+        node-version: 22
+        # Only enable the npm cache when we actually have a lock-file
+        cache: ${{ steps.detect.outputs.is_node == 'true' && 'npm' || '' }}
 
+    # -----------------------------------------------------------------
+    # 2. Project-level npm steps (only if package.json exists)
+    # -----------------------------------------------------------------
     - name: Install npm dependencies
       if: steps.detect.outputs.is_node == 'true'
       shell: bash
@@ -100,20 +47,10 @@ runs:
       shell: bash
       run: npm run build --if-present
 
-    # ---------------------------------------------------------
-    # Compute optional semantic‑release config arg
-    # ---------------------------------------------------------
-    - id: cfg
-      shell: bash
-      run: |
-        if [[ -n "${{ inputs.release-type }}" ]]; then
-          echo "ARG=--extends=.releaserc.${{ inputs.release-type }}.json" >> "$GITHUB_OUTPUT"
-        fi
-
-    # ---------------------------------------------------------
-    # Install semantic‑release core + plugins (JIT)
-    # ---------------------------------------------------------
-    - name: Install semantic‑release & plugins
+    # -----------------------------------------------------------------
+    # 3. semantic-release install (ALWAYS)
+    # -----------------------------------------------------------------
+    - name: Install semantic-release & plugins
       shell: bash
       run: |
         npm install --no-save \
@@ -126,9 +63,9 @@ runs:
           semantic-release-github-actions-tags \
           semantic-release-cargo
 
-    # ---------------------------------------------------------
-    # Run semantic‑release
-    # ---------------------------------------------------------
+    # -----------------------------------------------------------------
+    # 4. Run semantic-release     (ALWAYS)
+    # -----------------------------------------------------------------
     - id: sr
       shell: bash
       env:
