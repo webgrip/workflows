@@ -1,67 +1,42 @@
-name: 'Static Analysis'
+name: "[Workflow] Semantic Release (Rust + JS)"
 
 on:
   workflow_call:
+    inputs:
+      release-type:
+        description: "Explicit release level (major | minor | patch). Leave blank for auto‑detect."
+        required: false
+        type: string
+    outputs:
+      version:
+        description: "Published version"
+        value: ${{ jobs.semantic-release.outputs.version }}
 
-env:
-  CARGO_TERM_COLOR: always
+permissions:              # Applies to all jobs unless overridden
+  contents: write
+  pull-requests: write
+  issues: write
+  statuses: write
+
+concurrency:
+  group: semantic-release-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  static-analysis-run:
-    name: 'Static Analysis (fmt, Clippy, Audit, Deny, Udeps, Outdated)'
-    runs-on: arc-runner-set
-
-    # Use an official slim image so the cache works exactly the same locally
-    container:
-      image: webgrip/rust-ci-runner:latest
+  semantic-release:
+    name: "Semantic Release"
+    runs-on: arc-runner-set      # Use ubuntu-latest if you prefer GH‑hosted runners
+    outputs:
+      version: ${{ steps.out.outputs.version }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache cargo registry + target
-        uses: actions/cache@v4
+      - id: release
+        uses: webgrip/workflows/.github/composite-actions/semantic-release@main
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: "cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}"
+          release-type: ${{ inputs.release-type }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # ---------- rustfmt ----------
-      - name: rustfmt check
-        run: cargo fmt --all -- --check
-
-      # ---------- Clippy (like PHPStan/Psalm) ----------
-      - name: cargo clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
-        if: always()
-
-      # ---------- Security CVE scan ----------
-      - name: cargo audit
-        run: cargo audit
-        if: always()
-
-      # ---------- Policy / licence / advisories ----------
-      - name: cargo deny
-        run: cargo deny --all-features check --hide-inclusion-graph
-        if: always()
-
-      # ---------- Unused dependencies ----------
-      - name: cargo udeps
-        run: cargo +nightly udeps --all-targets
-        if: always()
-
-      # ---------- Outdated dependencies table ----------
-      - name: cargo outdated
-        run: cargo outdated --workspace --depth=1
-        if: always()
-
-      # ---------- Minimum-supported Rust version (nice-to-have) ----------
-      - name: cargo msrv
-        run: cargo msrv verify
-        if: always()
-
-      # ---------- Sort Cargo.toml files ----------
-      - name: cargo sort
-        run: cargo sort --workspace --check
-        if: always()
+      - name: Propagate version output
+        id: out
+        run: echo "version=${{ steps.release.outputs.version }}" >> "$GITHUB_OUTPUT"

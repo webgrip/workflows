@@ -1,0 +1,145 @@
+name: "[Action] Semantic Release"
+description: "Automate versioning & changelog for Rust crates and/or JS packages via semantic‑release"
+
+inputs:
+  release-type:
+    description: "Explicit release level override (major | minor | patch)"
+    required: false
+
+outputs:
+  version:
+    description: "The new version number"
+    value: ${{ steps.set-version.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    # ---------------------------------------------------------
+    # Detect project language(s)
+    # ---------------------------------------------------------
+    - id: detect
+      shell: bash
+      run: |
+        [[ -f Cargo.toml ]]  && echo "is_rust=true"  >> "$GITHUB_OUTPUT"
+        [[ -f package.json ]] && echo "is_node=true"  >> "$GITHUB_OUTPUT"
+
+    # ---------------------------------------------------------
+    # Full‑history checkout (semantic‑release needs tags)
+    # ---------------------------------------------------------
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    # ---------------------------------------------------------
+    # System tool‑chain for Rust (gcc, make, openssl‑dev)
+    # ---------------------------------------------------------
+    - name: Install build essentials (gcc/make)
+      if: steps.detect.outputs.is_rust == 'true'
+      shell: bash
+      run: |
+        if command -v apt-get &>/dev/null; then
+          sudo apt-get update -yq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev ca-certificates
+        elif command -v apk &>/dev/null; then
+          sudo apk add --no-cache build-base pkgconf openssl-dev
+        fi
+
+    # ---------------------------------------------------------
+    # Cache Cargo registry + git checkouts
+    # ---------------------------------------------------------
+    - name: Cache Cargo
+      if: steps.detect.outputs.is_rust == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+
+    # ---------------------------------------------------------
+    # Rust tool‑chain (stable, minimal profile)
+    # ---------------------------------------------------------
+    - name: Set up Rust
+      if: steps.detect.outputs.is_rust == 'true'
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+
+    # ---------------------------------------------------------
+    # Fast binary install of cargo‑release & git‑cliff
+    # ---------------------------------------------------------
+    - name: Install cargo‑release & git‑cliff (via cargo‑binstall)
+      if: steps.detect.outputs.is_rust == 'true'
+      uses: cargo-bins/cargo-binstall@v2
+      with:
+        bins: "cargo-release git-cliff"
+
+    # ---------------------------------------------------------
+    # Node.js (only when package.json present)
+    # ---------------------------------------------------------
+    - name: Set up Node.js
+      if: steps.detect.outputs.is_node == 'true'
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+        cache: npm
+
+    - name: Install npm dependencies
+      if: steps.detect.outputs.is_node == 'true'
+      shell: bash
+      run: npm ci --ignore-scripts
+
+    - name: Build (npm)
+      if: steps.detect.outputs.is_node == 'true'
+      shell: bash
+      run: npm run build --if-present
+
+    # ---------------------------------------------------------
+    # Compute optional semantic‑release config arg
+    # ---------------------------------------------------------
+    - id: cfg
+      shell: bash
+      run: |
+        if [[ -n "${{ inputs.release-type }}" ]]; then
+          echo "ARG=--extends=.releaserc.${{ inputs.release-type }}.json" >> "$GITHUB_OUTPUT"
+        fi
+
+    # ---------------------------------------------------------
+    # Install semantic‑release core + plugins (JIT)
+    # ---------------------------------------------------------
+    - name: Install semantic‑release & plugins
+      shell: bash
+      run: |
+        npm install --no-save \
+          semantic-release \
+          @semantic-release/changelog \
+          @semantic-release/commit-analyzer \
+          @semantic-release/release-notes-generator \
+          @semantic-release/git \
+          @semantic-release/github \
+          semantic-release-github-actions-tags \
+          semantic-release-cargo
+
+    # ---------------------------------------------------------
+    # Run semantic‑release
+    # ---------------------------------------------------------
+    - id: sr
+      shell: bash
+      env:
+        GH_TOKEN: ${{ env.GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+      run: |
+        npx semantic-release ${{ steps.cfg.outputs.ARG }}
+
+    # ---------------------------------------------------------
+    # Expose version for callers
+    # ---------------------------------------------------------
+    - id: set-version
+      if: always()
+      shell: bash
+      run: echo "version=${{ steps.sr.outputs.nextRelease.version }}" >> "$GITHUB_OUTPUT"
