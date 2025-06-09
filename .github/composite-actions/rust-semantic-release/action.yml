@@ -76,7 +76,7 @@ runs:
     # ---------------------------------------------------------
     - name: Install cargo‑release & git‑cliff (via cargo‑binstall)
       if: steps.detect.outputs.is_rust == 'true'
-      uses: cargo-bins/cargo-binstall@v2
+      uses: cargo-bins/cargo-binstall@v1
       with:
         bins: "cargo-release git-cliff"
 
