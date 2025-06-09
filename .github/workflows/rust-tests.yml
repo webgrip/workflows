@@ -17,7 +17,6 @@ jobs:
     name: 'Cargo Tests'
     runs-on: arc-runner-set
 
-    # Run inside the official Rust image so the workflow mirrors local builds
     container:
       image: webgrip/rust-ci-runner:latest
 
@@ -34,12 +33,6 @@ jobs:
             target
           key: |
             cargo-${{ runner.os }}-${{ inputs.toolchain }}-${{ hashFiles('**/Cargo.lock') }}
-
-      # ---------- install extra test tooling ----------
-      - name: Install nextest & tarpaulin
-        run: |
-          cargo install --locked cargo-nextest
-          cargo install --locked cargo-tarpaulin
 
       # ---------- run tests (fast, parallel) ----------
       - name: Run unit + integration tests
