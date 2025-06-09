@@ -132,7 +132,7 @@ runs:
     - id: sr
       shell: bash
       env:
-        GH_TOKEN: ${{ env.GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+        GITHUB_OUTPUT: $GITHUB_OUTPUT
       run: |
         npx semantic-release ${{ steps.cfg.outputs.ARG }}
 
