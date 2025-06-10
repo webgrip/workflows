@@ -98,7 +98,7 @@ runs:
       shell: bash
       env:
         GITHUB_OUTPUT: $GITHUB_OUTPUT
-        CARGO_REGISTRY_TOKEN: $CARGO_REGISTRY_TOKEN
+        CARGO_REGISTRY_TOKEN: ${{ env.CARGO_REGISTRY_TOKEN }}
       run: |
         npx semantic-release ${{ steps.set-config.outputs.release_config }}
 
