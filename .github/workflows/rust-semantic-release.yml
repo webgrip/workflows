@@ -38,9 +38,9 @@ jobs:
         uses: webgrip/workflows/.github/composite-actions/rust-semantic-release@main
         with:
           release-type: ${{ inputs.release-type }}
+          cargo-registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Propagate version output
         id: out

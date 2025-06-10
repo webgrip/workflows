@@ -5,6 +5,9 @@ inputs:
   release-type:
     description: "Explicit release level override (major | minor | patch)"
     required: false
+  cargo-registry-token:
+    description: "Cargo registry token for publishing Rust crates"
+    required: true
 
 outputs:
   version:
