@@ -14,35 +14,6 @@ jobs:
     container:
       image: webgrip/rust-ci-runner:latest
 
-    strategy:
-      fail-fast: false
-      max-parallel: 8
-      matrix:
-        include:
-          - task: fmt
-            cmd: cargo fmt --all -- --check
-
-          - task: clippy
-            cmd: cargo clippy --all-targets --all-features -- -D warnings
-
-          - task: audit
-            cmd: cargo audit
-
-          - task: deny
-            cmd: cargo deny --all-features check --hide-inclusion-graph
-
-          - task: udeps
-            cmd: cargo +nightly udeps --all-targets
-
-          - task: outdated
-            cmd: cargo outdated --workspace --depth=1
-
-          - task: msrv
-            cmd: cargo msrv verify
-
-          - task: sort
-            cmd: cargo sort --workspace --check
-  
     steps:
       - uses: actions/checkout@v4
 
@@ -55,5 +26,41 @@ jobs:
             target
           key: "cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}"
 
-      - name: Run ${{ matrix.task }}
-        run: ${{ matrix.cmd }}
+      # ---------- rustfmt ----------
+      - name: rustfmt check
+        run: cargo fmt --all -- --check
+
+      # ---------- Clippy (like PHPStan/Psalm) ----------
+      - name: cargo clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        if: always()
+
+      # ---------- Security CVE scan ----------
+      - name: cargo audit
+        run: cargo audit
+        if: always()
+
+      # ---------- Policy / licence / advisories ----------
+      - name: cargo deny
+        run: cargo deny --all-features check --hide-inclusion-graph
+        if: always()
+
+      # ---------- Unused dependencies ----------
+      - name: cargo udeps
+        run: cargo +nightly udeps --all-targets
+        if: always()
+
+      # ---------- Outdated dependencies table ----------
+      - name: cargo outdated
+        run: cargo outdated --workspace --depth=1
+        if: always()
+
+      # ---------- Minimum-supported Rust version (nice-to-have) ----------
+      - name: cargo msrv
+        run: cargo msrv verify
+        if: always()
+
+      # ---------- Sort Cargo.toml files ----------
+      - name: cargo sort
+        run: cargo sort --workspace --check
+        if: always()
