@@ -40,9 +40,16 @@ jobs:
         with: { fetch-depth: 0 }
 
       - name: Build
+        shell: bash                     # 👈 run with bash
         run: |
-          if [[ -f package.json ]]; then npm ci --ignore-scripts && npm run build --if-present; fi
-          if [[ -f Cargo.toml ]];   then cargo build --release; fi
+          if [[ -f package.json ]]; then
+            npm ci --ignore-scripts
+            npm run build --if-present
+          fi
+
+          if [[ -f Cargo.toml ]]; then
+            cargo build --release
+          fi
 
       - name: Run semantic-release
         id: release
