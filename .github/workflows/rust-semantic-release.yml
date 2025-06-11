@@ -40,7 +40,7 @@ jobs:
         with: { fetch-depth: 0 }
 
       - name: Build
-        shell: bash                     # 👈 run with bash
+        shell: bash
         run: |
           if [[ -f package.json ]]; then
             npm ci --ignore-scripts
