@@ -40,8 +40,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Ensure remote has .git suffix
+      - name: Git safety + canonical remote          # ← added
         run: |
+          git config --global --add safe.directory "$PWD"
           git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Build
