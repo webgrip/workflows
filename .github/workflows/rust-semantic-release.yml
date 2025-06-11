@@ -44,21 +44,13 @@ jobs:
           git config --global --add safe.directory "$PWD"
           git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
 
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross --locked
-
       - name: Build native release binaries
         run: |
           cross build --release --target x86_64-unknown-linux-gnu
           cross build --release --target x86_64-apple-darwin
           cross build --release --target x86_64-pc-windows-gnu
 
-      - name: Add wasm target & wasm-bindgen
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo install --locked wasm-bindgen-cli
-
-      - name: Build & optimize WASM
+      - name: Build & bindgen (WASM)
         run: |
           cargo build --release --target wasm32-unknown-unknown
           wasm-bindgen --target web \
@@ -66,30 +58,6 @@ jobs:
             target/wasm32-unknown-unknown/release/mybin.wasm
           mv dist/wasm/mybin_bg.wasm dist/mybin-wasm32-unknown-unknown.wasm
           gzip -9 -n dist/mybin-wasm32-unknown-unknown.wasm
-
-      - name: Build JavaScript (if present)
-        if: ${{ hashFiles('package.json') != '' }}
-        run: |
-          npm ci --ignore-scripts
-          npm run build --if-present
-
-      - name: Package native binaries for GitHub Release
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          # Linux
-          cp target/x86_64-unknown-linux-gnu/release/mybin dist/
-          tar -czf dist/mybin-x86_64-unknown-linux-gnu.tar.gz -C dist mybin
-          rm dist/mybin
-          # macOS
-          cp target/x86_64-apple-darwin/release/mybin dist/
-          tar -czf dist/mybin-x86_64-apple-darwin.tar.gz -C dist mybin
-          rm dist/mybin
-          # Windows
-          cp target/x86_64-pc-windows-gnu/release/mybin.exe dist/
-          zip -j dist/mybin-x86_64-pc-windows-gnu.zip dist/mybin.exe
-          rm dist/mybin.exe
-          # wasm is already in dist/ and gzipped
 
       - name: Run semantic-release
         id: release
