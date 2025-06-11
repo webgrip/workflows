@@ -38,6 +38,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+      
+      - name: Ensure remote has .git suffix
+        run: |
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
 
       - name: Build
         shell: bash
