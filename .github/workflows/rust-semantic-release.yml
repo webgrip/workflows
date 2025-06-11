@@ -44,11 +44,6 @@ jobs:
           git config --global --add safe.directory "$PWD"
           git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
 
-      - name: Put pre-installed Cargo tools on PATH
-        run: |
-          # Cargo & Cross are in /usr/local/cargo/bin from the image build.
-          echo "/usr/local/cargo/bin" >> $GITHUB_PATH
-      
       - name: Build native release binaries
         run: |
           cross build --release --target x86_64-unknown-linux-gnu
