@@ -1,4 +1,4 @@
-name: "[Call] Create repository from template"
+name: "[Call] Bootstrap repository"
 
 on:
   workflow_call:
@@ -30,8 +30,8 @@ on:
         required: true
 
 jobs:
-  create-repo-from-template:
-    name: "Create repository from template"
+  bootstrap-repo:
+    name: "Bootstrap repository"
     runs-on: arc-runner-set
 
     env:
