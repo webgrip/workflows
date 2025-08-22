@@ -11,7 +11,7 @@ on:
 
 jobs:
   deploy-gh-pages:
-    name: "Get the TechDocs from artifact and deploy it onto GitHub Pages"
+    name: "GitHub Pages"
     runs-on: arc-runner-set
     container: webgrip/techdocs-runner:latest
     steps:

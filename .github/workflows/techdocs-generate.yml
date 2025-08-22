@@ -14,8 +14,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  install-deps-generate-and-deploy:
-    name: "Install dependencies, generate with mkdocs, upload artifact and deploy to GitHub Pages"
+  generate-techdocs:
+    name: "techdocs"
     runs-on: arc-runner-set
     container: webgrip/techdocs-runner:latest
     steps:
