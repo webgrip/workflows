@@ -77,9 +77,11 @@ jobs:
         if: ${{ inputs.delete_files != '' }}
         run: |
           set -euo pipefail
-          IFS=',' read -ra files <<< "${{ inputs.delete_files }}"
+          input="${{ inputs.delete_files }}"
+          input="${input//$'\n'/,}"
+          IFS=',' read -ra files <<< "$input"
           for file in "${files[@]}"; do
-            f="$(echo "$file" | xargs)"   # trim whitespace
+            f="$(echo "$file" | xargs)"   # trim
             [[ -z "$f" ]] && continue
             echo "Deleting: $f"
             rm -rf -- "$f"
@@ -89,8 +91,7 @@ jobs:
         if: ${{ inputs.replace_values != '' }}
         uses: actions/github-script@v7
         env:
-          # Convert YAML -> JSON for the script; default to {}
-          REPLACE_VALUES: ${{ toJson(fromYaml(inputs.replace_values)) }}
+          REPLACE_VALUES_YAML: ${{ inputs.replace_values }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -98,8 +99,32 @@ jobs:
             const path = require('path');
 
             const root = process.env.GITHUB_WORKSPACE || process.cwd();
-            /** @type {Record<string,string>} */
-            const replacements = JSON.parse(process.env.REPLACE_VALUES || '{}');
+            const yamlRaw = (process.env.REPLACE_VALUES_YAML || '').trim();
+
+            function parseSimpleYamlMap(yaml) {
+              const map = {};
+              for (const rawLine of yaml.split(/\r?\n/)) {
+                const line = rawLine.trim();
+                if (!line || line.startsWith('#')) continue;
+                const idx = line.indexOf(':');
+                if (idx < 0) continue;
+                let key = line.slice(0, idx).trim();
+                let val = line.slice(idx + 1).trim();
+
+                const unquote = (s) => {
+                  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+                    return s.slice(1, -1);
+                  }
+                  return s;
+                };
+                key = unquote(key);
+                val = unquote(val);
+                map[key] = val;
+              }
+              return map;
+            }
+
+            const replacements = parseSimpleYamlMap(yamlRaw);
 
             function walk(dir) {
               let out = [];
@@ -117,7 +142,6 @@ jobs:
               let content = fs.readFileSync(file, 'utf8');
               for (const [search, replace] of Object.entries(replacements)) {
                 if (!search) continue;
-                // simple global replacement
                 content = content.split(search).join(String(replace));
               }
               fs.writeFileSync(file, content, 'utf8');
@@ -130,7 +154,7 @@ jobs:
         if: ${{ inputs.replace_values != '' }}
         uses: actions/github-script@v7
         env:
-          REPLACE_VALUES: ${{ toJson(fromYaml(inputs.replace_values)) }}
+          REPLACE_VALUES_YAML: ${{ inputs.replace_values }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -138,8 +162,32 @@ jobs:
             const path = require('path');
 
             const root = process.env.GITHUB_WORKSPACE || process.cwd();
-            /** @type {Record<string,string>} */
-            const replacements = JSON.parse(process.env.REPLACE_VALUES || '{}');
+            const yamlRaw = (process.env.REPLACE_VALUES_YAML || '').trim();
+
+            function parseSimpleYamlMap(yaml) {
+              const map = {};
+              for (const rawLine of yaml.split(/\r?\n/)) {
+                const line = rawLine.trim();
+                if (!line || line.startsWith('#')) continue;
+                const idx = line.indexOf(':');
+                if (idx < 0) continue;
+                let key = line.slice(0, idx).trim();
+                let val = line.slice(idx + 1).trim();
+
+                const unquote = (s) => {
+                  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
+                    return s.slice(1, -1);
+                  }
+                  return s;
+                };
+                key = unquote(key);
+                val = unquote(val);
+                map[key] = val;
+              }
+              return map;
+            }
+
+            const replacements = parseSimpleYamlMap(yamlRaw);
 
             function movePath(src, dest) {
               if (!src || !dest || src === dest) return;
@@ -164,11 +212,13 @@ jobs:
               fs.renameSync(src, dest);
             }
 
-            // Interpret mapping as oldPath -> newPath when both look like paths
+            const looksLikePath = (s) => typeof s === 'string' && (s.includes('/') || s.startsWith('.') || s.startsWith('_'));
+
             for (const [search, replace] of Object.entries(replacements)) {
-              const looksLikePath = (s) => typeof s === 'string' && (s.includes('/') || s.startsWith('.') || s.startsWith('_'));
               if (!looksLikePath(search) || !looksLikePath(replace)) continue;
-              movePath(path.join(root, search), path.join(root, replace));
+              const src = path.join(root, search);
+              const dst = path.join(root, replace);
+              movePath(src, dst);
             }
 
       - name: Resolve bot noreply email
@@ -216,7 +266,6 @@ jobs:
             const owner = process.env.ORG;
             const repo  = process.env.NEW_REPO;
 
-            // If a similar PR already exists and is open, do nothing
             const { data: prs } = await github.request('GET /repos/{owner}/{repo}/pulls', {
               owner, repo, state: 'open', base: 'main', head: `${owner}:development`
             });
@@ -264,7 +313,6 @@ jobs:
               core.setOutput('project_id', projectId);
               core.info(`OpenAI project id: ${projectId}`);
 
-              // Best-effort metadata link
               try {
                 const linkRes = await fetch(`https://api.openai.com/v1/projects/${projectId}`, {
                   method: 'PATCH', headers,
@@ -304,6 +352,7 @@ jobs:
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.app-token.outputs.token }}
+        # If the app lacks Pages permission/org restriction, this step just warns.
           script: |
             const owner = process.env.ORG;
             const repo  = process.env.NEW_REPO;
