@@ -60,38 +60,47 @@ jobs:
         id: gen
         uses: actions/github-script@v7
         with:
-            github-token: ${{ steps.app-token.outputs.token }}
-            script: |
-              const org = process.env.ORG;
-              const name = process.env.NEW_REPO;
-              const isPrivate = (process.env.VISIBILITY !== 'public');
-              const { data: repo } = await github.request('POST /repos/{template_owner}/{template_repo}/generate', {
-                template_owner: process.env.TEMPLATE_OWNER,
-                template_repo: process.env.TEMPLATE_REPO,
-                owner: org,
-                name,
-                private: isPrivate,
-                include_all_branches: false
-              });
-              core.info(`Generated repo: ${repo.full_name}`);
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const org = process.env.ORG;
+            const name = process.env.NEW_REPO;
+            const isPrivate = (process.env.VISIBILITY !== 'public');
 
-              const topics = process.env.TOPICS.split(",").map(t => t.trim());
+            const { data: repo } = await github.request('POST /repos/{template_owner}/{template_repo}/generate', {
+              template_owner: process.env.TEMPLATE_OWNER,
+              template_repo: process.env.TEMPLATE_REPO,
+              owner: org,
+              name,
+              private: isPrivate,
+              include_all_branches: false,
+            });
+            core.info(`Generated repo: ${repo.full_name}`);
+
+            const topicsRaw = process.env.TOPICS || '';
+            const topics = topicsRaw
+              .split(',')
+              .map(t => t.trim())
+              .filter(Boolean);
+            if (topics.length) {
               await github.request('PUT /repos/{owner}/{repo}/topics', {
-                  owner: org,
-                  repo: name,
-                  names: topics
+                owner: org,
+                repo: name,
+                names: topics,
               });
-              core.info(`Added topics: ${topics.join(", ")}`);
-              
-              await github.request('PATCH /repos/{owner}/{repo}', {
-                  owner: process.env.ORG,
-                  repo: process.env.NEW_REPO,
-                  allow_squash_merge: false,
-                  allow_merge_commit: false,
-                  allow_rebase_merge: true,
-                  delete_branch_on_merge: true
-              });
-              core.info(`Configured merge options for ${org}/${name}.`);
+              core.info(`Added topics: ${topics.join(', ')}`);
+            } else {
+              core.info('No topics provided.');
+            }
+
+            await github.request('PATCH /repos/{owner}/{repo}', {
+              owner: org,
+              repo: name,
+              allow_squash_merge: false,
+              allow_merge_commit: false,
+              allow_rebase_merge: true,
+              delete_branch_on_merge: true,
+            });
+            core.info(`Configured merge options for ${org}/${name}.`);
 
       - name: Wait for initial default branch
         id: wait-default-branch
@@ -106,6 +115,7 @@ jobs:
             let sleepMs = 2_000;
             const maxSleepMs = 10_000;
             const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
             async function ready() {
               const { data: repoData } = await github.request('GET /repos/{owner}/{repo}', { owner, repo });
               const branch = repoData.default_branch || 'main';
@@ -119,6 +129,7 @@ jobs:
               } catch {}
               return null;
             }
+
             while (Date.now() - start < timeoutMs) {
               const info = await ready();
               if (info) {
@@ -133,6 +144,35 @@ jobs:
             }
             core.setFailed('Timed out waiting for the new repo default branch and first commit.');
 
+      - name: Create development branch from initial commit
+        id: create-dev-branch
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const owner = process.env.ORG;
+            const repo  = process.env.NEW_REPO;
+            const sha   = process.env.INITIAL_SHA;
+
+            // If it already exists, do nothing
+            try {
+              await github.request('GET /repos/{owner}/{repo}/branches/{branch}', {
+                owner, repo, branch: 'development'
+              });
+              core.info('Branch "development" already exists.');
+            } catch (e) {
+              if (e.status === 404) {
+                await github.request('POST /repos/{owner}/{repo}/git/refs', {
+                  owner, repo,
+                  ref: 'refs/heads/development',
+                  sha,
+                });
+                core.info(`Created branch "development" at ${sha}.`);
+              } else {
+                throw e;
+              }
+            }
+
       - name: Set default branch to development
         uses: actions/github-script@v7
         with:
@@ -141,10 +181,10 @@ jobs:
             await github.request('PATCH /repos/{owner}/{repo}', {
               owner: process.env.ORG,
               repo: process.env.NEW_REPO,
-              default_branch: 'development'
+              default_branch: 'development',
             });
             core.info('Default branch set to development.');
-    
+
       - name: Create or update ruleset (main & development)
         uses: actions/github-script@v7
         with:
