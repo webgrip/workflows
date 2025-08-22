@@ -1,0 +1,17 @@
+name: '[Call] Run Tests'
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    name: 'Unit tests'
+    runs-on: arc-runner-set
+    steps:
+      -  uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run tests
+        run: npm run test
