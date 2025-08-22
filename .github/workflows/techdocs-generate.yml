@@ -1,0 +1,32 @@
+name: "Update TechDocs"
+
+on:
+  workflow_call:
+    inputs:
+      source-dir:
+        type: string
+        description: 'The directory containing the techdocs files'
+        required: false
+        default: 'docs/techdocs'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install-deps-generate-and-deploy:
+    name: "Install dependencies, generate with mkdocs, upload artifact and deploy to GitHub Pages"
+    runs-on: arc-runner-set
+    container: webgrip/techdocs-runner:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - run: |
+          techdocs-cli generate --no-docker --verbose --source-dir ${{ inputs.source-dir }} --output-dir techdocs-site
+
+      - name: Put in artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: techdocs-site
+          path: techdocs-site
+          retention-days: 1

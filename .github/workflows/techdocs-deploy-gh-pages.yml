@@ -1,0 +1,32 @@
+name: "Deploy Github Pages"
+
+on:
+  workflow_call:
+    inputs:
+      cname:
+        type: string
+        description: 'The custom domain for the TechDocs site'
+        required: false
+        default: ''
+
+jobs:
+  deploy-gh-pages:
+    name: "Get the TechDocs from artifact and deploy it onto GitHub Pages"
+    runs-on: arc-runner-set
+    container: webgrip/techdocs-runner:latest
+    steps:
+      - name: Get TechDocs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: techdocs-site
+          path: ./techdocs-site
+
+      - run: |
+          apk add --no-cache git
+
+      - name: GitHub Pages Deploy
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./techdocs-site
+          cname: ${{ inputs.cname }}
