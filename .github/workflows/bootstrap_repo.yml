@@ -110,13 +110,10 @@ jobs:
                 if (idx < 0) continue;
                 let key = line.slice(0, idx).trim();
                 let val = line.slice(idx + 1).trim();
-
-                const unquote = (s) => {
-                  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
-                    return s.slice(1, -1);
-                  }
-                  return s;
-                };
+                const unquote = (s) =>
+                  (s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))
+                    ? s.slice(1, -1)
+                    : s;
                 key = unquote(key);
                 val = unquote(val);
                 map[key] = val;
@@ -131,20 +128,36 @@ jobs:
               let ents = [];
               try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
               for (const e of ents) {
-                const p = path.join(dir, e.name);
-                if (e.isDirectory()) out = out.concat(walk(p));
-                else if (e.isFile()) out.push(p);
+                const full = path.join(dir, e.name);
+                try { if (fs.lstatSync(full).isSymbolicLink()) continue; } catch {}
+                if (e.name === '.git') continue;
+
+                if (e.isDirectory()) out = out.concat(walk(full));
+                else if (e.isFile()) out.push(full);
               }
               return out;
             }
 
             function replaceInFile(file) {
-              let content = fs.readFileSync(file, 'utf8');
+              if (file.includes(`${path.sep}.git${path.sep}`) || file.endsWith(`${path.sep}.git`)) return;
+
+              // best-effort small guard: ignore huge files (>5MB)
+              try {
+                const { size } = fs.statSync(file);
+                if (size > 5 * 1024 * 1024) return;
+              } catch {}
+
+              let content;
+              try { content = fs.readFileSync(file, 'utf8'); }
+              catch { return; } // binary/permission issues — skip
+
               for (const [search, replace] of Object.entries(replacements)) {
                 if (!search) continue;
                 content = content.split(search).join(String(replace));
               }
-              fs.writeFileSync(file, content, 'utf8');
+
+              try { fs.writeFileSync(file, content, 'utf8'); }
+              catch { /* readonly or perms — skip */ }
             }
 
             const files = walk(root);
@@ -173,13 +186,10 @@ jobs:
                 if (idx < 0) continue;
                 let key = line.slice(0, idx).trim();
                 let val = line.slice(idx + 1).trim();
-
-                const unquote = (s) => {
-                  if ((s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))) {
-                    return s.slice(1, -1);
-                  }
-                  return s;
-                };
+                const unquote = (s) =>
+                  (s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))
+                    ? s.slice(1, -1)
+                    : s;
                 key = unquote(key);
                 val = unquote(val);
                 map[key] = val;
@@ -188,9 +198,16 @@ jobs:
             }
 
             const replacements = parseSimpleYamlMap(yamlRaw);
+            const looksLikePath = (s) => typeof s === 'string' && (s.includes('/') || s.startsWith('.') || s.startsWith('_'));
+            const isGitPath = (p) => p === '.git' || p.startsWith('.git/');
 
             function movePath(src, dest) {
               if (!src || !dest || src === dest) return;
+              // never touch .git
+              const relSrc = path.relative(root, src).replace(/\\/g, '/');
+              const relDst = path.relative(root, dest).replace(/\\/g, '/');
+              if (isGitPath(relSrc) || isGitPath(relDst)) return;
+
               if (!fs.existsSync(src)) return;
 
               const destDir = path.dirname(dest);
@@ -211,8 +228,6 @@ jobs:
               }
               fs.renameSync(src, dest);
             }
-
-            const looksLikePath = (s) => typeof s === 'string' && (s.includes('/') || s.startsWith('.') || s.startsWith('_'));
 
             for (const [search, replace] of Object.entries(replacements)) {
               if (!looksLikePath(search) || !looksLikePath(replace)) continue;
@@ -352,7 +367,6 @@ jobs:
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.app-token.outputs.token }}
-        # If the app lacks Pages permission/org restriction, this step just warns.
           script: |
             const owner = process.env.ORG;
             const repo  = process.env.NEW_REPO;
@@ -377,7 +391,6 @@ jobs:
               return getCommitSha('main');
             }
 
-            // Create gh-pages if missing
             if (!(await branchExists('gh-pages'))) {
               try {
                 const sha = await baseSha();
@@ -391,7 +404,6 @@ jobs:
               core.info('gh-pages branch already exists.');
             }
 
-            // Configure Pages deployment source
             async function getPages() {
               try {
                 const { data } = await github.request('GET /repos/{owner}/{repo}/pages', { owner, repo });
