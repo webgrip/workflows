@@ -17,6 +17,21 @@ on:
         type: string
         required: false
         default: ""
+      allow_wf_changes:
+        description: "Allow modifying/deleting files under .github/workflows"
+        type: boolean
+        required: false
+        default: false
+      configure_pages:
+        description: "Configure gh-pages branch and GitHub Pages"
+        type: boolean
+        required: false
+        default: false
+      create_openai_project:
+        description: "Create and link an OpenAI Project"
+        type: boolean
+        required: false
+        default: false
     secrets:
       WEBGRIP_CI_CLIENT_ID:
         description: "GitHub App ID (numeric)"
@@ -26,10 +41,10 @@ on:
         required: true
       OPENAI_API_KEY:
         description: "OpenAI API key"
-        required: true
+        required: false
       OPENAI_ORG_ID:
         description: "OpenAI Organization ID"
-        required: true
+        required: false
 
 permissions:
   contents: write
@@ -54,7 +69,7 @@ jobs:
       ORG: ${{ github.repository_owner }}
       NEW_REPO: ${{ inputs.repo_name }}
       APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
-      ALLOW_WF_CHANGES: false
+      ALLOW_WF_CHANGES: ${{ inputs.allow_wf_changes }}
 
     steps:
       - name: Mint GitHub App installation token (owner-based)
@@ -299,24 +314,28 @@ jobs:
               return;
             }
             const title = "chore(init): personalize repository";
-            const body  = "Automated initialization PR from `development` to `main`.";
+            const body  = "Automated initialization PR from \`development\` to \`main\`.";
             const { data: pr } = await github.request('POST /repos/{owner}/{repo}/pulls', {
               owner, repo, title, body, base: 'main', head: 'development', maintainer_can_modify: true, draft: false
             });
             core.info(`PR opened: #${pr.number} ${pr.html_url}`);
 
-      - name: Create OpenAI Project (best-effort)
+      - name: Create OpenAI Project (best-effort, opt-in)
+        if: ${{ inputs.create_openai_project && secrets.OPENAI_API_KEY != '' }}
         id: openai-project
         uses: actions/github-script@v7
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENAI_ORG_ID: ${{ secrets.OPENAI_ORG_ID }}
         with:
+          github-token: ${{ steps.app-token.outputs.token }}
           script: |
-            const apiKey = process.env.OPENAI_API_KEY;
+            const apiKey = process.env.OPENAI_API_KEY || '';
             const orgId  = process.env.OPENAI_ORG_ID || '';
             const repo   = process.env.NEW_REPO;
             const owner  = process.env.ORG;
+
+            if (!apiKey) { core.info('No OPENAI_API_KEY provided; skipping.'); return; }
 
             const headers = {
               'Authorization': `Bearer ${apiKey}`,
@@ -372,10 +391,12 @@ jobs:
               }
             }
 
-      - name: Ensure gh-pages branch, configure Pages, and set homepage (best-effort)
+      - name: Ensure gh-pages branch, configure Pages, and set homepage (best-effort, opt-in)
+        if: ${{ inputs.configure_pages }}
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.app-token.outputs.token }}
+        # continue-on-error prevents noisy failures if the app/org can't use Pages
           script: |
             const owner = process.env.ORG;
             const repo  = process.env.NEW_REPO;
@@ -416,7 +437,7 @@ jobs:
               else { await github.request('POST /repos/{owner}/{repo}/pages', { owner, repo, source }); }
               core.info('Configured GitHub Pages to deploy from gh-pages /.');
             } catch (e) {
-              if (e.status === 403) core.warning('Pages API 403. Ensure App has "Pages: Read and write" and org allows Pages.');
+              if (e.status === 403) core.warning('Pages API 403. Ensure app has "Pages: Read and write" and org allows Pages.');
               else core.warning(`Pages configuration error: ${e.status||''} ${e.message}`);
             }
 
