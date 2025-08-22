@@ -256,7 +256,7 @@ jobs:
             const slug = process.env.APP_BOT_SLUG || 'webgrip-ci';
             const username = `${slug}[bot]`;
             try {
-              const { data: user } = await github.request('GET /users/{username}`, { username });
+              const { data: user } = await github.request('GET /users/{username}', { username });
               core.setOutput('name', username);
               core.setOutput('email', `${user.id}+${username}@users.noreply.github.com`);
             } catch {
