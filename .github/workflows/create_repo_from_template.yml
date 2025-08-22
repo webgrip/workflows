@@ -44,6 +44,8 @@ jobs:
       TOPICS: ${{ inputs.topics }}
       WEBGRIP_CI_CLIENT_ID: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
       WEBGRIP_CI_APP_PRIVATE_KEY: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
+      TEMPLATE_OWNER: ${{ inputs.template_owner }}
+      TEMPLATE_REPO: ${{ inputs.template_repo }}
 
     steps:
       - name: Mint GitHub App installation token (owner-based)
