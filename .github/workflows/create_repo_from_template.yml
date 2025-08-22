@@ -15,6 +15,15 @@ on:
         description: 'Name of the new repository to be created'
         type: string
         required: true
+      visibility:
+        description: 'Visibility of the new repository'
+        type: string
+        required: true
+        default: 'private'
+      topics:
+        description: 'Comma-separated list of topics to apply to the new repository'
+        type: string
+        required: false
     secrets:
       WEBGRIP_CI_CLIENT_ID:
         description: "GitHub App ID (numeric)"
@@ -31,6 +40,8 @@ jobs:
     env:
       ORG: ${{ github.repository_owner }}
       NEW_REPO: ${{ inputs.new_repo_name }}
+      VISIBILITY: ${{ inputs.visibility }}
+      TOPICS: ${{ inputs.topics }}
       WEBGRIP_CI_CLIENT_ID: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
       WEBGRIP_CI_APP_PRIVATE_KEY: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
 
@@ -49,34 +60,36 @@ jobs:
         with:
             github-token: ${{ steps.app-token.outputs.token }}
             script: |
-                const org = process.env.ORG;
-                const name = process.env.NEW_REPO;
-                const isPrivate = (process.env.VISIBILITY !== 'public');
-                const { data: repo } = await github.request('POST /repos/{template_owner}/{template_repo}/generate', {
-                    template_owner: process.env.TEMPLATE_OWNER,
-                    template_repo: process.env.TEMPLATE_REPO,
-                    owner: org,
-                    name,
-                    private: isPrivate,
-                    include_all_branches: false
-                });
-                core.info(`Generated repo: ${repo.full_name}`);
-                const topics = ["application"];
-                await github.request('PUT /repos/{owner}/{repo}/topics', {
-                    owner: org,
-                    repo: name,
-                    names: topics
-                });
-                core.info(`Added topics: ${topics.join(", ")}`);
-                await github.request('PATCH /repos/{owner}/{repo}', {
-                    owner: process.env.ORG,
-                    repo: process.env.NEW_REPO,
-                    allow_squash_merge: false,
-                    allow_merge_commit: false,
-                    allow_rebase_merge: true,
-                    delete_branch_on_merge: true
-                });
-                core.info(`Configured merge options for ${org}/${name}.`);
+              const org = process.env.ORG;
+              const name = process.env.NEW_REPO;
+              const isPrivate = (process.env.VISIBILITY !== 'public');
+              const { data: repo } = await github.request('POST /repos/{template_owner}/{template_repo}/generate', {
+                template_owner: process.env.TEMPLATE_OWNER,
+                template_repo: process.env.TEMPLATE_REPO,
+                owner: org,
+                name,
+                private: isPrivate,
+                include_all_branches: false
+              });
+              core.info(`Generated repo: ${repo.full_name}`);
+
+              const topics = process.env.TOPICS.split(",").map(t => t.trim());
+              await github.request('PUT /repos/{owner}/{repo}/topics', {
+                  owner: org,
+                  repo: name,
+                  names: topics
+              });
+              core.info(`Added topics: ${topics.join(", ")}`);
+              
+              await github.request('PATCH /repos/{owner}/{repo}', {
+                  owner: process.env.ORG,
+                  repo: process.env.NEW_REPO,
+                  allow_squash_merge: false,
+                  allow_merge_commit: false,
+                  allow_rebase_merge: true,
+                  delete_branch_on_merge: true
+              });
+              core.info(`Configured merge options for ${org}/${name}.`);
 
       - name: Wait for initial default branch
         id: wait-default-branch
