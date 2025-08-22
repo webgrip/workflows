@@ -1,0 +1,343 @@
+name: "[Call] Create repository from template"
+
+on:
+  workflow_call:
+    inputs:
+      repo_name:
+        description: "Name of the template repository"
+        type: string
+        required: true
+      delete_files:
+        description: "Comma-separated list of files to delete from the new repository"
+        type: string
+        required: false
+      replace_values:
+        description: "YAML formatted string of values to replace in the new repository"
+        type: string
+        required: false
+    secrets:
+      WEBGRIP_CI_CLIENT_ID:
+        description: "GitHub App ID (numeric)"
+        required: true
+      WEBGRIP_CI_APP_PRIVATE_KEY:
+        description: "GitHub App private key (PEM)"
+        required: true
+      OPENAI_API_KEY:
+        description: "OpenAI API key"
+        required: true
+      OPENAI_ORG_ID:
+        description: "OpenAI Organization ID"
+        required: true
+
+jobs:
+  create-repo-from-template:
+    name: "Create repository from template"
+    runs-on: arc-runner-set
+
+    env:
+      ORG: ${{ github.repository_owner }}
+      NEW_REPO: ${{ inputs.repo_name }}
+      WEBGRIP_CI_CLIENT_ID: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
+      WEBGRIP_CI_APP_PRIVATE_KEY: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
+      APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
+
+    steps:
+      - name: Mint GitHub App installation token (owner-based)
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
+          private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
+          owner: ${{ env.ORG }}
+
+      - name: Check out new repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.ORG }}/${{ env.NEW_REPO }}
+          ref: development
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+
+      # delete the files that are in the delete_files input, comma separated, making sure that deep files work:
+      - name: Delete files
+        run: |
+          IFS=',' read -ra files <<< "${{ inputs.delete_files }}"
+          for file in "${files[@]}"; do
+            rm -rf "$file"
+          done
+
+      # Replace values that are in the yaml inside of inputs.replace_values inside all files with a javascript script
+      - name: "Replace values"
+        if: ${{ inputs.replace_values }}
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const root = process.env.GITHUB_WORKSPACE || process.cwd();
+            const replacements = JSON.parse(process.env.REPLACE_VALUES);
+            function replaceInFile(file) {
+              let content = fs.readFileSync(file, 'utf8');
+              for (const [search, replace] of Object.entries(replacements)) {
+                content = content.split(search).join(replace);
+              }
+              fs.writeFileSync(file, content, 'utf8');
+            }
+            const all = walk(root);
+            const files = all.filter(isFile);
+            for (const file of files) {
+              replaceInFile(file);
+            }
+
+      - name: "Rename/Merge paths"
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            function movePath(src, dest) {
+              if (fs.existsSync(src)) {
+                const destDir = path.dirname(dest);
+                if (!fs.existsSync(destDir)) {
+                  fs.mkdirSync(destDir, { recursive: true });
+                }
+                fs.renameSync(src, dest);
+              }
+            }
+
+            const replacements = JSON.parse(process.env.REPLACE_VALUES);
+            for (const [search, replace] of Object.entries(replacements)) {
+              movePath(path.join(root, search), path.join(root, replace));
+            }
+
+      - name: Resolve bot noreply email
+        id: bot-email
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const slug = process.env.APP_BOT_SLUG;
+            const username = `${slug}[bot]`;
+            try {
+              const { data: user } = await github.request('GET /users/{username}', { username });
+              core.setOutput('name', username);
+              core.setOutput('email', `${user.id}+${username}@users.noreply.github.com`);
+            } catch {
+              core.setOutput('name', 'github-actions[bot]');
+              core.setOutput('email', '41898282+github-actions[bot]@users.noreply.github.com');
+            }
+
+      - name: Authenticate git remote for push
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${ORG}/${NEW_REPO}.git"
+
+      - name: Commit and push to development
+        run: |
+          git config user.name  "${{ steps.bot-email.outputs.name }}"
+          git config user.email "${{ steps.bot-email.outputs.email }}"
+          git add -A
+          git commit -m "chore(init): personalize ${NEW_REPO}" || echo "Nothing to commit"
+          git push origin HEAD:development
+
+      - name: Open PR development
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const org  = process.env.ORG;
+            const repo = process.env.NEW_REPO;
+
+            const q = `
+              query($org:String!, $repo:String!) {
+                repository(owner:$org, name:$repo) { id }
+              }
+            `;
+            const r = await github.graphql(q, { org, repo });
+            const repositoryId = r.repository.id;
+
+            const m = `
+              mutation($repositoryId:ID!, $title:String!, $body:String, $base:String!, $head:String!, $draft:Boolean) {
+                createPullRequest(input:{
+                  repositoryId:$repositoryId,
+                  title:$title,
+                  body:$body,
+                  baseRefName:$base,
+                  headRefName:$head,
+                  draft:$draft,
+                  maintainerCanModify:true
+                }) {
+                  pullRequest { number url }
+                }
+              }
+            `;
+            const title = "chore(init): personalize repository";
+            const body  = "Automated initialization PR from \`development\` to \`main\`.";
+            const pr = await github.graphql(m, {
+              repositoryId,
+              title,
+              body,
+              base: "main",
+              head: "development",
+              draft: false
+            });
+            core.info(`PR opened: #${pr.createPullRequest.pullRequest.number} ${pr.createPullRequest.pullRequest.url}`);
+
+      - name: Create OpenAI Project
+        id: openai-project
+        uses: actions/github-script@v7
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ORG_ID: ${{ secrets.OPENAI_ORG_ID }}
+        with:
+          script: |
+            const apiKey = process.env.OPENAI_API_KEY;
+            const orgId  = process.env.OPENAI_ORG_ID || '';
+            const repo   = process.env.NEW_REPO;
+            const owner  = process.env.ORG;
+
+            const headers = {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+            };
+            if (orgId) headers['OpenAI-Organization'] = orgId;
+
+            const createRes = await fetch('https://api.openai.com/v1/projects', {
+              method: 'POST', headers,
+              body: JSON.stringify({
+                name: repo,
+                description: `Auto-created for ${owner}/${repo}`
+              })
+            });
+            const txt = await createRes.text();
+            if (!createRes.ok) { core.warning(`OpenAI project create failed (${createRes.status}): ${txt}`); return; }
+            let data = {}; try { data = JSON.parse(txt); } catch {}
+            const projectId = data.id || data.project_id || '';
+            if (!projectId) { core.warning('OpenAI project created but no id returned.'); return; }
+            core.setOutput('project_id', projectId);
+            core.info(`OpenAI project id: ${projectId}`);
+
+            try {
+              const linkRes = await fetch(`https://api.openai.com/v1/projects/${projectId}`, {
+                method: 'PATCH', headers,
+                body: JSON.stringify({
+                  metadata: { github_repo: `${owner}/${repo}`, github_url: `https://github.com/${owner}/${repo}` }
+                })
+              });
+              if (!linkRes.ok) core.warning(`OpenAI project link warning (${linkRes.status})`);
+            } catch (e) {
+              core.warning(`OpenAI project link error: ${e.message}`);
+            }
+
+      - name: Store OPENAI_PROJECT_ID repo variable (best-effort)
+        if: ${{ steps.openai-project.outputs.project_id != '' }}
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const owner = process.env.ORG;
+            const repo  = process.env.NEW_REPO;
+            const varName = 'OPENAI_PROJECT_ID';
+            const value   = `${{ steps.openai-project.outputs.project_id }}`;
+            try {
+              await github.request('POST /repos/{owner}/{repo}/actions/variables', {
+                owner, repo, name: varName, value
+              });
+              core.info(`Created repo variable ${varName}.`);
+            } catch (e) {
+              if (e.status === 422) {
+                await github.request('PATCH /repos/{owner}/{repo}/actions/variables/{name}', {
+                  owner, repo, name: varName, value
+                });
+                core.info(`Updated repo variable ${varName}.`);
+              } else {
+                core.warning(`Could not set repo variable ${varName}: ${e.status}`);
+              }
+            }
+
+      - name: Ensure gh-pages branch, configure Pages, and set homepage
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const owner = process.env.ORG;
+            const repo  = process.env.NEW_REPO;
+
+            async function branchExists(branch) {
+              try {
+                await github.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch });
+                return true;
+              } catch (e) {
+                if (e.status === 404) return false;
+                throw e;
+              }
+            }
+
+            async function getBaseSha() {
+              try {
+                const { data } = await github.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch: 'development' });
+                return data.commit.sha;
+              } catch {
+                const { data } = await github.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch: 'main' });
+                return data.commit.sha;
+              }
+            }
+
+            if (!(await branchExists('gh-pages'))) {
+              const sha = await getBaseSha();
+              try {
+                await github.request('POST /repos/{owner}/{repo}/git/refs', {
+                  owner, repo, ref: 'refs/heads/gh-pages', sha
+                });
+                core.info('Created gh-pages branch.');
+              } catch (e) {
+                core.setFailed(`Failed to create gh-pages branch: ${e.status} ${e.message}`);
+                return;
+              }
+            } else {
+              core.info('gh-pages branch already exists.');
+            }
+
+            async function getPages() {
+              try {
+                const { data } = await github.request('GET /repos/{owner}/{repo}/pages', { owner, repo });
+                return data;
+              } catch (e) {
+                if (e.status === 404) return null;
+                throw e;
+              }
+            }
+
+            const source = { branch: 'gh-pages', path: '/' };
+            const existing = await getPages();
+
+            try {
+              if (existing) {
+                await github.request('PUT /repos/{owner}/{repo}/pages', { owner, repo, source });
+                core.info('Updated GitHub Pages to deploy from gh-pages /.');
+              } else {
+                await github.request('POST /repos/{owner}/{repo}/pages', { owner, repo, source });
+                core.info('Enabled GitHub Pages to deploy from gh-pages /.');
+              }
+            } catch (e) {
+              if (e.status === 403) {
+                core.warning('Pages API returned 403. Ensure the GitHub App has "Pages: Read and write" permission and Pages are allowed for the org.');
+              } else {
+                throw e;
+              }
+            }
+
+            let pagesUrl = `https://${owner}.github.io/${repo}/`;
+            try {
+              const pagesInfo = await getPages();
+              if (pagesInfo?.html_url) pagesUrl = pagesInfo.html_url;
+            } catch {}
+            await github.request('PATCH /repos/{owner}/{repo}', {
+              owner, repo, homepage: pagesUrl
+            });
+            core.info(`Set repository homepage to ${pagesUrl}`);
