@@ -8,12 +8,12 @@ on:
         type: string
         required: true
       delete_files:
-        description: "Comma-separated list of files/paths to delete from the new repository"
+        description: "Comma-separated list of files/paths to delete"
         type: string
         required: false
         default: ""
       replace_values:
-        description: "YAML mapping of find->replace values (also used as oldPath->newPath for renames)"
+        description: "YAML mapping of find->replace (also used as oldPath->newPath for renames)"
         type: string
         required: false
         default: ""
@@ -54,6 +54,7 @@ jobs:
       ORG: ${{ github.repository_owner }}
       NEW_REPO: ${{ inputs.repo_name }}
       APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
+      ALLOW_WF_CHANGES: false
 
     steps:
       - name: Mint GitHub App installation token (owner-based)
@@ -81,8 +82,13 @@ jobs:
           input="${input//$'\n'/,}"
           IFS=',' read -ra files <<< "$input"
           for file in "${files[@]}"; do
-            f="$(echo "$file" | xargs)"   # trim
+            f="$(echo "$file" | xargs)"
             [[ -z "$f" ]] && continue
+            # Block workflow deletions unless explicitly allowed
+            if [[ "${ALLOW_WF_CHANGES}" != "true" && "$f" == .github/workflows* ]]; then
+              echo "Skipping deletion in .github/workflows (guard active): $f"
+              continue
+            fi
             echo "Deleting: $f"
             rm -rf -- "$f"
           done
@@ -92,6 +98,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           REPLACE_VALUES_YAML: ${{ inputs.replace_values }}
+          ALLOW_WF_CHANGES: ${{ env.ALLOW_WF_CHANGES }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -100,6 +107,7 @@ jobs:
 
             const root = process.env.GITHUB_WORKSPACE || process.cwd();
             const yamlRaw = (process.env.REPLACE_VALUES_YAML || '').trim();
+            const allowWF = (process.env.ALLOW_WF_CHANGES || '').toLowerCase() === 'true';
 
             function parseSimpleYamlMap(yaml) {
               const map = {};
@@ -122,16 +130,22 @@ jobs:
             }
 
             const replacements = parseSimpleYamlMap(yamlRaw);
+            const shouldSkip = (p) => {
+              const rel = path.relative(root, p).replace(/\\/g, '/');
+              if (rel === '.git' || rel.startsWith('.git/')) return true;
+              if (!allowWF && (rel === '.github/workflows' || rel.startsWith('.github/workflows/'))) return true;
+              return false;
+            };
 
             function walk(dir) {
+              if (shouldSkip(dir)) return [];
               let out = [];
               let ents = [];
               try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
               for (const e of ents) {
                 const full = path.join(dir, e.name);
                 try { if (fs.lstatSync(full).isSymbolicLink()) continue; } catch {}
-                if (e.name === '.git') continue;
-
+                if (shouldSkip(full)) continue;
                 if (e.isDirectory()) out = out.concat(walk(full));
                 else if (e.isFile()) out.push(full);
               }
@@ -139,25 +153,18 @@ jobs:
             }
 
             function replaceInFile(file) {
-              if (file.includes(`${path.sep}.git${path.sep}`) || file.endsWith(`${path.sep}.git`)) return;
-
-              // best-effort small guard: ignore huge files (>5MB)
+              // tiny guard: skip large files
               try {
                 const { size } = fs.statSync(file);
                 if (size > 5 * 1024 * 1024) return;
               } catch {}
-
               let content;
-              try { content = fs.readFileSync(file, 'utf8'); }
-              catch { return; } // binary/permission issues — skip
-
+              try { content = fs.readFileSync(file, 'utf8'); } catch { return; }
               for (const [search, replace] of Object.entries(replacements)) {
                 if (!search) continue;
                 content = content.split(search).join(String(replace));
               }
-
-              try { fs.writeFileSync(file, content, 'utf8'); }
-              catch { /* readonly or perms — skip */ }
+              try { fs.writeFileSync(file, content, 'utf8'); } catch {}
             }
 
             const files = walk(root);
@@ -168,6 +175,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           REPLACE_VALUES_YAML: ${{ inputs.replace_values }}
+          ALLOW_WF_CHANGES: ${{ env.ALLOW_WF_CHANGES }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -176,6 +184,7 @@ jobs:
 
             const root = process.env.GITHUB_WORKSPACE || process.cwd();
             const yamlRaw = (process.env.REPLACE_VALUES_YAML || '').trim();
+            const allowWF = (process.env.ALLOW_WF_CHANGES || '').toLowerCase() === 'true';
 
             function parseSimpleYamlMap(yaml) {
               const map = {};
@@ -199,15 +208,16 @@ jobs:
 
             const replacements = parseSimpleYamlMap(yamlRaw);
             const looksLikePath = (s) => typeof s === 'string' && (s.includes('/') || s.startsWith('.') || s.startsWith('_'));
-            const isGitPath = (p) => p === '.git' || p.startsWith('.git/');
+            const isBlocked = (rel) => {
+              if (rel === '.git' || rel.startsWith('.git/')) return true;
+              if (!allowWF && (rel === '.github/workflows' || rel.startsWith('.github/workflows/'))) return true;
+              return false;
+            };
 
             function movePath(src, dest) {
-              if (!src || !dest || src === dest) return;
-              // never touch .git
               const relSrc = path.relative(root, src).replace(/\\/g, '/');
               const relDst = path.relative(root, dest).replace(/\\/g, '/');
-              if (isGitPath(relSrc) || isGitPath(relDst)) return;
-
+              if (isBlocked(relSrc) || isBlocked(relDst)) return;
               if (!fs.existsSync(src)) return;
 
               const destDir = path.dirname(dest);
@@ -233,6 +243,7 @@ jobs:
               if (!looksLikePath(search) || !looksLikePath(replace)) continue;
               const src = path.join(root, search);
               const dst = path.join(root, replace);
+              if (src === dst) continue;
               movePath(src, dst);
             }
 
@@ -245,7 +256,7 @@ jobs:
             const slug = process.env.APP_BOT_SLUG || 'webgrip-ci';
             const username = `${slug}[bot]`;
             try {
-              const { data: user } = await github.request('GET /users/{username}', { username });
+              const { data: user } = await github.request('GET /users/{username}`, { username });
               core.setOutput('name', username);
               core.setOutput('email', `${user.id}+${username}@users.noreply.github.com`);
             } catch {
@@ -280,7 +291,6 @@ jobs:
           script: |
             const owner = process.env.ORG;
             const repo  = process.env.NEW_REPO;
-
             const { data: prs } = await github.request('GET /repos/{owner}/{repo}/pulls', {
               owner, repo, state: 'open', base: 'main', head: `${owner}:development`
             });
@@ -288,7 +298,6 @@ jobs:
               core.info(`PR already open: #${prs[0].number} ${prs[0].html_url}`);
               return;
             }
-
             const title = "chore(init): personalize repository";
             const body  = "Automated initialization PR from `development` to `main`.";
             const { data: pr } = await github.request('POST /repos/{owner}/{repo}/pulls', {
@@ -375,72 +384,43 @@ jobs:
               try {
                 await github.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch });
                 return true;
-              } catch (e) {
-                if (e.status === 404) return false;
-                throw e;
-              }
+              } catch (e) { if (e.status === 404) return false; throw e; }
             }
-
-            async function getCommitSha(branch) {
+            async function getSha(branch) {
               const { data } = await github.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch });
               return data.commit.sha;
             }
+            const baseSha = await (await branchExists('development') ? getSha('development') : getSha('main'));
 
-            async function baseSha() {
-              if (await branchExists('development')) return getCommitSha('development');
-              return getCommitSha('main');
-            }
-
-            if (!(await branchExists('gh-pages'))) {
-              try {
-                const sha = await baseSha();
-                await github.request('POST /repos/{owner}/{repo}/git/refs', { owner, repo, ref: 'refs/heads/gh-pages', sha });
-                core.info('Created gh-pages branch.');
-              } catch (e) {
-                core.warning(`Failed to create gh-pages branch: ${e.status || ''} ${e.message}`);
-                return;
-              }
-            } else {
+            try {
+              await github.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch: 'gh-pages' });
               core.info('gh-pages branch already exists.');
+            } catch (e) {
+              if (e.status === 404) {
+                await github.request('POST /repos/{owner}/{repo}/git/refs', { owner, repo, ref: 'refs/heads/gh-pages', sha: baseSha });
+                core.info('Created gh-pages branch.');
+              } else { core.warning(`Failed to check/create gh-pages: ${e.status||''} ${e.message}`); return; }
             }
 
             async function getPages() {
               try {
                 const { data } = await github.request('GET /repos/{owner}/{repo}/pages', { owner, repo });
                 return data;
-              } catch (e) {
-                if (e.status === 404) return null;
-                throw e;
-              }
+              } catch (e) { if (e.status === 404) return null; throw e; }
             }
 
             const source = { branch: 'gh-pages', path: '/' };
             const existing = await getPages();
-
             try {
-              if (existing) {
-                await github.request('PUT /repos/{owner}/{repo}/pages', { owner, repo, source });
-                core.info('Updated GitHub Pages to deploy from gh-pages /.');
-              } else {
-                await github.request('POST /repos/{owner}/{repo}/pages', { owner, repo, source });
-                core.info('Enabled GitHub Pages to deploy from gh-pages /.');
-              }
+              if (existing) { await github.request('PUT /repos/{owner}/{repo}/pages', { owner, repo, source }); }
+              else { await github.request('POST /repos/{owner}/{repo}/pages', { owner, repo, source }); }
+              core.info('Configured GitHub Pages to deploy from gh-pages /.');
             } catch (e) {
-              if (e.status === 403) {
-                core.warning('Pages API returned 403. Ensure the GitHub App has "Pages: Read and write" and Pages are allowed for the org.');
-              } else {
-                core.warning(`Pages configuration error: ${e.status || ''} ${e.message}`);
-              }
+              if (e.status === 403) core.warning('Pages API 403. Ensure App has "Pages: Read and write" and org allows Pages.');
+              else core.warning(`Pages configuration error: ${e.status||''} ${e.message}`);
             }
 
             let pagesUrl = `https://${owner}.github.io/${repo}/`;
-            try {
-              const info = await getPages();
-              if (info?.html_url) pagesUrl = info.html_url;
-            } catch {}
-            try {
-              await github.request('PATCH /repos/{owner}/{repo}', { owner, repo, homepage: pagesUrl });
-              core.info(`Set repository homepage to ${pagesUrl}`);
-            } catch (e) {
-              core.warning(`Could not set repository homepage: ${e.status || ''} ${e.message}`);
-            }
+            try { const info = await getPages(); if (info?.html_url) pagesUrl = info.html_url; } catch {}
+            try { await github.request('PATCH /repos/{owner}/{repo}', { owner, repo, homepage: pagesUrl }); } catch {}
+            core.info(`Set repository homepage to ${pagesUrl}`);

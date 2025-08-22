@@ -1,29 +1,30 @@
-name: '[Call] Create repository from template'
+name: "[Call] Create repository from template"
 
 on:
   workflow_call:
     inputs:
       template_owner:
-        description: 'Owner of the template repository'
+        description: "Owner of the template repository"
         type: string
         required: true
       template_repo:
-        description: 'Name of the template repository'
+        description: "Name of the template repository"
         type: string
         required: true
       new_repo_name:
-        description: 'Name of the new repository to be created'
+        description: "Name of the new repository to be created"
         type: string
         required: true
       visibility:
-        description: 'Visibility of the new repository'
+        description: "Visibility of the new repository"
         type: string
         required: true
-        default: 'private'
+        default: "private"
       topics:
-        description: 'Comma-separated list of topics to apply to the new repository'
+        description: "Comma-separated list of topics to apply to the new repository"
         type: string
         required: false
+        default: ""
     secrets:
       WEBGRIP_CI_CLIENT_ID:
         description: "GitHub App ID (numeric)"
@@ -32,9 +33,15 @@ on:
         description: "GitHub App private key (PEM)"
         required: true
 
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  pages: write
+
 jobs:
   create-repo-from-template:
-    name: 'create repository'
+    name: "create repository"
     runs-on: arc-runner-set
 
     env:
@@ -42,8 +49,6 @@ jobs:
       NEW_REPO: ${{ inputs.new_repo_name }}
       VISIBILITY: ${{ inputs.visibility }}
       TOPICS: ${{ inputs.topics }}
-      WEBGRIP_CI_CLIENT_ID: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
-      WEBGRIP_CI_APP_PRIVATE_KEY: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
       TEMPLATE_OWNER: ${{ inputs.template_owner }}
       TEMPLATE_REPO: ${{ inputs.template_repo }}
 
@@ -56,7 +61,7 @@ jobs:
           private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
           owner: ${{ env.ORG }}
 
-      - name: Create repo from template (no history) + set topics + merge options
+      - name: Create repo from template + topics + merge options
         id: gen
         uses: actions/github-script@v7
         with:
@@ -72,21 +77,16 @@ jobs:
               owner: org,
               name,
               private: isPrivate,
-              include_all_branches: false,
+              include_all_branches: false
             });
             core.info(`Generated repo: ${repo.full_name}`);
 
-            const topicsRaw = process.env.TOPICS || '';
-            const topics = topicsRaw
+            const topics = (process.env.TOPICS || '')
               .split(',')
               .map(t => t.trim())
               .filter(Boolean);
             if (topics.length) {
-              await github.request('PUT /repos/{owner}/{repo}/topics', {
-                owner: org,
-                repo: name,
-                names: topics,
-              });
+              await github.request('PUT /repos/{owner}/{repo}/topics', { owner: org, repo: name, names: topics });
               core.info(`Added topics: ${topics.join(', ')}`);
             } else {
               core.info('No topics provided.');
@@ -98,7 +98,7 @@ jobs:
               allow_squash_merge: false,
               allow_merge_commit: false,
               allow_rebase_merge: true,
-              delete_branch_on_merge: true,
+              delete_branch_on_merge: false
             });
             core.info(`Configured merge options for ${org}/${name}.`);
 
@@ -145,7 +145,6 @@ jobs:
             core.setFailed('Timed out waiting for the new repo default branch and first commit.');
 
       - name: Create development branch from initial commit
-        id: create-dev-branch
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.app-token.outputs.token }}
@@ -154,23 +153,16 @@ jobs:
             const repo  = process.env.NEW_REPO;
             const sha   = process.env.INITIAL_SHA;
 
-            // If it already exists, do nothing
             try {
-              await github.request('GET /repos/{owner}/{repo}/branches/{branch}', {
-                owner, repo, branch: 'development'
-              });
+              await github.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch: 'development' });
               core.info('Branch "development" already exists.');
             } catch (e) {
               if (e.status === 404) {
                 await github.request('POST /repos/{owner}/{repo}/git/refs', {
-                  owner, repo,
-                  ref: 'refs/heads/development',
-                  sha,
+                  owner, repo, ref: 'refs/heads/development', sha
                 });
                 core.info(`Created branch "development" at ${sha}.`);
-              } else {
-                throw e;
-              }
+              } else { throw e; }
             }
 
       - name: Set default branch to development
@@ -181,7 +173,7 @@ jobs:
             await github.request('PATCH /repos/{owner}/{repo}', {
               owner: process.env.ORG,
               repo: process.env.NEW_REPO,
-              default_branch: 'development',
+              default_branch: 'development'
             });
             core.info('Default branch set to development.');
 
@@ -193,23 +185,15 @@ jobs:
             const owner = process.env.ORG;
             const repo  = process.env.NEW_REPO;
 
-            async function upsertRuleset() {
+            async function upsert() {
               const payload = {
                 name: "Default protections (main & development)",
                 target: "branch",
                 enforcement: "active",
-                conditions: {
-                  ref_name: {
-                    include: ["refs/heads/main", "refs/heads/development"],
-                    exclude: []
-                  }
-                },
-                bypass_actors: [
-                  { actor_id: 1, actor_type: "OrganizationAdmin", bypass_mode: "always" }
-                ],
+                conditions: { ref_name: { include: ["refs/heads/main", "refs/heads/development"], exclude: [] } },
+                bypass_actors: [{ actor_id: 1, actor_type: "OrganizationAdmin", bypass_mode: "always" }],
                 rules: [
-                  {
-                    type: "pull_request",
+                  { type: "pull_request",
                     parameters: {
                       automatic_copilot_code_review_enabled: true,
                       dismiss_stale_reviews_on_push: true,
@@ -219,15 +203,9 @@ jobs:
                       required_review_thread_resolution: true
                     }
                   },
-                  {
-                    type: "branch_name_pattern",
-                    parameters: {
-                      name: "Branch name pattern",
-                      negate: false,
-                      operator: "regex",
-                      pattern: "^(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)\/.+"
-                    }
-                  },
+                  { type: "branch_name_pattern",
+                    parameters: { name: "Branch name pattern", negate: false, operator: "regex",
+                      pattern: "^((main|development)|(feat|fix|chore|docs|style|refactor|perf|test|build|ci|revert)\\/.+)$" } },
                   { type: "non_fast_forward" },
                   { type: "required_linear_history" },
                   { type: "deletion" }
@@ -236,18 +214,12 @@ jobs:
 
               const list = await github.request('GET /repos/{owner}/{repo}/rulesets', { owner, repo });
               const existing = (list.data || []).find(r => r.name === payload.name);
-
               if (existing) {
-                await github.request('PATCH /repos/{owner}/{repo}/rulesets/{ruleset_id}', {
-                  owner, repo, ruleset_id: existing.id, ...payload
-                });
+                await github.request('PATCH /repos/{owner}/{repo}/rulesets/{ruleset_id}', { owner, repo, ruleset_id: existing.id, ...payload });
                 core.info(`Updated ruleset '${payload.name}' (id: ${existing.id}).`);
               } else {
-                const created = await github.request('POST /repos/{owner}/{repo}/rulesets', {
-                  owner, repo, ...payload
-                });
+                const created = await github.request('POST /repos/{owner}/{repo}/rulesets', { owner, repo, ...payload });
                 core.info(`Created ruleset '${payload.name}' (id: ${created.data.id}).`);
               }
             }
-
-            await upsertRuleset();
+            await upsert();
