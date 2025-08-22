@@ -4,17 +4,19 @@ on:
   workflow_call:
     inputs:
       repo_name:
-        description: "Name of the template repository"
+        description: "Name of the new repository"
         type: string
         required: true
       delete_files:
-        description: "Comma-separated list of files to delete from the new repository"
+        description: "Comma-separated list of files/paths to delete from the new repository"
         type: string
         required: false
+        default: ""
       replace_values:
-        description: "YAML formatted string of values to replace in the new repository"
+        description: "YAML mapping of find->replace values (also used as oldPath->newPath for renames)"
         type: string
         required: false
+        default: ""
     secrets:
       WEBGRIP_CI_CLIENT_ID:
         description: "GitHub App ID (numeric)"
@@ -29,16 +31,28 @@ on:
         description: "OpenAI Organization ID"
         required: true
 
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  pages: write
+
+concurrency:
+  group: bootstrap-${{ github.repository_id }}-${{ inputs.repo_name }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
 jobs:
   bootstrap-repo:
-    name: "bootstrap"
+    name: bootstrap
     runs-on: arc-runner-set
 
     env:
       ORG: ${{ github.repository_owner }}
       NEW_REPO: ${{ inputs.repo_name }}
-      WEBGRIP_CI_CLIENT_ID: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
-      WEBGRIP_CI_APP_PRIVATE_KEY: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
       APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
 
     steps:
@@ -50,7 +64,7 @@ jobs:
           private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
           owner: ${{ env.ORG }}
 
-      - name: Check out new repo
+      - name: Check out new repo (development)
         uses: actions/checkout@v4
         with:
           repository: ${{ env.ORG }}/${{ env.NEW_REPO }}
@@ -59,58 +73,101 @@ jobs:
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
-      # delete the files that are in the delete_files input, comma separated, making sure that deep files work:
-      - name: Delete files
+      - name: Delete files (if provided)
+        if: ${{ inputs.delete_files != '' }}
         run: |
+          set -euo pipefail
           IFS=',' read -ra files <<< "${{ inputs.delete_files }}"
           for file in "${files[@]}"; do
-            rm -rf "$file"
+            f="$(echo "$file" | xargs)"   # trim whitespace
+            [[ -z "$f" ]] && continue
+            echo "Deleting: $f"
+            rm -rf -- "$f"
           done
 
-      # Replace values that are in the yaml inside of inputs.replace_values inside all files with a javascript script
-      - name: "Replace values"
-        if: ${{ inputs.replace_values }}
+      - name: Replace values across repository (if provided)
+        if: ${{ inputs.replace_values != '' }}
         uses: actions/github-script@v7
+        env:
+          # Convert YAML -> JSON for the script; default to {}
+          REPLACE_VALUES: ${{ toJson(fromYaml(inputs.replace_values)) }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const fs = require('fs');
             const path = require('path');
+
             const root = process.env.GITHUB_WORKSPACE || process.cwd();
-            const replacements = JSON.parse(process.env.REPLACE_VALUES);
+            /** @type {Record<string,string>} */
+            const replacements = JSON.parse(process.env.REPLACE_VALUES || '{}');
+
+            function walk(dir) {
+              let out = [];
+              let ents = [];
+              try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+              for (const e of ents) {
+                const p = path.join(dir, e.name);
+                if (e.isDirectory()) out = out.concat(walk(p));
+                else if (e.isFile()) out.push(p);
+              }
+              return out;
+            }
+
             function replaceInFile(file) {
               let content = fs.readFileSync(file, 'utf8');
               for (const [search, replace] of Object.entries(replacements)) {
-                content = content.split(search).join(replace);
+                if (!search) continue;
+                // simple global replacement
+                content = content.split(search).join(String(replace));
               }
               fs.writeFileSync(file, content, 'utf8');
             }
-            const all = walk(root);
-            const files = all.filter(isFile);
-            for (const file of files) {
-              replaceInFile(file);
-            }
 
-      - name: "Rename/Merge paths"
+            const files = walk(root);
+            for (const file of files) replaceInFile(file);
+
+      - name: Rename / merge paths based on replace_values keys (if provided)
+        if: ${{ inputs.replace_values != '' }}
         uses: actions/github-script@v7
+        env:
+          REPLACE_VALUES: ${{ toJson(fromYaml(inputs.replace_values)) }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const fs = require('fs');
             const path = require('path');
 
+            const root = process.env.GITHUB_WORKSPACE || process.cwd();
+            /** @type {Record<string,string>} */
+            const replacements = JSON.parse(process.env.REPLACE_VALUES || '{}');
+
             function movePath(src, dest) {
-              if (fs.existsSync(src)) {
-                const destDir = path.dirname(dest);
-                if (!fs.existsSync(destDir)) {
-                  fs.mkdirSync(destDir, { recursive: true });
+              if (!src || !dest || src === dest) return;
+              if (!fs.existsSync(src)) return;
+
+              const destDir = path.dirname(dest);
+              fs.mkdirSync(destDir, { recursive: true });
+
+              if (fs.existsSync(dest)) {
+                const statSrc = fs.statSync(src);
+                const statDst = fs.statSync(dest);
+                if (statSrc.isDirectory() && statDst.isDirectory()) {
+                  for (const entry of fs.readdirSync(src)) {
+                    movePath(path.join(src, entry), path.join(dest, entry));
+                  }
+                  fs.rmSync(src, { recursive: true, force: true });
+                  return;
+                } else {
+                  fs.rmSync(dest, { recursive: true, force: true });
                 }
-                fs.renameSync(src, dest);
               }
+              fs.renameSync(src, dest);
             }
 
-            const replacements = JSON.parse(process.env.REPLACE_VALUES);
+            // Interpret mapping as oldPath -> newPath when both look like paths
             for (const [search, replace] of Object.entries(replacements)) {
+              const looksLikePath = (s) => typeof s === 'string' && (s.includes('/') || s.startsWith('.') || s.startsWith('_'));
+              if (!looksLikePath(search) || !looksLikePath(replace)) continue;
               movePath(path.join(root, search), path.join(root, replace));
             }
 
@@ -120,7 +177,7 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
-            const slug = process.env.APP_BOT_SLUG;
+            const slug = process.env.APP_BOT_SLUG || 'webgrip-ci';
             const username = `${slug}[bot]`;
             try {
               const { data: user } = await github.request('GET /users/{username}', { username });
@@ -135,60 +192,47 @@ jobs:
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
+          set -euo pipefail
           git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${ORG}/${NEW_REPO}.git"
 
-      - name: Commit and push to development
+      - name: Commit and push changes to development (if any)
         run: |
+          set -euo pipefail
           git config user.name  "${{ steps.bot-email.outputs.name }}"
           git config user.email "${{ steps.bot-email.outputs.email }}"
           git add -A
-          git commit -m "chore(init): personalize ${NEW_REPO}" || echo "Nothing to commit"
-          git push origin HEAD:development
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+          else
+            git commit -m "chore(init): personalize ${NEW_REPO}"
+            git push origin HEAD:development
+          fi
 
-      - name: Open PR development
+      - name: Open PR from development to main (idempotent)
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
-            const org  = process.env.ORG;
-            const repo = process.env.NEW_REPO;
+            const owner = process.env.ORG;
+            const repo  = process.env.NEW_REPO;
 
-            const q = `
-              query($org:String!, $repo:String!) {
-                repository(owner:$org, name:$repo) { id }
-              }
-            `;
-            const r = await github.graphql(q, { org, repo });
-            const repositoryId = r.repository.id;
-
-            const m = `
-              mutation($repositoryId:ID!, $title:String!, $body:String, $base:String!, $head:String!, $draft:Boolean) {
-                createPullRequest(input:{
-                  repositoryId:$repositoryId,
-                  title:$title,
-                  body:$body,
-                  baseRefName:$base,
-                  headRefName:$head,
-                  draft:$draft,
-                  maintainerCanModify:true
-                }) {
-                  pullRequest { number url }
-                }
-              }
-            `;
-            const title = "chore(init): personalize repository";
-            const body  = "Automated initialization PR from \`development\` to \`main\`.";
-            const pr = await github.graphql(m, {
-              repositoryId,
-              title,
-              body,
-              base: "main",
-              head: "development",
-              draft: false
+            // If a similar PR already exists and is open, do nothing
+            const { data: prs } = await github.request('GET /repos/{owner}/{repo}/pulls', {
+              owner, repo, state: 'open', base: 'main', head: `${owner}:development`
             });
-            core.info(`PR opened: #${pr.createPullRequest.pullRequest.number} ${pr.createPullRequest.pullRequest.url}`);
+            if (Array.isArray(prs) && prs.length > 0) {
+              core.info(`PR already open: #${prs[0].number} ${prs[0].html_url}`);
+              return;
+            }
 
-      - name: Create OpenAI Project
+            const title = "chore(init): personalize repository";
+            const body  = "Automated initialization PR from `development` to `main`.";
+            const { data: pr } = await github.request('POST /repos/{owner}/{repo}/pulls', {
+              owner, repo, title, body, base: 'main', head: 'development', maintainer_can_modify: true, draft: false
+            });
+            core.info(`PR opened: #${pr.number} ${pr.html_url}`);
+
+      - name: Create OpenAI Project (best-effort)
         id: openai-project
         uses: actions/github-script@v7
         env:
@@ -204,37 +248,37 @@ jobs:
             const headers = {
               'Authorization': `Bearer ${apiKey}`,
               'Content-Type': 'application/json',
+              ...(orgId ? { 'OpenAI-Organization': orgId } : {})
             };
-            if (orgId) headers['OpenAI-Organization'] = orgId;
-
-            const createRes = await fetch('https://api.openai.com/v1/projects', {
-              method: 'POST', headers,
-              body: JSON.stringify({
-                name: repo,
-                description: `Auto-created for ${owner}/${repo}`
-              })
-            });
-            const txt = await createRes.text();
-            if (!createRes.ok) { core.warning(`OpenAI project create failed (${createRes.status}): ${txt}`); return; }
-            let data = {}; try { data = JSON.parse(txt); } catch {}
-            const projectId = data.id || data.project_id || '';
-            if (!projectId) { core.warning('OpenAI project created but no id returned.'); return; }
-            core.setOutput('project_id', projectId);
-            core.info(`OpenAI project id: ${projectId}`);
 
             try {
-              const linkRes = await fetch(`https://api.openai.com/v1/projects/${projectId}`, {
-                method: 'PATCH', headers,
-                body: JSON.stringify({
-                  metadata: { github_repo: `${owner}/${repo}`, github_url: `https://github.com/${owner}/${repo}` }
-                })
+              const createRes = await fetch('https://api.openai.com/v1/projects', {
+                method: 'POST', headers,
+                body: JSON.stringify({ name: repo, description: `Auto-created for ${owner}/${repo}` })
               });
-              if (!linkRes.ok) core.warning(`OpenAI project link warning (${linkRes.status})`);
+              const txt = await createRes.text();
+              if (!createRes.ok) { core.warning(`OpenAI project create failed (${createRes.status}): ${txt}`); return; }
+              let data = {}; try { data = JSON.parse(txt); } catch {}
+              const projectId = data.id || data.project_id || '';
+              if (!projectId) { core.warning('OpenAI project created but no id returned.'); return; }
+              core.setOutput('project_id', projectId);
+              core.info(`OpenAI project id: ${projectId}`);
+
+              // Best-effort metadata link
+              try {
+                const linkRes = await fetch(`https://api.openai.com/v1/projects/${projectId}`, {
+                  method: 'PATCH', headers,
+                  body: JSON.stringify({ metadata: { github_repo: `${owner}/${repo}`, github_url: `https://github.com/${owner}/${repo}` } })
+                });
+                if (!linkRes.ok) core.warning(`OpenAI project link warning (${linkRes.status})`);
+              } catch (e) {
+                core.warning(`OpenAI project link error: ${e.message}`);
+              }
             } catch (e) {
-              core.warning(`OpenAI project link error: ${e.message}`);
+              core.warning(`OpenAI project create error: ${e.message}`);
             }
 
-      - name: Store OPENAI_PROJECT_ID repo variable (best-effort)
+      - name: Store OPENAI_PROJECT_ID as repo variable (best-effort)
         if: ${{ steps.openai-project.outputs.project_id != '' }}
         uses: actions/github-script@v7
         with:
@@ -245,22 +289,18 @@ jobs:
             const varName = 'OPENAI_PROJECT_ID';
             const value   = `${{ steps.openai-project.outputs.project_id }}`;
             try {
-              await github.request('POST /repos/{owner}/{repo}/actions/variables', {
-                owner, repo, name: varName, value
-              });
+              await github.request('POST /repos/{owner}/{repo}/actions/variables', { owner, repo, name: varName, value });
               core.info(`Created repo variable ${varName}.`);
             } catch (e) {
               if (e.status === 422) {
-                await github.request('PATCH /repos/{owner}/{repo}/actions/variables/{name}', {
-                  owner, repo, name: varName, value
-                });
+                await github.request('PATCH /repos/{owner}/{repo}/actions/variables/{name}', { owner, repo, name: varName, value });
                 core.info(`Updated repo variable ${varName}.`);
               } else {
                 core.warning(`Could not set repo variable ${varName}: ${e.status}`);
               }
             }
 
-      - name: Ensure gh-pages branch, configure Pages, and set homepage
+      - name: Ensure gh-pages branch, configure Pages, and set homepage (best-effort)
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.app-token.outputs.token }}
@@ -278,31 +318,31 @@ jobs:
               }
             }
 
-            async function getBaseSha() {
-              try {
-                const { data } = await github.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch: 'development' });
-                return data.commit.sha;
-              } catch {
-                const { data } = await github.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch: 'main' });
-                return data.commit.sha;
-              }
+            async function getCommitSha(branch) {
+              const { data } = await github.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch });
+              return data.commit.sha;
             }
 
+            async function baseSha() {
+              if (await branchExists('development')) return getCommitSha('development');
+              return getCommitSha('main');
+            }
+
+            // Create gh-pages if missing
             if (!(await branchExists('gh-pages'))) {
-              const sha = await getBaseSha();
               try {
-                await github.request('POST /repos/{owner}/{repo}/git/refs', {
-                  owner, repo, ref: 'refs/heads/gh-pages', sha
-                });
+                const sha = await baseSha();
+                await github.request('POST /repos/{owner}/{repo}/git/refs', { owner, repo, ref: 'refs/heads/gh-pages', sha });
                 core.info('Created gh-pages branch.');
               } catch (e) {
-                core.setFailed(`Failed to create gh-pages branch: ${e.status} ${e.message}`);
+                core.warning(`Failed to create gh-pages branch: ${e.status || ''} ${e.message}`);
                 return;
               }
             } else {
               core.info('gh-pages branch already exists.');
             }
 
+            // Configure Pages deployment source
             async function getPages() {
               try {
                 const { data } = await github.request('GET /repos/{owner}/{repo}/pages', { owner, repo });
@@ -326,18 +366,20 @@ jobs:
               }
             } catch (e) {
               if (e.status === 403) {
-                core.warning('Pages API returned 403. Ensure the GitHub App has "Pages: Read and write" permission and Pages are allowed for the org.');
+                core.warning('Pages API returned 403. Ensure the GitHub App has "Pages: Read and write" and Pages are allowed for the org.');
               } else {
-                throw e;
+                core.warning(`Pages configuration error: ${e.status || ''} ${e.message}`);
               }
             }
 
             let pagesUrl = `https://${owner}.github.io/${repo}/`;
             try {
-              const pagesInfo = await getPages();
-              if (pagesInfo?.html_url) pagesUrl = pagesInfo.html_url;
+              const info = await getPages();
+              if (info?.html_url) pagesUrl = info.html_url;
             } catch {}
-            await github.request('PATCH /repos/{owner}/{repo}', {
-              owner, repo, homepage: pagesUrl
-            });
-            core.info(`Set repository homepage to ${pagesUrl}`);
+            try {
+              await github.request('PATCH /repos/{owner}/{repo}', { owner, repo, homepage: pagesUrl });
+              core.info(`Set repository homepage to ${pagesUrl}`);
+            } catch (e) {
+              core.warning(`Could not set repository homepage: ${e.status || ''} ${e.message}`);
+            }
