@@ -121,14 +121,14 @@ jobs:
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Directly check out specific Copilot dirs into workspace `.github/`
+      - name: Copy Copilot YAMLs into workspace .github/
         env:
           COPILOT_REPO: ${{ inputs.copilot_repo }}
           COPILOT_REF: ${{ inputs.copilot_ref }}
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          echo "Checking out .github/chatmodes, .github/instructions, .github/prompts from $COPILOT_REPO@$COPILOT_REF into workspace .github/"
+          echo "Copying YAMLs from $COPILOT_REPO@$COPILOT_REF (.github/{chatmodes,instructions,prompts}) into workspace .github/"
           repo="${COPILOT_REPO}"
           ref="${COPILOT_REF}"
           auth_url="https://x-access-token:${APP_TOKEN}@github.com/${repo}.git"
@@ -136,18 +136,33 @@ jobs:
           cleanup() { rm -rf "$tmpdir" || true; }
           trap cleanup EXIT
 
-          # Clone directly at the requested ref, without checking out files
-          git clone --no-checkout --filter=blob:none -b "$ref" "$auth_url" "$tmpdir"
+          # Shallow, filtered clone at the requested ref
+          git clone --filter=blob:none -b "$ref" "$auth_url" "$tmpdir" >/dev/null
 
-          cd "$tmpdir"
-          git sparse-checkout init --cone
-          git sparse-checkout set .github/chatmodes .github/instructions .github/prompts
-          git checkout --quiet
+          # Ensure destination dirs exist
+          mkdir -p .github/chatmodes .github/instructions .github/prompts
 
-          workspace="${GITHUB_WORKSPACE:-$PWD/..}"
-          # Write selected paths into the runner workspace
-          git --git-dir="$tmpdir/.git" --work-tree="$workspace" checkout -- .github/chatmodes .github/instructions .github/prompts || true
-          echo "Checked out paths written into: $workspace/.github/"
+          copy_yaml() {
+            local src_dir="$1"
+            local dst_dir="$2"
+            if [[ -d "$src_dir" ]]; then
+              # Copy only *.yml / *.yaml (non-recursive + recursive both)
+              find "$src_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 | while IFS= read -r -d '' f; do
+                rel="${f#"$src_dir/"}"
+                mkdir -p "$dst_dir/$(dirname "$rel")"
+                cp -f "$f" "$dst_dir/$rel"
+                echo "  + $dst_dir/$rel"
+              done
+            else
+              echo "  (skip) $src_dir not found in copilot repo"
+            fi
+          }
+
+          copy_yaml "$tmpdir/.github/chatmodes"    ".github/chatmodes"
+          copy_yaml "$tmpdir/.github/instructions" ".github/instructions"
+          copy_yaml "$tmpdir/.github/prompts"      ".github/prompts"
+
+          echo "Done copying Copilot YAMLs."
 
       # - name: Prune Copilot assets with AI (optional)
       #   if: ${{ secrets.OPENAI_API_KEY != '' }}
