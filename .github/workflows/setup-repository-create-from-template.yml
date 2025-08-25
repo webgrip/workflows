@@ -223,3 +223,26 @@ jobs:
               }
             }
             await upsert();
+
+      - name: Return pertinent information
+        if: >
+          ${{ always() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const repoUrl = `https://github.com/${process.env.ORG}/${process.env.NEW_REPO}`;
+
+            core.summary
+              .addHeading('Repository Overview', 2)
+              .addEOL()
+              .addRaw(`Repository Name: ${process.env.NEW_REPO}`)
+              .addEOL()
+              .addRaw(`Repository Owner: ${process.env.ORG}`)
+              .addEOL()
+              .addRaw(`Repository URL: ${repoUrl}`)
+              .addSeparator();
+
+            await core.summary.write();
+            
+            core.setOutput('repository_url', repoUrl);
+            core.info(`Repository URL: ${repoUrl}`);
