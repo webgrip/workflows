@@ -17,11 +17,6 @@ on:
         type: string
         required: false
         default: ""
-      force_commit_files:
-        description: "Comma-separated list of files/paths to force commit"
-        type: string
-        required: false
-        default: ""
       configure_pages:
         description: "Configure gh-pages branch and GitHub Pages"
         type: boolean
@@ -289,29 +284,7 @@ jobs:
           git config user.name  "${{ steps.bot-email.outputs.name }}"
           git config user.email "${{ steps.bot-email.outputs.email }}"
           git add -A
-          # If no staged changes yet, optionally force-create or touch files listed in force_commit_files
-          if git diff --cached --quiet; then
-            fc_list="${{ inputs.force_commit_files }}"
-            if [[ -n "${fc_list// }" ]]; then
-              IFS=',' read -ra fc_files <<< "$fc_list"
-              for file in "${fc_files[@]}"; do
-                f="$(echo "$file" | xargs)"
-                [[ -z "$f" ]] && continue
-                # Respect workflow guard: do not modify workflow files
-                if [[ "$f" == .github/workflows* ]]; then
-                  echo "Skipping force touch in .github/workflows (guard active): $f"
-                  continue
-                fi
-                if [[ -e "$f" ]]; then
-                  echo "# force touch $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$f" || true
-                else
-                  mkdir -p "$(dirname "$f")"
-                  echo "# bootstrap force placeholder $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$f" || true
-                fi
-              done
-              git add -A
-            fi
-          fi
+          # No force-commit logic; only commit real changes
           if git diff --cached --quiet; then
             echo "Nothing to commit."
           else

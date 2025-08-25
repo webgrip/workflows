@@ -7,7 +7,21 @@ on:
         description: "Name of the new repository"
         type: string
         required: true
-    
+      copilot_repo:
+        description: "Repository that contains Copilot configs"
+        type: string
+        default: webgrip/awesome-copilot
+        required: false
+      copilot_ref:
+        description: "Ref/branch of the Copilot repo to use"
+        type: string
+        default: main
+        required: false
+      open_pr:
+        description: "Open a PR from development to main"
+        type: boolean
+        default: true
+        required: false
     secrets:
       WEBGRIP_CI_CLIENT_ID:
         description: "GitHub App ID (numeric)"
@@ -25,8 +39,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  actions: write
-  pages: write
 
 concurrency:
   group: bootstrap-copilot-${{ github.repository_id }}-${{ inputs.repo_name }}
@@ -57,6 +69,49 @@ jobs:
           private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
           owner: ${{ env.ORG }}
 
+      - name: Compute URLs / outputs
+        id: compute-urls
+        run: |
+          echo "repository_url=https://github.com/${ORG}/${NEW_REPO}" >> "$GITHUB_OUTPUT"
+
+      - name: Ensure development branch exists (create from default branch if missing)
+        uses: actions/github-script@v7
+        env:
+          ORG: ${{ env.ORG }}
+          NEW_REPO: ${{ env.NEW_REPO }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const owner = process.env.ORG;
+            const repo  = process.env.NEW_REPO;
+
+            const { data: repoData } = await github.request("GET /repos/{owner}/{repo}", { owner, repo });
+            const defaultBranch = repoData.default_branch || "main";
+
+            let devExists = true;
+            try {
+              await github.request("GET /repos/{owner}/{repo}/branches/{branch}", {
+                owner, repo, branch: "development"
+              });
+            } catch {
+              devExists = false;
+            }
+
+            if (!devExists) {
+              const { data: ref } = await github.request(
+                "GET /repos/{owner}/{repo}/git/ref/{ref}",
+                { owner, repo, ref: `heads/${defaultBranch}` }
+              );
+              await github.request("POST /repos/{owner}/{repo}/git/refs", {
+                owner, repo,
+                ref: "refs/heads/development",
+                sha: ref.object.sha
+              });
+              core.info(`Created branch 'development' from '${defaultBranch}'.`);
+            } else {
+              core.info("Branch 'development' already exists.");
+            }
+
       - name: Check out new repo (development)
         uses: actions/checkout@v4
         with:
@@ -66,24 +121,43 @@ jobs:
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Check out repository containing the files for copilot
-        uses: actions/checkout@v4
-        with:
-          repository: webgrip/awesome-copilot
-          ref: main
-          fetch-depth: 0
-          token: ${{ steps.app-token.outputs.token }}
-          path: .github/
-          sparse-checkout: |
-            .github/chatmodes
-            .github/instructions
-            .github/prompts
+      - name: Directly check out specific Copilot dirs into workspace `.github/`
+        env:
+          COPILOT_REPO: ${{ inputs.copilot_repo }}
+          COPILOT_REF: ${{ inputs.copilot_ref }}
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          echo "Checking out .github/chatmodes, .github/instructions, .github/prompts from $COPILOT_REPO@$COPILOT_REF into workspace .github/"
+          repo="${COPILOT_REPO}"
+          ref="${COPILOT_REF}"
+          auth_url="https://x-access-token:${APP_TOKEN}@github.com/${repo}.git"
+          tmpdir=$(mktemp -d)
+          cleanup() { rm -rf "$tmpdir" || true; }
+          trap cleanup EXIT
 
-      # - name: @TODO Have AI decide which chatmodes and agent configs to keep and which to throw away
+          # Clone directly at the requested ref, without checking out files
+          git clone --no-checkout --filter=blob:none -b "$ref" "$auth_url" "$tmpdir"
+
+          cd "$tmpdir"
+          git sparse-checkout init --cone
+          git sparse-checkout set .github/chatmodes .github/instructions .github/prompts
+          git checkout --quiet
+
+          workspace="${GITHUB_WORKSPACE:-$PWD/..}"
+          # Write selected paths into the runner workspace
+          git --git-dir="$tmpdir/.git" --work-tree="$workspace" checkout -- .github/chatmodes .github/instructions .github/prompts || true
+          echo "Checked out paths written into: $workspace/.github/"
+
+      # - name: Prune Copilot assets with AI (optional)
+      #   if: ${{ secrets.OPENAI_API_KEY != '' }}
       #   uses: webgrip/copilot-action@main
+      #   env:
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      #     OPENAI_ORG_ID: ${{ secrets.OPENAI_ORG_ID }}
       #   with:
       #     prompt: |
-      #       delete all the chatmodes, instructions and prompts inside of .github/ that we will not need for the project according to the project's full documentation.
+      #       Keep only the chatmodes, instructions, and prompts inside .github/ that are relevant to this project's repo (${ { env.NEW_REPO } }) based on the repository contents and typical Magento/DevOps workflows. Remove the rest.
 
       - name: Resolve bot noreply email
         id: bot-email
@@ -107,6 +181,7 @@ jobs:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${ORG}/${NEW_REPO}.git"
 
       - name: Commit and push changes to development (if any)
@@ -115,29 +190,6 @@ jobs:
           git config user.name  "${{ steps.bot-email.outputs.name }}"
           git config user.email "${{ steps.bot-email.outputs.email }}"
           git add -A
-          # If no staged changes yet, optionally force-create or touch files listed in force_commit_files
-          if git diff --cached --quiet; then
-            fc_list="${{ inputs.force_commit_files }}"
-            if [[ -n "${fc_list// }" ]]; then
-              IFS=',' read -ra fc_files <<< "$fc_list"
-              for file in "${fc_files[@]}"; do
-                f="$(echo "$file" | xargs)"
-                [[ -z "$f" ]] && continue
-                # Respect workflow guard: do not modify workflow files
-                if [[ "$f" == .github/workflows* ]]; then
-                  echo "Skipping force touch in .github/workflows (guard active): $f"
-                  continue
-                fi
-                if [[ -e "$f" ]]; then
-                  echo "# force touch $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$f" || true
-                else
-                  mkdir -p "$(dirname "$f")"
-                  echo "# bootstrap force placeholder $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$f" || true
-                fi
-              done
-              git add -A
-            fi
-          fi
           if git diff --cached --quiet; then
             echo "Nothing to commit."
           else
@@ -145,69 +197,36 @@ jobs:
             git push origin HEAD:development
           fi
 
-      - name: Open PR from development to main (idempotent)
+      - name: Return pertinent information (summary)
+        if: ${{ always() }}
         uses: actions/github-script@v7
         with:
-          github-token: ${{ steps.app-token.outputs.token }}
           script: |
-            const owner = process.env.ORG;
-            const repo  = process.env.NEW_REPO;
-            const { data: prs } = await github.request('GET /repos/{owner}/{repo}/pulls', {
-              owner, repo, state: 'open', base: 'main', head: `${owner}:development`
-            });
-            if (Array.isArray(prs) && prs.length > 0) {
-              core.info(`PR already open: #${prs[0].number} ${prs[0].html_url}`);
-              return;
-            }
-            const title = "chore(init): personalize repository";
-            const body  = "Automated initialization PR from `development` to `main`.";
-            const { data: pr } = await github.request('POST /repos/{owner}/{repo}/pulls', {
-              owner, repo, title, body, base: 'main', head: 'development', maintainer_can_modify: true, draft: false
-            });
-            core.info(`PR opened: #${pr.number} ${pr.html_url}`);
+            const fs = require('fs');
 
-      - name: Return pertinent information
-        if: >
-          ${{ always() }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.summary
+            // Helper: list yaml files in a dir (if it exists)
+            function listYamlFiles(dir) {
+              try {
+                if (!fs.existsSync(dir)) return [];
+                return fs.readdirSync(dir)
+                  .filter(f => f.endsWith('.yml') || f.endsWith('.yaml'))
+                  .map(f => `${dir}/${f}`);
+              } catch {
+                return [];
+              }
+            }
+
+            // Collect kept files
+            const keptFiles = [
+              ...listYamlFiles('.github/chatmodes'),
+              ...listYamlFiles('.github/instructions'),
+              ...listYamlFiles('.github/prompts'),
+            ];
+
+            await core.summary
               .addHeading('Copilot Setup Overview', 2)
               .addEOL()
-              .addSeparator();
-
-            # Show which files the AI kept by checking in .github/chatmodes, .github/instructions and .github/prompts
-            const fs = require('fs');
-            const keptFiles = [];
-
-            // Check .github/chatmodes
-            const chatmodes = fs.readdirSync('.github/chatmodes');
-            chatmodes.forEach(file => {
-              if (file.endsWith('.yml') || file.endsWith('.yaml')) {
-                keptFiles.push(`.github/chatmodes/${file}`);
-              }
-            });
-
-            // Check .github/instructions
-            const instructions = fs.readdirSync('.github/instructions');
-            instructions.forEach(file => {
-              if (file.endsWith('.yml') || file.endsWith('.yaml')) {
-                keptFiles.push(`.github/instructions/${file}`);
-              }
-            });
-
-            // Check .github/prompts
-            const prompts = fs.readdirSync('.github/prompts');
-            prompts.forEach(file => {
-              if (file.endsWith('.yml') || file.endsWith('.yaml')) {
-                keptFiles.push(`.github/prompts/${file}`);
-              }
-            });
-
-            core.summary
+              .addSeparator()
               .addHeading('Kept Files', 3)
-              .addList(keptFiles);
-
-            await core.summary.write();
-            core.info(`Summary written to: ${process.env.GITHUB_WORKSPACE}/summary.md`);
+              .addList(keptFiles.length ? keptFiles : ['(none detected)'])
+              .write();
