@@ -121,14 +121,14 @@ jobs:
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Copy Copilot YAMLs into workspace .github/
+      - name: Copy Copilot YAMLs from repo root into .github/
         env:
           COPILOT_REPO: ${{ inputs.copilot_repo }}
           COPILOT_REF: ${{ inputs.copilot_ref }}
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          echo "Copying YAMLs from $COPILOT_REPO@$COPILOT_REF (.github/{chatmodes,instructions,prompts}) into workspace .github/"
+          echo "Copying YAMLs from $COPILOT_REPO@$COPILOT_REF (root/chatmodes|instructions|prompts) into workspace .github/"
           repo="${COPILOT_REPO}"
           ref="${COPILOT_REF}"
           auth_url="https://x-access-token:${APP_TOKEN}@github.com/${repo}.git"
@@ -136,31 +136,37 @@ jobs:
           cleanup() { rm -rf "$tmpdir" || true; }
           trap cleanup EXIT
 
-          # Shallow, filtered clone at the requested ref
-          git clone --filter=blob:none -b "$ref" "$auth_url" "$tmpdir" >/dev/null
+          # Shallow clone at requested ref
+          git clone -b "$ref" --depth 1 "$auth_url" "$tmpdir" >/dev/null
 
           # Ensure destination dirs exist
           mkdir -p .github/chatmodes .github/instructions .github/prompts
 
           copy_yaml() {
-            local src_dir="$1"
-            local dst_dir="$2"
+            local src_dir="$1"   # e.g., $tmpdir/chatmodes
+            local dst_dir="$2"   # e.g., .github/chatmodes
             if [[ -d "$src_dir" ]]; then
-              # Copy only *.yml / *.yaml (non-recursive + recursive both)
-              find "$src_dir" -type f \( -name '*.yml' -o -name '*.yaml' \) -print0 | while IFS= read -r -d '' f; do
+              echo "  + copying from ${src_dir#$tmpdir/} -> $dst_dir"
+              # Copy all YAML files recursively, preserving subpaths
+              found=0
+              while IFS= read -r -d '' f; do
+                found=1
                 rel="${f#"$src_dir/"}"
                 mkdir -p "$dst_dir/$(dirname "$rel")"
                 cp -f "$f" "$dst_dir/$rel"
-                echo "  + $dst_dir/$rel"
-              done
+                echo "    - $dst_dir/$rel"
+              done < <(find "$src_dir" -type f \( -iname '*.yml' -o -iname '*.yaml' \) -print0)
+              if [[ "$found" -eq 0 ]]; then
+                echo "    (note) No YAML files found under ${src_dir#$tmpdir/}"
+              fi
             else
-              echo "  (skip) $src_dir not found in copilot repo"
+              echo "  (skip) ${src_dir#$tmpdir/} not found"
             fi
           }
 
-          copy_yaml "$tmpdir/.github/chatmodes"    ".github/chatmodes"
-          copy_yaml "$tmpdir/.github/instructions" ".github/instructions"
-          copy_yaml "$tmpdir/.github/prompts"      ".github/prompts"
+          copy_yaml "$tmpdir/chatmodes"    ".github/chatmodes"
+          copy_yaml "$tmpdir/instructions" ".github/instructions"
+          copy_yaml "$tmpdir/prompts"      ".github/prompts"
 
           echo "Done copying Copilot YAMLs."
 
