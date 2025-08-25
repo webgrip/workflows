@@ -29,7 +29,7 @@ permissions:
   pages: write
 
 concurrency:
-  group: bootstrap-${{ github.repository_id }}-${{ inputs.repo_name }}
+  group: bootstrap-copilot-${{ github.repository_id }}-${{ inputs.repo_name }}
   cancel-in-progress: false
 
 defaults:
@@ -37,8 +37,8 @@ defaults:
     shell: bash
 
 jobs:
-  bootstrap-repo:
-    name: bootstrap
+  bootstrap-copilot:
+    name: bootstrap-copilot
     runs-on: arc-runner-set
     outputs:
       repository_url: ${{ steps.compute-urls.outputs.repository_url }}
