@@ -49,8 +49,8 @@ defaults:
     shell: bash
 
 jobs:
-  bootstrap-copilot:
-    name: bootstrap-copilot
+  copilot:
+    name: "Bootstrap copilot files"
     runs-on: arc-runner-set
     outputs:
       repository_url: ${{ steps.compute-urls.outputs.repository_url }}

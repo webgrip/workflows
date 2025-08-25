@@ -41,7 +41,7 @@ permissions:
 
 jobs:
   create-repo-from-template:
-    name: "create repository"
+    name: "Create repository"
     runs-on: arc-runner-set
 
     env:

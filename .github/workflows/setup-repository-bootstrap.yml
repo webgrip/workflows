@@ -61,7 +61,7 @@ defaults:
 
 jobs:
   bootstrap-repo:
-    name: bootstrap
+    name: "Bootstrap repository"
     runs-on: arc-runner-set
     outputs:
       repository_url: ${{ steps.compute-urls.outputs.repository_url }}
