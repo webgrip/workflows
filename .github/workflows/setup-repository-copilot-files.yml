@@ -121,14 +121,14 @@ jobs:
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Copy Copilot YAMLs from repo root into .github/
+      - name: Copy Copilot dirs (copy everything recursively)
         env:
           COPILOT_REPO: ${{ inputs.copilot_repo }}
           COPILOT_REF: ${{ inputs.copilot_ref }}
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          echo "Copying YAMLs from $COPILOT_REPO@$COPILOT_REF (root/chatmodes|instructions|prompts) into workspace .github/"
+          echo "Copying ALL contents from $COPILOT_REPO@$COPILOT_REF (chatmodes|instructions|prompts at repo ROOT) into workspace .github/"
           repo="${COPILOT_REPO}"
           ref="${COPILOT_REF}"
           auth_url="https://x-access-token:${APP_TOKEN}@github.com/${repo}.git"
@@ -139,36 +139,37 @@ jobs:
           # Shallow clone at requested ref
           git clone -b "$ref" --depth 1 "$auth_url" "$tmpdir" >/dev/null
 
-          # Ensure destination dirs exist
           mkdir -p .github/chatmodes .github/instructions .github/prompts
 
-          copy_yaml() {
+          copy_all() {
             local src_dir="$1"   # e.g., $tmpdir/chatmodes
             local dst_dir="$2"   # e.g., .github/chatmodes
+
             if [[ -d "$src_dir" ]]; then
-              echo "  + copying from ${src_dir#$tmpdir/} -> $dst_dir"
-              # Copy all YAML files recursively, preserving subpaths
-              found=0
-              while IFS= read -r -d '' f; do
-                found=1
-                rel="${f#"$src_dir/"}"
-                mkdir -p "$dst_dir/$(dirname "$rel")"
-                cp -f "$f" "$dst_dir/$rel"
-                echo "    - $dst_dir/$rel"
-              done < <(find "$src_dir" -type f \( -iname '*.yml' -o -iname '*.yaml' \) -print0)
-              if [[ "$found" -eq 0 ]]; then
-                echo "    (note) No YAML files found under ${src_dir#$tmpdir/}"
+              echo "  + mirroring ${src_dir#$tmpdir/} -> $dst_dir"
+              # Optionally clear destination to avoid stale files; comment out next line if you prefer merging
+              rm -rf "${dst_dir:?}/"* "${dst_dir}/".* 2>/dev/null || true
+
+              shopt -s dotglob nullglob
+              files=( "$src_dir"/* )
+              shopt -u dotglob
+
+              if (( ${#files[@]} )); then
+                # Preserve structure, perms, timestamps
+                cp -a "$src_dir"/. "$dst_dir"/
+              else
+                echo "    (note) Source directory is empty: ${src_dir#$tmpdir/}"
               fi
             else
               echo "  (skip) ${src_dir#$tmpdir/} not found"
             fi
           }
 
-          copy_yaml "$tmpdir/chatmodes"    ".github/chatmodes"
-          copy_yaml "$tmpdir/instructions" ".github/instructions"
-          copy_yaml "$tmpdir/prompts"      ".github/prompts"
+          copy_all "$tmpdir/chatmodes"    ".github/chatmodes"
+          copy_all "$tmpdir/instructions" ".github/instructions"
+          copy_all "$tmpdir/prompts"      ".github/prompts"
 
-          echo "Done copying Copilot YAMLs."
+          echo "Done copying all Copilot assets."
 
       # - name: Prune Copilot assets with AI (optional)
       #   if: ${{ secrets.OPENAI_API_KEY != '' }}
