@@ -1,0 +1,213 @@
+name: "[Call] Setup Copilot files for this project"
+
+on:
+  workflow_call:
+    inputs:
+      repo_name:
+        description: "Name of the new repository"
+        type: string
+        required: true
+    
+    secrets:
+      WEBGRIP_CI_CLIENT_ID:
+        description: "GitHub App ID (numeric)"
+        required: true
+      WEBGRIP_CI_APP_PRIVATE_KEY:
+        description: "GitHub App private key (PEM)"
+        required: true
+      OPENAI_API_KEY:
+        description: "OpenAI API key"
+        required: false
+      OPENAI_ORG_ID:
+        description: "OpenAI Organization ID"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  pages: write
+
+concurrency:
+  group: bootstrap-${{ github.repository_id }}-${{ inputs.repo_name }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bootstrap-repo:
+    name: bootstrap
+    runs-on: arc-runner-set
+    outputs:
+      repository_url: ${{ steps.compute-urls.outputs.repository_url }}
+
+    env:
+      ORG: ${{ github.repository_owner }}
+      NEW_REPO: ${{ inputs.repo_name }}
+      APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
+
+    steps:
+      - name: Mint GitHub App installation token (owner-based)
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
+          private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
+          owner: ${{ env.ORG }}
+
+      - name: Check out new repo (development)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.ORG }}/${{ env.NEW_REPO }}
+          ref: development
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Check out repository containing the files for copilot
+        uses: actions/checkout@v4
+        with:
+          repository: webgrip/awesome-copilot
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+          path: .github/
+          sparse-checkout: |
+            .github/chatmodes
+            .github/instructions
+            .github/prompts
+
+      # - name: @TODO Have AI decide which chatmodes and agent configs to keep and which to throw away
+      #   uses: webgrip/copilot-action@main
+      #   with:
+      #     prompt: |
+      #       delete all the chatmodes, instructions and prompts inside of .github/ that we will not need for the project according to the project's full documentation.
+
+      - name: Resolve bot noreply email
+        id: bot-email
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const slug = process.env.APP_BOT_SLUG || 'webgrip-ci';
+            const username = `${slug}[bot]`;
+            try {
+              const { data: user } = await github.request('GET /users/{username}', { username });
+              core.setOutput('name', username);
+              core.setOutput('email', `${user.id}+${username}@users.noreply.github.com`);
+            } catch {
+              core.setOutput('name', 'github-actions[bot]');
+              core.setOutput('email', '41898282+github-actions[bot]@users.noreply.github.com');
+            }
+
+      - name: Authenticate git remote for push
+        env:
+          APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${ORG}/${NEW_REPO}.git"
+
+      - name: Commit and push changes to development (if any)
+        run: |
+          set -euo pipefail
+          git config user.name  "${{ steps.bot-email.outputs.name }}"
+          git config user.email "${{ steps.bot-email.outputs.email }}"
+          git add -A
+          # If no staged changes yet, optionally force-create or touch files listed in force_commit_files
+          if git diff --cached --quiet; then
+            fc_list="${{ inputs.force_commit_files }}"
+            if [[ -n "${fc_list// }" ]]; then
+              IFS=',' read -ra fc_files <<< "$fc_list"
+              for file in "${fc_files[@]}"; do
+                f="$(echo "$file" | xargs)"
+                [[ -z "$f" ]] && continue
+                # Respect workflow guard: do not modify workflow files
+                if [[ "$f" == .github/workflows* ]]; then
+                  echo "Skipping force touch in .github/workflows (guard active): $f"
+                  continue
+                fi
+                if [[ -e "$f" ]]; then
+                  echo "# force touch $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$f" || true
+                else
+                  mkdir -p "$(dirname "$f")"
+                  echo "# bootstrap force placeholder $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$f" || true
+                fi
+              done
+              git add -A
+            fi
+          fi
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+          else
+            git commit -m "chore(init): personalize ${NEW_REPO}"
+            git push origin HEAD:development
+          fi
+
+      - name: Open PR from development to main (idempotent)
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const owner = process.env.ORG;
+            const repo  = process.env.NEW_REPO;
+            const { data: prs } = await github.request('GET /repos/{owner}/{repo}/pulls', {
+              owner, repo, state: 'open', base: 'main', head: `${owner}:development`
+            });
+            if (Array.isArray(prs) && prs.length > 0) {
+              core.info(`PR already open: #${prs[0].number} ${prs[0].html_url}`);
+              return;
+            }
+            const title = "chore(init): personalize repository";
+            const body  = "Automated initialization PR from `development` to `main`.";
+            const { data: pr } = await github.request('POST /repos/{owner}/{repo}/pulls', {
+              owner, repo, title, body, base: 'main', head: 'development', maintainer_can_modify: true, draft: false
+            });
+            core.info(`PR opened: #${pr.number} ${pr.html_url}`);
+
+      - name: Return pertinent information
+        if: >
+          ${{ always() }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.summary
+              .addHeading('Copilot Setup Overview', 2)
+              .addEOL()
+              .addSeparator();
+
+            # Show which files the AI kept by checking in .github/chatmodes, .github/instructions and .github/prompts
+            const fs = require('fs');
+            const keptFiles = [];
+
+            // Check .github/chatmodes
+            const chatmodes = fs.readdirSync('.github/chatmodes');
+            chatmodes.forEach(file => {
+              if (file.endsWith('.yml') || file.endsWith('.yaml')) {
+                keptFiles.push(`.github/chatmodes/${file}`);
+              }
+            });
+
+            // Check .github/instructions
+            const instructions = fs.readdirSync('.github/instructions');
+            instructions.forEach(file => {
+              if (file.endsWith('.yml') || file.endsWith('.yaml')) {
+                keptFiles.push(`.github/instructions/${file}`);
+              }
+            });
+
+            // Check .github/prompts
+            const prompts = fs.readdirSync('.github/prompts');
+            prompts.forEach(file => {
+              if (file.endsWith('.yml') || file.endsWith('.yaml')) {
+                keptFiles.push(`.github/prompts/${file}`);
+              }
+            });
+
+            core.summary
+              .addHeading('Kept Files', 3)
+              .addList(keptFiles);
+
+            await core.summary.write();
+            core.info(`Summary written to: ${process.env.GITHUB_WORKSPACE}/summary.md`);
