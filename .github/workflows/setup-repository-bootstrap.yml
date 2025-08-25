@@ -17,11 +17,6 @@ on:
         type: string
         required: false
         default: ""
-      allow_wf_changes:
-        description: "Allow modifying/deleting files under .github/workflows"
-        type: boolean
-        required: false
-        default: false
       configure_pages:
         description: "Configure gh-pages branch and GitHub Pages"
         type: boolean
@@ -69,7 +64,6 @@ jobs:
       ORG: ${{ github.repository_owner }}
       NEW_REPO: ${{ inputs.repo_name }}
       APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
-      ALLOW_WF_CHANGES: ${{ inputs.allow_wf_changes }}
 
     steps:
       - name: Mint GitHub App installation token (owner-based)
@@ -99,8 +93,8 @@ jobs:
           for file in "${files[@]}"; do
             f="$(echo "$file" | xargs)"
             [[ -z "$f" ]] && continue
-            # Block workflow deletions unless explicitly allowed
-            if [[ "${ALLOW_WF_CHANGES}" != "true" && "$f" == .github/workflows* ]]; then
+            # Block workflow deletions (guard always active)
+            if [[ "$f" == .github/workflows* ]]; then
               echo "Skipping deletion in .github/workflows (guard active): $f"
               continue
             fi
@@ -113,7 +107,6 @@ jobs:
         uses: actions/github-script@v7
         env:
           REPLACE_VALUES_YAML: ${{ inputs.replace_values }}
-          ALLOW_WF_CHANGES: ${{ env.ALLOW_WF_CHANGES }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -122,8 +115,7 @@ jobs:
 
             const root = process.env.GITHUB_WORKSPACE || process.cwd();
             const yamlRaw = (process.env.REPLACE_VALUES_YAML || '').trim();
-            const allowWF = (process.env.ALLOW_WF_CHANGES || '').toLowerCase() === 'true';
-
+            const allowWF = false;
             function parseSimpleYamlMap(yaml) {
               const map = {};
               for (const rawLine of yaml.split(/\r?\n/)) {
@@ -190,7 +182,6 @@ jobs:
         uses: actions/github-script@v7
         env:
           REPLACE_VALUES_YAML: ${{ inputs.replace_values }}
-          ALLOW_WF_CHANGES: ${{ env.ALLOW_WF_CHANGES }}
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -199,7 +190,7 @@ jobs:
 
             const root = process.env.GITHUB_WORKSPACE || process.cwd();
             const yamlRaw = (process.env.REPLACE_VALUES_YAML || '').trim();
-            const allowWF = (process.env.ALLOW_WF_CHANGES || '').toLowerCase() === 'true';
+            const allowWF = false;
 
             function parseSimpleYamlMap(yaml) {
               const map = {};
