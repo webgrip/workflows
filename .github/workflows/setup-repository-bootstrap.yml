@@ -27,11 +27,6 @@ on:
         type: boolean
         required: false
         default: false
-      create_openai_project:
-        description: "Create and link an OpenAI Project"
-        type: boolean
-        required: false
-        default: false
     outputs:
       repository_url:
         description: "URL of the newly bootstrapped repository"
@@ -412,38 +407,17 @@ jobs:
         uses: actions/github-script@v7
         with:
           script: |
-            const statsCSV = process.env.DEPLOYMENT_STATS || '';
-            const overallStats = process.env.OVERALL_STATS || '';
-            const helmOutput = process.env.HELM_OUTPUT || '';
+            const repoUrl = `https://github.com/${process.env.ORG}/${process.env.NEW_REPO}`;
 
             core.summary
-              .addHeading('Deployment Overview', 2)
-              .addRaw(overallStats)
+              .addHeading('Repository Overview', 2)
               .addEOL()
+              .addRaw(`Repository Name: ${process.env.NEW_REPO}`)
+              .addRaw(`Repository Owner: ${process.env.ORG}`)
+              .addRaw(`Repository URL: ${repoUrl}`)
               .addSeparator();
 
-            if (!statsCSV) {
-              core.summary
-                .addRaw('No deployment statistics available.')
-                .addEOL();
-            } else {
-              const lines = statsCSV.trim().split('\n');
-              const header = lines.shift().split(',');
-              const dataRows = lines.map(line => line.split(','));
-
-              core.summary
-                .addHeading('Per-Chart Deployment Details', 3)
-                .addTable([header, ...dataRows]);
-            }
-
-            if (helmOutput) {
-              core.summary
-                .addHeading('Helm Command Output', 3)
-                .addCodeBlock(helmOutput, 'bash');
-              }
-
             await core.summary.write();
-            const repoUrl = `https://github.com/${process.env.ORG}/${process.env.NEW_REPO}`;
+            
             core.setOutput('repository_url', repoUrl);
             core.info(`Repository URL: ${repoUrl}`);
-            
