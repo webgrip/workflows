@@ -171,14 +171,56 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Render Helm templates for summary
+        if: always()
+        run: |
+          set -euo pipefail
+          chartDir="${{ inputs.path }}"
+          chartName=$(basename "$chartDir")
+          rendered="rendered-manifests.yaml"
+          valuesFile=""
+          if [ -f "$chartDir/values.dec.yaml" ]; then
+            valuesFile="$chartDir/values.dec.yaml"
+          elif [ -f "$chartDir/values.yaml" ]; then
+            valuesFile="$chartDir/values.yaml"
+          fi
+
+          helmCmd=(helm template "${chartName}" "${chartDir}" --namespace "$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || echo default)")
+          if [ -n "$valuesFile" ]; then
+            helmCmd+=(--values "$valuesFile")
+          fi
+          if [ -n "${{ inputs.tag }}" ]; then
+            helmCmd+=(--set n8n.image.tag=${{ inputs.tag }})
+          fi
+
+          echo "Rendering helm templates to $rendered"
+          # Run helm template and capture output (do not fail the job if render fails)
+          "${helmCmd[@]}" > "$rendered" 2>&1 || true
+          # Create a file list of template source files for inclusion in the summary
+          if [ -d "$chartDir/templates" ]; then
+            find "$chartDir/templates" -type f -maxdepth 1 -print > template-files.txt || true
+          else
+            echo "" > template-files.txt
+          fi
+          # Also capture Chart.yaml and values file contents if present
+          cp -f "$chartDir/Chart.yaml" chart-Chart.yaml 2>/dev/null || true
+          if [ -n "$valuesFile" ]; then cp -f "$valuesFile" chart-values.yaml 2>/dev/null || true; fi
+
       - name: Generate Job Summary with Deployment Stats
         if: always()
         uses: actions/github-script@v7
         with:
           script: |
+            const fs = require('fs');
+            const path = require('path');
             const statsCSV = process.env.DEPLOYMENT_STATS || '';
             const overallStats = process.env.OVERALL_STATS || '';
             const helmOutput = process.env.HELM_OUTPUT || '';
+            const chartDir = process.env.CHART_DIR || '';
+            const renderedPath = path.join(process.cwd(), 'rendered-manifests.yaml');
+            const templateListPath = path.join(process.cwd(), 'template-files.txt');
+            const chartYamlPath = path.join(process.cwd(), 'chart-Chart.yaml');
+            const chartValuesPath = path.join(process.cwd(), 'chart-values.yaml');
 
             core.summary
               .addHeading('Deployment Overview', 2)
@@ -205,6 +247,45 @@ jobs:
                 .addHeading('Helm Command Output', 3)
                 .addCodeBlock(helmOutput, 'bash');
             }
+
+            // Add Chart metadata and templates
+            try {
+              if (fs.existsSync(chartYamlPath)) {
+                const chartYaml = fs.readFileSync(chartYamlPath, 'utf8');
+                core.summary.addHeading('Chart.yaml', 3).addCodeBlock(chartYaml, 'yaml');
+              }
+            } catch (e) {}
+
+            try {
+              if (fs.existsSync(chartValuesPath)) {
+                const chartValues = fs.readFileSync(chartValuesPath, 'utf8');
+                core.summary.addHeading('Values used for render', 3).addCodeBlock(chartValues, 'yaml');
+              }
+            } catch (e) {}
+
+            try {
+              if (fs.existsSync(templateListPath)) {
+                const files = fs.readFileSync(templateListPath, 'utf8').trim().split('\n').filter(Boolean);
+                if (files.length) {
+                  core.summary.addHeading('Chart template files', 3);
+                  for (const f of files) {
+                    try {
+                      const content = fs.readFileSync(f, 'utf8');
+                      const name = path.basename(f);
+                      core.summary.addHeading(name, 4).addCodeBlock(content, 'yaml');
+                    } catch (e) {}
+                  }
+                }
+              }
+            } catch (e) {}
+
+            // Add rendered manifests
+            try {
+              if (fs.existsSync(renderedPath)) {
+                const rendered = fs.readFileSync(renderedPath, 'utf8');
+                core.summary.addHeading('Rendered Kubernetes Manifests', 3).addCodeBlock(rendered, 'yaml');
+              }
+            } catch (e) {}
 
             await core.summary.write();
         env:
