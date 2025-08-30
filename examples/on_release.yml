@@ -1,0 +1,36 @@
+name: 'Release CI/CD'
+
+# This workflow handles release activities:
+# - Semantic versioning and changelog generation
+# - Docker image building and publishing
+# - Application deployment to staging
+
+on:
+  push:
+    branches:
+      - 'main'
+    paths:
+      - 'ops/**'
+      - 'src/**'
+      - '.releaserc.json'
+      - '.github/workflows/**'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    name: 'Release Pipeline'
+    uses: webgrip/workflows/.github/workflows/gitflow-release.yml@main
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+      DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+    with:
+      source-paths: 'src/**'
+      ops-paths: 'ops/**'
+      static-analysis-enabled: true
+      tests-enabled: true
+      deploy-enabled: true  # Enable deployment on releases

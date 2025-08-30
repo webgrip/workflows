@@ -1,0 +1,50 @@
+name: 'Source Change CI/CD'
+
+# This workflow handles development activities:
+# - Static analysis and testing on all source changes
+# - Automatic release PR creation from development to main
+# - Validation of pull requests
+
+on:
+  push:
+    branches:
+      - 'development'
+      - 'develop'
+      - 'feature/**'
+      - 'bugfix/**'
+      - 'hotfix/**'
+    paths:
+      - 'ops/**'
+      - 'src/**'
+      - '.releaserc.json'
+      - '.github/workflows/**'
+  pull_request:
+    branches:
+      - 'main'
+      - 'development'
+      - 'develop'
+    paths:
+      - 'ops/**'
+      - 'src/**'
+      - '.releaserc.json'
+      - '.github/workflows/**'
+
+concurrency:
+  group: source-change-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-change:
+    name: 'Source Change Pipeline'
+    uses: webgrip/workflows/.github/workflows/gitflow-release.yml@main
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+      DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+    with:
+      source-paths: 'src/**'
+      ops-paths: 'ops/**'
+      static-analysis-enabled: true
+      tests-enabled: true
+      deploy-enabled: false  # No deployment on source changes
