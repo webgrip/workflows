@@ -1,4 +1,4 @@
-name: 'Source Change CI/CD'
+name: 'Development CI/CD'
 
 # This workflow handles development activities:
 # - Static analysis and testing on all source changes
@@ -34,17 +34,117 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  source-change:
-    name: 'Source Change Pipeline'
-    uses: webgrip/workflows/.github/workflows/gitflow-release.yml@main
-    secrets:
-      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
-      DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
-      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
-    with:
-      source-paths: 'src/**'
-      ops-paths: 'ops/**'
-      static-analysis-enabled: true
-      tests-enabled: true
-      deploy-enabled: false  # No deployment on source changes
+  # Run static analysis on all source changes
+  static-analysis:
+    name: 'Static Analysis'
+    uses: webgrip/workflows/.github/workflows/static-analysis.yml@main
+
+  # Run tests on all source changes
+  tests:
+    name: 'Tests'
+    needs: [static-analysis]
+    if: always() && (needs.static-analysis.result == 'success' || needs.static-analysis.result == 'skipped')
+    uses: webgrip/workflows/.github/workflows/tests.yml@main
+
+  # Create release PR from development to main (only on development branch pushes)
+  create-release-pr:
+    name: 'Create Release PR'
+    needs: [static-analysis, tests]
+    if: |
+      always() &&
+      github.event_name == 'push' &&
+      (github.ref_name == 'development' || github.ref_name == 'develop') &&
+      needs.tests.result == 'success'
+    runs-on: arc-runner-set
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout development
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Check if release PR already exists
+        id: check-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if there's already an open PR from development to main
+          EXISTING_PR=$(gh pr list --base main --head ${{ github.ref_name }} --state open --json number --jq '.[0].number')
+          if [[ "$EXISTING_PR" != "null" && -n "$EXISTING_PR" ]]; then
+            echo "existing-pr=$EXISTING_PR" >> $GITHUB_OUTPUT
+            echo "PR already exists: #$EXISTING_PR"
+          else
+            echo "existing-pr=" >> $GITHUB_OUTPUT
+            echo "No existing PR found"
+          fi
+
+      - name: Generate changelog for release
+        id: changelog
+        if: steps.check-pr.outputs.existing-pr == ''
+        run: |
+          # Ensure we have the latest main branch
+          git fetch origin main:main || git fetch origin main
+          
+          # Get commits between main and development
+          COMMITS=$(git log main..${{ github.ref_name }} --pretty=format:"- %s" --no-merges 2>/dev/null || echo "")
+          
+          if [[ -z "$COMMITS" ]]; then
+            echo "No new commits to release"
+            echo "has-changes=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "has-changes=true" >> $GITHUB_OUTPUT
+          
+          # Generate changelog content
+          CHANGELOG="## Changes in this release
+
+          The following changes will be included in the next release:
+
+          $COMMITS
+
+          ## Release Notes
+
+          This release includes the latest changes from the ${{ github.ref_name }} branch.
+          Please review the changes above before merging.
+
+          ---
+          *This PR was automatically created by the Development CI/CD workflow.*"
+          
+          # Save changelog to file for use in PR
+          echo "$CHANGELOG" > /tmp/release-notes.md
+          echo "Generated changelog with $(echo "$COMMITS" | wc -l) commits"
+
+      - name: Create release PR
+        if: |
+          steps.check-pr.outputs.existing-pr == '' && 
+          steps.changelog.outputs.has-changes == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create PR from development to main
+          gh pr create \
+            --title "🚀 Release: ${{ github.ref_name }} → main" \
+            --body-file /tmp/release-notes.md \
+            --base main \
+            --head ${{ github.ref_name }} \
+            --label "release" \
+            --label "automated"
+
+          echo "Created release PR from ${{ github.ref_name }} to main"
+
+      - name: Update existing release PR
+        if: |
+          steps.check-pr.outputs.existing-pr != '' && 
+          steps.changelog.outputs.has-changes == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Update the existing PR with new changelog
+          gh pr edit ${{ steps.check-pr.outputs.existing-pr }} \
+            --body-file /tmp/release-notes.md
+
+          echo "Updated existing release PR #${{ steps.check-pr.outputs.existing-pr }}"

@@ -1,33 +1,41 @@
 # Application Workflow Examples
 
-This directory contains example workflow files that applications can copy into their repositories to use the gitflow-esque release workflow.
+This directory contains example workflow files that applications can copy into their repositories to implement a clean gitflow-style development process with separated concerns.
 
 ## Files
 
-### `on_source_change.yml`
+### `on_source_change.yml` - Development CI/CD
 This workflow handles development activities and should be triggered by:
-- Pushes to development/feature branches
+- Pushes to development/feature/bugfix/hotfix branches
 - Pull requests to main/development branches
 
 **Actions performed:**
-- Static analysis on all changes
-- Automated testing
+- Static analysis using `webgrip/workflows/.github/workflows/static-analysis.yml`
+- Automated testing using `webgrip/workflows/.github/workflows/tests.yml`
 - Automatic creation of release PRs from development to main
 - No deployment (development activities only)
 
-### `on_release.yml`
+### `on_release.yml` - Release CI/CD
 This workflow handles release activities and should be triggered by:
 - Pushes to the main branch (typically from merged release PRs)
 
 **Actions performed:**
-- Static analysis and testing (as final validation)
-- Semantic versioning and changelog generation
-- Docker image building and publishing
-- Application deployment to staging environment
+- Static analysis and testing (final validation)
+- Semantic versioning and changelog generation using `webgrip/workflows/.github/workflows/semantic-release.yml`
+- Docker image building and publishing using `webgrip/workflows/.github/workflows/docker-build-and-push.yml`
+- Secrets deployment using `webgrip/workflows/.github/workflows/helm-charts-deploy.yml`
+- Application deployment using `webgrip/workflows/.github/workflows/helm-chart-deploy.yml`
+
+## Key Benefits
+
+- **Separation of Concerns**: Development and release workflows are completely separate
+- **Direct Workflow Calls**: Each workflow calls specific components instead of monolithic workflows
+- **Clear Dependencies**: Easy to understand job dependencies and flow
+- **Focused Execution**: Development workflows focus on validation, release workflows focus on deployment
 
 ## Usage
 
-### Option 1: Separate Source Change and Release Workflows
+### Recommended: Separate Development and Release Workflows
 
 Copy both files to your application repository's `.github/workflows/` directory:
 
@@ -37,9 +45,13 @@ cp examples/on_source_change.yml .github/workflows/
 cp examples/on_release.yml .github/workflows/
 ```
 
-This approach separates development activities from release activities, providing clear separation of concerns.
+This approach provides:
+- **Clear separation** between development validation and release deployment
+- **Focused workflows** that do exactly what they need to
+- **Better visibility** into which stage is failing
+- **Independent scaling** of development vs release processes
 
-### Option 2: Single Combined Workflow
+### Alternative: Single Combined Workflow
 
 If you prefer a single workflow file, you can use the combined approach from `gitflow-application.yml`:
 
@@ -50,16 +62,12 @@ cp .github/workflows/gitflow-application.yml .github/workflows/
 
 ## Configuration
 
-Both workflow examples can be customized by modifying the `with` parameters:
+The example workflows are ready to use as-is, but can be customized by modifying the workflow parameters directly in the files. Common customizations include:
 
-```yaml
-with:
-  source-paths: 'src/**'              # Paths to monitor for source changes
-  ops-paths: 'ops/**'                 # Paths to monitor for ops changes
-  static-analysis-enabled: true       # Enable/disable static analysis
-  tests-enabled: true                 # Enable/disable automated testing
-  deploy-enabled: true                # Enable/disable deployment (release workflow only)
-```
+- **Path filters**: Modify the `paths` sections to watch different directories
+- **Branch names**: Adjust branch names in the `branches` sections
+- **Environments**: Change deployment targets in `on_release.yml`
+- **Docker settings**: Update Docker context, file paths, and tag strategies
 
 ## Required Secrets
 

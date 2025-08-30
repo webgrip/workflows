@@ -1,6 +1,7 @@
 name: 'Release CI/CD'
 
 # This workflow handles release activities:
+# - Static analysis and testing before release
 # - Semantic versioning and changelog generation
 # - Docker image building and publishing
 # - Application deployment to staging
@@ -20,17 +21,89 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  release:
-    name: 'Release Pipeline'
-    uses: webgrip/workflows/.github/workflows/gitflow-release.yml@main
+  # Run static analysis before release
+  static-analysis:
+    name: 'Static Analysis'
+    uses: webgrip/workflows/.github/workflows/static-analysis.yml@main
+
+  # Run tests before release
+  tests:
+    name: 'Tests'
+    needs: [static-analysis]
+    if: |
+      always() && 
+      (needs.static-analysis.result == 'success' || 
+       needs.static-analysis.result == 'skipped')
+    uses: webgrip/workflows/.github/workflows/tests.yml@main
+
+  # Create semantic release with version and changelog
+  semantic-release:
+    name: 'Semantic Release'
+    needs: [static-analysis, tests]
+    if: always() && needs.tests.result == 'success'
+    uses: webgrip/workflows/.github/workflows/semantic-release.yml@main
+    with:
+      release-type: 'gitflow'
+
+  # Determine changed secrets for deployment
+  determine-changed-secrets:
+    name: "Determine Changed Secrets"
+    needs: [semantic-release]
+    if: |
+      always() && 
+      (needs.semantic-release.result == 'success' || 
+       needs.semantic-release.result == 'skipped')
+    uses: webgrip/workflows/.github/workflows/determine-changed-directories.yml@main
+    with:
+      inside-dir: 'ops/secrets'
+      max-level: 1
+
+  # Deploy changed secrets
+  deploy-changed-secrets:
+    name: "Deploy Changed Secrets"
+    needs: [determine-changed-secrets]
+    if: always() && needs.determine-changed-secrets.outputs.matrix != '[]'
+    uses: webgrip/workflows/.github/workflows/helm-charts-deploy.yml@main
     secrets:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
       DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
       SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
     with:
-      source-paths: 'src/**'
-      ops-paths: 'ops/**'
-      static-analysis-enabled: true
-      tests-enabled: true
-      deploy-enabled: true  # Enable deployment on releases
+      paths: ${{ needs.determine-changed-secrets.outputs.matrix }}
+
+  # Build and push Docker image (only if semantic release created a version)
+  build:
+    name: 'Build and Push Docker Image'
+    needs: [semantic-release]
+    if: |
+      always() &&
+      needs.semantic-release.result == 'success' &&
+      needs.semantic-release.outputs.version != ''
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push.yml@main
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+    with:
+      docker-context: '.'
+      docker-file: './ops/docker/application/Dockerfile'
+      docker-tags: |
+        ${{github.repository_owner}}/${{ github.event.repository.name }}:latest
+        ${{github.repository_owner}}/${{ github.event.repository.name }}:${{ needs.semantic-release.outputs.version }}
+
+  # Deploy application to staging (only after successful build)
+  deploy-application:
+    name: 'Deploy Application'
+    needs: [semantic-release, build, deploy-changed-secrets]
+    if: |
+      always() &&
+      needs.build.result == 'success'
+    uses: webgrip/workflows/.github/workflows/helm-chart-deploy.yml@main
+    secrets:
+      DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+    with:
+      environment: 'staging'
+      path: './ops/helm/${{ github.event.repository.name }}'
+      tag: ${{ needs.semantic-release.outputs.version }}
