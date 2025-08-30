@@ -37,7 +37,15 @@ runs:
       shell: bash
       run: |
         if [[ -n "${{ inputs.release-type }}" ]]; then
-          echo "release_config=--extends=./.releaserc.${{ inputs.release-type }}.json" >> $GITHUB_OUTPUT
+          # Check if custom config exists in the repo
+          if [[ -f "./.releaserc.${{ inputs.release-type }}.json" ]]; then
+            echo "release_config=--extends=./.releaserc.${{ inputs.release-type }}.json" >> $GITHUB_OUTPUT
+          # Fall back to webgrip/workflows configs
+          elif [[ -f "$(dirname "$0")/../../.releaserc.${{ inputs.release-type }}.json" ]]; then
+            echo "release_config=--extends=$(dirname "$0")/../../.releaserc.${{ inputs.release-type }}.json" >> $GITHUB_OUTPUT
+          else
+            echo "release_config=" >> $GITHUB_OUTPUT
+          fi
         else
           echo "release_config=" >> $GITHUB_OUTPUT
         fi

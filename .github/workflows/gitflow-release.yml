@@ -1,0 +1,292 @@
+name: 'Gitflow Release Workflow'
+
+on:
+  workflow_call:
+    inputs:
+      source-paths:
+        description: 'Paths to monitor for source changes'
+        required: false
+        type: string
+        default: 'src/**'
+      ops-paths:
+        description: 'Paths to monitor for ops changes'
+        required: false
+        type: string
+        default: 'ops/**'
+      static-analysis-enabled:
+        description: 'Enable static analysis'
+        required: false
+        type: boolean
+        default: true
+      tests-enabled:
+        description: 'Enable tests'
+        required: false
+        type: boolean
+        default: true
+      deploy-enabled:
+        description: 'Enable deployment'
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      DOCKER_USERNAME:
+        required: false
+      DOCKER_TOKEN:
+        required: false
+      DIGITAL_OCEAN_API_KEY:
+        required: false
+      SOPS_AGE_KEY:
+        required: false
+
+jobs:
+  # Determine what type of branch we're working with
+  branch-analysis:
+    name: 'Analyze Branch Type'
+    runs-on: arc-runner-set
+    outputs:
+      branch-type: ${{ steps.branch-type.outputs.type }}
+      is-main: ${{ steps.branch-type.outputs.is-main }}
+      is-development: ${{ steps.branch-type.outputs.is-development }}
+      is-feature: ${{ steps.branch-type.outputs.is-feature }}
+      should-run-tests: ${{ steps.branch-type.outputs.should-run-tests }}
+      should-create-release-pr: ${{ steps.branch-type.outputs.should-create-release-pr }}
+      should-run-semantic-release: ${{ steps.branch-type.outputs.should-run-semantic-release }}
+    steps:
+      - name: Determine branch type and actions
+        id: branch-type
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          echo "Branch: $BRANCH_NAME"
+          
+          # Default values
+          IS_MAIN=false
+          IS_DEVELOPMENT=false
+          IS_FEATURE=false
+          SHOULD_RUN_TESTS=true
+          SHOULD_CREATE_RELEASE_PR=false
+          SHOULD_RUN_SEMANTIC_RELEASE=false
+          
+          # Determine branch type
+          if [[ "$BRANCH_NAME" == "main" ]]; then
+            BRANCH_TYPE="main"
+            IS_MAIN=true
+            SHOULD_RUN_SEMANTIC_RELEASE=true
+          elif [[ "$BRANCH_NAME" == "development" || "$BRANCH_NAME" == "develop" ]]; then
+            BRANCH_TYPE="development"
+            IS_DEVELOPMENT=true
+            SHOULD_CREATE_RELEASE_PR=true
+          elif [[ "$BRANCH_NAME" == feature/* ]] || [[ "$BRANCH_NAME" == bugfix/* ]] || [[ "$BRANCH_NAME" == hotfix/* ]]; then
+            BRANCH_TYPE="feature"
+            IS_FEATURE=true
+          else
+            BRANCH_TYPE="other"
+          fi
+          
+          # Output results
+          echo "type=$BRANCH_TYPE" >> $GITHUB_OUTPUT
+          echo "is-main=$IS_MAIN" >> $GITHUB_OUTPUT
+          echo "is-development=$IS_DEVELOPMENT" >> $GITHUB_OUTPUT
+          echo "is-feature=$IS_FEATURE" >> $GITHUB_OUTPUT
+          echo "should-run-tests=$SHOULD_RUN_TESTS" >> $GITHUB_OUTPUT
+          echo "should-create-release-pr=$SHOULD_CREATE_RELEASE_PR" >> $GITHUB_OUTPUT
+          echo "should-run-semantic-release=$SHOULD_RUN_SEMANTIC_RELEASE" >> $GITHUB_OUTPUT
+          
+          echo "Branch Type: $BRANCH_TYPE"
+          echo "Should run tests: $SHOULD_RUN_TESTS"
+          echo "Should create release PR: $SHOULD_CREATE_RELEASE_PR"
+          echo "Should run semantic release: $SHOULD_RUN_SEMANTIC_RELEASE"
+
+  # Run static analysis on all branches
+  static-analysis:
+    name: 'Static Analysis'
+    needs: [branch-analysis]
+    if: inputs.static-analysis-enabled == true
+    uses: webgrip/workflows/.github/workflows/static-analysis.yml@main
+
+  # Run tests on all branches
+  tests:
+    name: 'Tests'
+    needs: [branch-analysis, static-analysis]
+    if: |
+      always() &&
+      inputs.tests-enabled == true &&
+      needs.branch-analysis.outputs.should-run-tests == 'true' &&
+      (needs.static-analysis.result == 'success' || needs.static-analysis.result == 'skipped')
+    uses: webgrip/workflows/.github/workflows/tests.yml@main
+
+  # Create release PR from development to main
+  create-release-pr:
+    name: 'Create Release PR'
+    needs: [branch-analysis, static-analysis, tests]
+    if: |
+      always() &&
+      needs.branch-analysis.outputs.should-create-release-pr == 'true' &&
+      needs.tests.result == 'success'
+    runs-on: arc-runner-set
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout development
+        uses: actions/checkout@v4
+        with:
+          ref: development
+          fetch-depth: 0
+
+      - name: Check if release PR already exists
+        id: check-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if there's already an open PR from development to main
+          EXISTING_PR=$(gh pr list --base main --head development --state open --json number --jq '.[0].number')
+          if [[ "$EXISTING_PR" != "null" && -n "$EXISTING_PR" ]]; then
+            echo "existing-pr=$EXISTING_PR" >> $GITHUB_OUTPUT
+            echo "PR already exists: #$EXISTING_PR"
+          else
+            echo "existing-pr=" >> $GITHUB_OUTPUT
+            echo "No existing PR found"
+          fi
+
+      - name: Generate changelog for release
+        id: changelog
+        if: steps.check-pr.outputs.existing-pr == ''
+        run: |
+          # Get commits between main and development
+          COMMITS=$(git log main..development --pretty=format:"- %s" --no-merges)
+          
+          if [[ -z "$COMMITS" ]]; then
+            echo "No new commits to release"
+            echo "has-changes=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "has-changes=true" >> $GITHUB_OUTPUT
+          
+          # Generate changelog content
+          CHANGELOG="## Changes in this release
+
+          The following changes will be included in the next release:
+
+          $COMMITS
+
+          ## Release Notes
+
+          This release includes the latest changes from the development branch.
+          Please review the changes above before merging.
+
+          ---
+          *This PR was automatically created by the Gitflow Release Workflow.*"
+          
+          # Save changelog to file for use in PR
+          echo "$CHANGELOG" > /tmp/release-notes.md
+          echo "Generated changelog with $(echo "$COMMITS" | wc -l) commits"
+
+      - name: Create release PR
+        if: steps.check-pr.outputs.existing-pr == '' && steps.changelog.outputs.has-changes == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create PR from development to main
+          gh pr create \
+            --title "🚀 Release: development → main" \
+            --body-file /tmp/release-notes.md \
+            --base main \
+            --head development \
+            --label "release" \
+            --label "automated"
+          
+          echo "Created release PR from development to main"
+
+      - name: Update existing release PR
+        if: steps.check-pr.outputs.existing-pr != '' && steps.changelog.outputs.has-changes == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Update the existing PR with new changelog
+          gh pr edit ${{ steps.check-pr.outputs.existing-pr }} \
+            --body-file /tmp/release-notes.md
+          
+          echo "Updated existing release PR #${{ steps.check-pr.outputs.existing-pr }}"
+
+  # Run semantic release on main branch only
+  semantic-release:
+    name: 'Semantic Release'
+    needs: [branch-analysis, static-analysis, tests]
+    if: |
+      always() &&
+      needs.branch-analysis.outputs.should-run-semantic-release == 'true' &&
+      needs.tests.result == 'success'
+    uses: webgrip/workflows/.github/workflows/semantic-release.yml@main
+
+  # Determine changed secrets (only on main)
+  determine-changed-secrets:
+    name: "Determine Changed Secrets"
+    needs: [branch-analysis, semantic-release]
+    if: |
+      always() &&
+      needs.branch-analysis.outputs.is-main == 'true' &&
+      inputs.deploy-enabled == true &&
+      (needs.semantic-release.result == 'success' || needs.semantic-release.result == 'skipped')
+    uses: webgrip/workflows/.github/workflows/determine-changed-directories.yml@main
+    with:
+      inside-dir: 'ops/secrets'
+      max-level: 1
+
+  # Deploy changed secrets (only on main)
+  deploy-changed-secrets:
+    name: "Deploy Changed Secrets"
+    needs: [branch-analysis, determine-changed-secrets]
+    if: |
+      always() &&
+      needs.branch-analysis.outputs.is-main == 'true' &&
+      needs.determine-changed-secrets.outputs.matrix != '[]' &&
+      inputs.deploy-enabled == true
+    uses: webgrip/workflows/.github/workflows/helm-charts-deploy.yml@main
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+      DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+    with:
+      paths: ${{ needs.determine-changed-secrets.outputs.matrix }}
+
+  # Build Docker image (only on main after successful release)
+  build:
+    name: 'Build'
+    needs: [branch-analysis, semantic-release]
+    if: |
+      always() &&
+      needs.branch-analysis.outputs.is-main == 'true' &&
+      needs.semantic-release.result == 'success' &&
+      needs.semantic-release.outputs.version != '' &&
+      inputs.deploy-enabled == true
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push.yml@main
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+    with:
+      docker-context: '.'
+      docker-file: './ops/docker/application/Dockerfile'
+      docker-tags: |
+        ${{github.repository_owner}}/${{ github.event.repository.name }}:latest
+        ${{github.repository_owner}}/${{ github.event.repository.name }}:${{ needs.semantic-release.outputs.version }}
+
+  # Deploy application (only on main after successful build)
+  deploy-application:
+    name: 'Deploy Application'
+    needs: [branch-analysis, semantic-release, build, deploy-changed-secrets]
+    if: |
+      always() &&
+      needs.branch-analysis.outputs.is-main == 'true' &&
+      needs.build.result == 'success' &&
+      inputs.deploy-enabled == true
+    uses: webgrip/workflows/.github/workflows/helm-chart-deploy.yml@main
+    secrets:
+      DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+    with:
+      environment: 'staging'
+      path: './ops/helm/${{ github.event.repository.name }}'
+      tag: ${{ needs.semantic-release.outputs.version }}
