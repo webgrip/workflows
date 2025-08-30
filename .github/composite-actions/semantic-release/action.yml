@@ -40,14 +40,30 @@ runs:
           # Check if custom config exists in the repo
           if [[ -f "./.releaserc.${{ inputs.release-type }}.json" ]]; then
             echo "release_config=--extends=./.releaserc.${{ inputs.release-type }}.json" >> $GITHUB_OUTPUT
-          # Fall back to webgrip/workflows configs
-          elif [[ -f "$(dirname "$0")/../../.releaserc.${{ inputs.release-type }}.json" ]]; then
-            echo "release_config=--extends=$(dirname "$0")/../../.releaserc.${{ inputs.release-type }}.json" >> $GITHUB_OUTPUT
+            echo "Using repo-specific config: ./.releaserc.${{ inputs.release-type }}.json"
           else
-            echo "release_config=" >> $GITHUB_OUTPUT
+            # For gitflow, try to download the config from webgrip/workflows
+            if [[ "${{ inputs.release-type }}" == "gitflow" ]]; then
+              echo "Downloading gitflow config from webgrip/workflows..."
+              curl -s -o ".releaserc.gitflow.json" \
+                "https://raw.githubusercontent.com/webgrip/workflows/main/.releaserc.gitflow.json" || \
+                echo "Failed to download gitflow config, using default"
+              
+              if [[ -f ".releaserc.gitflow.json" ]]; then
+                echo "release_config=--extends=./.releaserc.gitflow.json" >> $GITHUB_OUTPUT
+                echo "Using downloaded gitflow config"
+              else
+                echo "release_config=" >> $GITHUB_OUTPUT
+                echo "Using default semantic-release configuration"
+              fi
+            else
+              echo "release_config=" >> $GITHUB_OUTPUT
+              echo "Using default semantic-release configuration"
+            fi
           fi
         else
           echo "release_config=" >> $GITHUB_OUTPUT
+          echo "Using default semantic-release configuration"
         fi
 
     - name: Run semantic-release
