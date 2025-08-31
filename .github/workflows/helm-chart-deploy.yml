@@ -68,8 +68,10 @@ jobs:
           if [ -f "$chartDir/values.sops.yaml" ]; then
             echo "Decrypting SOPS file: $chartDir/values.sops.yaml"
             sops --decrypt "$chartDir/values.sops.yaml" > "$chartDir/values.dec.yaml"
+            echo "sops_used=true" >> "$GITHUB_OUTPUT"
           else
             echo "No SOPS file found at $chartDir/values.sops.yaml, skipping."
+            echo "sops_used=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Deploy the specified Helm chart
@@ -224,6 +226,7 @@ jobs:
             const templateListPath = path.join(process.cwd(), 'template-files.txt');
             const chartYamlPath = path.join(process.cwd(), 'chart-Chart.yaml');
             const chartValuesPath = path.join(process.cwd(), 'chart-values.yaml');
+            const sopsUsed = (process.env.SOPS_USED || '').toLowerCase() === 'true';
 
             core.summary
               .addHeading('Deployment Overview', 2)
@@ -261,8 +264,12 @@ jobs:
 
             try {
               if (fs.existsSync(chartValuesPath)) {
-                const chartValues = fs.readFileSync(chartValuesPath, 'utf8');
-                core.summary.addHeading('Values used for render', 3).addCodeBlock(chartValues, 'yaml');
+                if (sopsUsed) {
+                  core.summary.addHeading('Values used for render', 3).addRaw('Suppressed (SOPS secrets in use)').addEOL();
+                } else {
+                  const chartValues = fs.readFileSync(chartValuesPath, 'utf8');
+                  core.summary.addHeading('Values used for render', 3).addCodeBlock(chartValues, 'yaml');
+                }
               }
             } catch (e) {}
 
@@ -282,11 +289,17 @@ jobs:
               }
             } catch (e) {}
 
-            // Add rendered manifests
+            // Add rendered manifests (suppress if secrets present)
             try {
               if (fs.existsSync(renderedPath)) {
                 const rendered = fs.readFileSync(renderedPath, 'utf8');
-                core.summary.addHeading('Rendered Kubernetes Manifests', 3).addCodeBlock(rendered, 'yaml');
+                const containsSecret = /\bkind:\s+Secret\b/i.test(rendered);
+                if (sopsUsed || containsSecret) {
+                  core.summary.addHeading('Rendered Kubernetes Manifests', 3)
+                    .addRaw('Suppressed due to presence of secrets (SOPS or Secret kind detected).');
+                } else {
+                  core.summary.addHeading('Rendered Kubernetes Manifests', 3).addCodeBlock(rendered, 'yaml');
+                }
               }
             } catch (e) {}
 
@@ -295,6 +308,7 @@ jobs:
           DEPLOYMENT_STATS: ${{ steps.collect-stats.outputs.stats }}
           OVERALL_STATS: ${{ steps.collect-stats.outputs.overall }}
           HELM_OUTPUT: ${{ steps.deploy.outputs.helm_output }}
+          SOPS_USED: ${{ steps.decrypt_sops.outputs.sops_used }}
 
       - name: Fail if Helm Failed
         if: steps.deploy.outputs.exit_code == '1'
