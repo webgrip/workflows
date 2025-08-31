@@ -4,15 +4,11 @@ on:
   workflow_call:
     secrets:
       DOCKER_USERNAME:
-        description: >-
-          Docker Username (optional, for pulling private images
-          during deployment)
-        required: false
+        description: 'Docker Username'
+        required: true
       DOCKER_TOKEN:
-        description: >-
-          Docker Token (optional, for pulling private images
-          during deployment)
-        required: false
+        description: 'Docker Token'
+        required: true
       DIGITAL_OCEAN_API_KEY:
         description: 'DigitalOcean API Key'
         required: true
@@ -43,9 +39,6 @@ jobs:
         password: ${{ github.token }}
     name: ${{ inputs.path }}
     runs-on: arc-runner-set
-    permissions:
-      contents: read
-      packages: read
     env:
       DO_CLUSTER_NAME: webgrip-${{ inputs.environment }}-cluster
       DO_KUBECONFIG_FILE: './doks-kubeconfig'

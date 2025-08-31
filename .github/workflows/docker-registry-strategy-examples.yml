@@ -1,0 +1,112 @@
+name: 'Example: Docker Registry Strategy Options'
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry-strategy:
+        description: 'Choose registry strategy'
+        required: true
+        default: 'auto'
+        type: choice
+        options:
+        - auto
+        - ghcr
+        - dockerhub
+        - dual
+        - legacy
+        - none
+
+jobs:
+  demo-auto-strategy:
+    name: "Demo: Auto Strategy (Recommended)"
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push.yml@main
+    with:
+      docker-context: '.'
+      docker-file: 'Dockerfile'
+      docker-tags: |
+        latest
+        ${{ github.sha }}
+      registry-strategy: 'auto'  # Automatically chooses based on available secrets
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}  # Optional
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}      # Optional
+
+  demo-ghcr-only:
+    name: "Demo: GHCR Only"
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push.yml@main
+    with:
+      docker-context: '.'
+      docker-file: 'Dockerfile'
+      docker-tags: |
+        latest
+        ${{ github.sha }}
+      registry-strategy: 'ghcr'  # Force GHCR only
+    # No Docker secrets needed
+    
+  demo-dockerhub-only:
+    name: "Demo: Docker Hub Only"
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push.yml@main
+    with:
+      docker-context: '.'
+      docker-file: 'Dockerfile'
+      docker-tags: |
+        latest
+        ${{ github.sha }}
+      registry-strategy: 'dockerhub'  # Force Docker Hub only
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}  # Required for this strategy
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}      # Required for this strategy
+
+  demo-dual-registry:
+    name: "Demo: Both Registries"
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push.yml@main
+    with:
+      docker-context: '.'
+      docker-file: 'Dockerfile'
+      docker-tags: |
+        latest
+        ${{ github.sha }}
+      registry-strategy: 'dual'  # Force both registries
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}  # Required for this strategy
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}      # Required for this strategy
+
+  demo-legacy-mode:
+    name: "Demo: Legacy Mode (Backward Compatibility)"
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push.yml@main
+    with:
+      docker-context: '.'
+      docker-file: 'Dockerfile'
+      docker-tags: |
+        latest
+        ${{ github.sha }}
+      registry-strategy: 'legacy'  # Use original docker-build-push action
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}  # Required for legacy mode
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}      # Required for legacy mode
+
+  demo-no-push:
+    name: "Demo: No Push (Build Only)"
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push.yml@main
+    with:
+      docker-context: '.'
+      docker-file: 'Dockerfile'
+      docker-tags: |
+        latest
+        ${{ github.sha }}
+      registry-strategy: 'none'  # Skip pushing entirely
+    # No secrets needed
+
+  demo-user-selected:
+    name: "Demo: User Selected Strategy"
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push.yml@main
+    with:
+      docker-context: '.'
+      docker-file: 'Dockerfile'
+      docker-tags: |
+        latest
+        ${{ github.sha }}
+      registry-strategy: ${{ inputs.registry-strategy }}
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}

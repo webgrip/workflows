@@ -1,0 +1,93 @@
+name: '[Action] Smart Docker Build and Push'
+description: 'Conditionally builds and pushes Docker images based on available secrets'
+
+inputs:
+  docker-context:
+    type: string
+    description: 'Docker context'
+    required: true
+    default: '.'
+  docker-file:
+    type: string
+    description: 'Dockerfile path from the context'
+    required: true
+    default: 'Dockerfile'
+  docker-tags:
+    type: string
+    description: 'Docker tags'
+    required: true
+  docker-target:
+    type: string
+    description: 'Docker target'
+    required: false
+    default: ''
+
+runs:
+  using: "composite"
+  steps:
+    - name: Determine registry strategy
+      id: strategy
+      shell: bash
+      run: |
+        # Check which secrets are available
+        has_docker_hub=false
+        has_github_token=true  # Always available in GitHub Actions
+        
+        if [[ -n "${{ env.DOCKER_USERNAME }}" && -n "${{ env.DOCKER_TOKEN }}" ]]; then
+          has_docker_hub=true
+        fi
+        
+        # Determine strategy
+        if [[ "$has_docker_hub" == "true" && "$has_github_token" == "true" ]]; then
+          strategy="dual"
+          echo "🚀 Using dual-registry strategy (GHCR + Docker Hub)"
+        elif [[ "$has_github_token" == "true" ]]; then
+          strategy="ghcr"
+          echo "🐙 Using GHCR-only strategy"
+        elif [[ "$has_docker_hub" == "true" ]]; then
+          strategy="dockerhub"
+          echo "🐋 Using Docker Hub-only strategy"
+        else
+          strategy="none"
+          echo "❌ No registry credentials available - skipping push"
+        fi
+        
+        echo "strategy=$strategy" >> "$GITHUB_OUTPUT"
+        echo "Registry strategy: $strategy"
+        
+    - name: Build and Push to Both Registries
+      if: steps.strategy.outputs.strategy == 'dual'
+      uses: webgrip/workflows/.github/composite-actions/docker-build-push-dual@main
+      with:
+        docker-context: ${{ inputs.docker-context }}
+        docker-file: ${{ inputs.docker-file }}
+        docker-tags: ${{ inputs.docker-tags }}
+        docker-target: ${{ inputs.docker-target }}
+        
+    - name: Build and Push to GHCR Only
+      if: steps.strategy.outputs.strategy == 'ghcr'
+      uses: webgrip/workflows/.github/composite-actions/docker-build-push-ghcr@main
+      with:
+        docker-context: ${{ inputs.docker-context }}
+        docker-file: ${{ inputs.docker-file }}
+        docker-tags: ${{ inputs.docker-tags }}
+        docker-target: ${{ inputs.docker-target }}
+        
+    - name: Build and Push to Docker Hub Only
+      if: steps.strategy.outputs.strategy == 'dockerhub'
+      uses: webgrip/workflows/.github/composite-actions/docker-build-push-dockerhub@main
+      with:
+        docker-context: ${{ inputs.docker-context }}
+        docker-file: ${{ inputs.docker-file }}
+        docker-tags: ${{ inputs.docker-tags }}
+        docker-target: ${{ inputs.docker-target }}
+        
+    - name: Skip Push (No Credentials)
+      if: steps.strategy.outputs.strategy == 'none'
+      shell: bash
+      run: |
+        echo "⚠️  No registry credentials provided - Docker image build and push skipped"
+        echo "To enable pushing:"
+        echo "  - For GHCR: Ensure GitHub token has packages:write permission (automatic in most cases)"
+        echo "  - For Docker Hub: Provide DOCKER_USERNAME and DOCKER_TOKEN secrets"
+        echo "  - For both: Provide both sets of credentials"
