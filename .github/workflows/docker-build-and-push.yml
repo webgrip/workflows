@@ -2,11 +2,15 @@ on:
   workflow_call:
     secrets:
       DOCKER_USERNAME:
-          description: 'DockerHub username (optional, for pushing to Docker Hub in addition to GHCR)'
-          required: false
+        description: >-
+          DockerHub username (optional, for pushing to Docker Hub
+          in addition to GHCR)
+        required: false
       DOCKER_TOKEN:
-          description: 'DockerHub token (optional, for pushing to Docker Hub in addition to GHCR)'
-          required: false
+        description: >-
+          DockerHub token (optional, for pushing to Docker Hub
+          in addition to GHCR)
+        required: false
     inputs:
       docker-context:
         type: string

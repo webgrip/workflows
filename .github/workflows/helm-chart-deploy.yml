@@ -4,10 +4,14 @@ on:
   workflow_call:
     secrets:
       DOCKER_USERNAME:
-        description: 'Docker Username (optional, for pulling private images during deployment)'
+        description: >-
+          Docker Username (optional, for pulling private images
+          during deployment)
         required: false
       DOCKER_TOKEN:
-        description: 'Docker Token (optional, for pulling private images during deployment)'
+        description: >-
+          Docker Token (optional, for pulling private images
+          during deployment)
         required: false
       DIGITAL_OCEAN_API_KEY:
         description: 'DigitalOcean API Key'
