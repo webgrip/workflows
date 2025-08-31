@@ -28,16 +28,69 @@ runs:
     - uses: actions/checkout@v4
     - uses: docker/setup-qemu-action@v3
     - uses: docker/setup-buildx-action@v3
-    - uses: docker/login-action@v3
+    - name: Login to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+    - name: Login to Docker Hub
+      if: ${{ env.DOCKER_USERNAME != '' && env.DOCKER_TOKEN != '' }}
+      uses: docker/login-action@v3
       with:
         username: ${{ env.DOCKER_USERNAME }}
         password: ${{ env.DOCKER_TOKEN }}
+    - name: Generate registry tags
+      id: registry-tags
+      shell: bash
+      run: |
+        # Convert repository name to lowercase for GitHub Container Registry
+        repo_name=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+        
+        # Initialize output file
+        echo -n > all_tags.tmp
+        
+        # Parse input tags and generate tags for both registries
+        echo "${{ inputs.docker-tags }}" | while IFS= read -r tag; do
+          # Skip empty lines
+          if [[ -z "${tag// }" ]]; then
+            continue
+          fi
+          
+          # If tag already has a registry prefix, use as-is
+          if [[ "$tag" == ghcr.io/* ]] || [[ "$tag" == docker.io/* ]]; then
+            echo "$tag" >> all_tags.tmp
+          elif [[ "$tag" == */* ]]; then
+            # Tag has repository name, add GHCR prefix and optionally Docker Hub
+            echo "ghcr.io/$tag" >> all_tags.tmp
+            if [[ -n "${{ env.DOCKER_USERNAME }}" && -n "${{ env.DOCKER_TOKEN }}" ]]; then
+              echo "$tag" >> all_tags.tmp
+            fi
+          else
+            # Tag is just tag name, prepend with repo name for both registries
+            echo "ghcr.io/${repo_name}:${tag}" >> all_tags.tmp
+            if [[ -n "${{ env.DOCKER_USERNAME }}" && -n "${{ env.DOCKER_TOKEN }}" ]]; then
+              echo "${repo_name}:${tag}" >> all_tags.tmp
+            fi
+          fi
+        done
+        
+        # Output the tags
+        echo "all_tags<<EOF" >> "$GITHUB_OUTPUT"
+        cat all_tags.tmp >> "$GITHUB_OUTPUT"
+        echo "EOF" >> "$GITHUB_OUTPUT"
+        
+        # Debug output
+        echo "Generated tags:"
+        cat all_tags.tmp
+        
+        rm -f all_tags.tmp
     - name: Get cache tag
       id: cache-tag
       shell: bash
       run: |
         # Split the docker-tags input by newline, ignore empty lines, and select the first tag.
-        primary=$(echo "${{ inputs.docker-tags }}" | grep -v '^\s*$' | head -n 1)
+        primary=$(echo "${{ steps.registry-tags.outputs.all_tags }}" | grep -v '^\s*$' | head -n 1)
         # Use :cache instead of :latest to avoid conflicts with the latest tag.
         cache="${primary%:latest}:cache"
         echo "cache_tag=$cache" >> "$GITHUB_OUTPUT"
@@ -47,8 +100,7 @@ runs:
         file: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
         platforms: linux/amd64,linux/arm64
         push: true
-        tags: |
-          ${{ inputs.docker-tags }}
+        tags: ${{ steps.registry-tags.outputs.all_tags }}
         target: ${{ inputs.docker-target }}
         cache-from: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }}
         cache-to: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }},mode=max,compression=zstd

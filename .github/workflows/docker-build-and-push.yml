@@ -2,11 +2,11 @@ on:
   workflow_call:
     secrets:
       DOCKER_USERNAME:
-          description: 'DockerHub username'
-          required: true
+          description: 'DockerHub username (optional, for pushing to Docker Hub in addition to GHCR)'
+          required: false
       DOCKER_TOKEN:
-          description: 'DockerHub token'
-          required: true
+          description: 'DockerHub token (optional, for pushing to Docker Hub in addition to GHCR)'
+          required: false
     inputs:
       docker-context:
         type: string
@@ -34,6 +34,9 @@ jobs:
   build:
     name: "Docker Build and Push"
     runs-on: arc-runner-set
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: webgrip/workflows/.github/composite-actions/docker-build-push@main
         with:
