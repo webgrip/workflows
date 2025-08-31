@@ -16,7 +16,7 @@ on:
       WEBGRIP_CI_APP_ID:
         description: 'GitHub App ID (numeric)'
         required: false
-      WEBGRIP_APP_PRIVATE_KEY:
+      WEBGRIP_CI_APP_PRIVATE_KEY:
         description: 'GitHub App private key'
         required: false
     outputs:
@@ -42,7 +42,7 @@ jobs:
         uses: actions/create-github-app-token@v2
         with:
           app-id: ${{ secrets.WEBGRIP_CI_APP_ID }}
-          private-key: ${{ secrets.WEBGRIP_APP_PRIVATE_KEY }}
+          private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
 
