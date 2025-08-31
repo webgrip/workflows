@@ -111,10 +111,11 @@ jobs:
 
           helm dependency update "$chartDir"
 
+          # --force sometimes helps with image updates
           helmCmd="helm upgrade --install \"$chartName\" \"$chartDir\" \
             --namespace \"$namespace\" \
             --create-namespace \
-            --wait --timeout 10m --force \
+            --wait --timeout 10m \
             --atomic --cleanup-on-fail"
 
           if [ -n "$valuesFile" ]; then
