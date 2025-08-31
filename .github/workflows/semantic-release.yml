@@ -53,7 +53,7 @@ jobs:
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
-            const slug = ${{ vars.WEBGRIP_CI_BOT_NAME }} || 'webgrip-ci';
+            const slug = '${{ vars.WEBGRIP_CI_BOT_NAME }}' || 'webgrip-ci';
             const username = `${slug}[bot]`;
             try {
               const { data: user } = await github.request('GET /users/{username}', { username });
