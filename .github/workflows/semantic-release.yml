@@ -78,5 +78,4 @@ jobs:
         uses: webgrip/workflows/.github/composite-actions/semantic-release@main
         with:
           release-type: ${{ inputs.release-type }}
-        env:
-          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          token: ${{ inputs.use-bot-to-commit == true && steps.app-token.outputs.token || github.token }}

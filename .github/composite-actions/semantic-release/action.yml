@@ -1,14 +1,17 @@
-name: '[Action] Semantic Release'
-description: 'Use semantic-release to automate versioning and releases'
+name: "[Action] Semantic Release"
+description: "Use semantic-release to automate versioning and releases"
 
 inputs:
   release-type:
-    description: 'The type of release'
+    description: "The type of release"
+    required: false
+  token:
+    description: "Token to use for checkout/push (e.g., GitHub App token)"
     required: false
 
 outputs:
   version:
-    description: 'The new version number'
+    description: "The new version number"
     value: ${{ steps.semantic-release.outputs.version }}
 
 runs:
@@ -17,12 +20,13 @@ runs:
     - name: Check out repo
       uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # semantic-release requires all commits/tags
+        fetch-depth: 0 # semantic-release requires all commits/tags
+        token: ${{ inputs.token || github.token }}
 
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '22'
+        node-version: "22"
 
     - name: Install dependencies
       shell: bash
@@ -47,6 +51,7 @@ runs:
       id: semantic-release
       env:
         GITHUB_OUTPUT: $GITHUB_OUTPUT
+        GITHUB_TOKEN: ${{ inputs.token || github.token }}
       run: |
         npm install --no-save \
           semantic-release \
