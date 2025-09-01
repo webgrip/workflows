@@ -26,14 +26,23 @@ on:
         type: string
         required: true
       tag:
-        description: 'Tag to deploy'
+        description: 'Tag to deploy (overrides shared _shared_config.image.tag by default)'
         type: string
         required: false
       image_tag_key:
-        description: 'Helm --set key path for the image tag (e.g., image.tag or controllers.api.image.tag). If empty, tag is not injected.'
+        description: 'Helm --set key path for the image tag. Defaults to _shared_config.image.tag.'
         type: string
         required: false
-        default: ''
+        default: '_shared_config.image.tag'
+      image_repository:
+        description: 'Image repository to deploy (overrides shared _shared_config.image.repository).'
+        type: string
+        required: false
+      image_repository_key:
+        description: 'Helm --set key path for the image repository. Defaults to _shared_config.image.repository.'
+        type: string
+        required: false
+        default: '_shared_config.image.repository'
 
 permissions:
   contents: read
@@ -66,16 +75,18 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${{ inputs.tag }}" ] && [ -z "${{ inputs.image_tag_key }}" ]; then
-            echo "::warning::'tag' provided but 'image_tag_key' is empty. The tag will NOT be injected into the chart." >&2
+            echo "::warning::'tag' provided but 'image_tag_key' is empty. (Default is _shared_config.image.tag) The tag may NOT be injected." >&2
           fi
           if [ -z "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
-            echo "::notice::'image_tag_key' provided but no 'tag' value. No --set injection will occur." >&2
+            echo "::notice::'image_tag_key' provided but no 'tag' value. No tag injection will occur." >&2
+          fi
+          if [ -n "${{ inputs.image_repository }}" ] && [ -z "${{ inputs.image_repository_key }}" ]; then
+            echo "::warning::'image_repository' provided but 'image_repository_key' is empty. (Default is _shared_config.image.repository) The repository may NOT be injected." >&2
           fi
 
       - name: Init deployment stats placeholder
         run: |
           set -euo pipefail
-          # Ensure placeholder files exist so later collection never fails
           echo 'Chart,Namespace,Time,Status,Error' > deployment-stats.csv
           echo 'No deployment attempted yet.' > overall-stats.txt
 
@@ -100,17 +111,13 @@ jobs:
       - name: Fetch DOKS kubeconfig
         run: |
           set -euo pipefail
-          # Mask the cluster name to avoid leaking it in subsequent logs
           echo "::add-mask::${DO_CLUSTER_NAME}"
-          # Fetch kubeconfig while suppressing noisy informational warnings that expose cluster details
-          # Retain only real errors (non-zero exit). We capture stderr to a temp file, filter benign lines, then delete it.
           tmp_err="$(mktemp)"
           if ! KUBECONFIG="$DO_KUBECONFIG_FILE" doctl kubernetes cluster kubeconfig save "$DO_CLUSTER_NAME" 2>"$tmp_err"; then
             echo "::error::Failed retrieving kubeconfig for cluster (masked)." >&2
             sed -e 's/'"$DO_CLUSTER_NAME"'/[REDACTED]/g' "$tmp_err" >&2 || true
             exit 1
           fi
-          # Show only unexpected stderr lines (exclude benign notices / warnings)
           grep -Ev 'Config not found|Adding cluster credentials|Setting current-context' "$tmp_err" | sed -e 's/'"$DO_CLUSTER_NAME"'/[REDACTED]/g' || true
           rm -f "$tmp_err"
           chmod 600 "$DO_KUBECONFIG_FILE" || true
@@ -126,7 +133,6 @@ jobs:
           else
             echo "::warning::Cluster not reachable (kube-system ns query failed)"
           fi
-          # Intentionally not outputting version, nodes, IPs, or other sensitive details.
 
       - name: Mask SOPS key (if provided)
         if: ${{ env.SOPS_AGE_KEY != '' }}
@@ -143,7 +149,6 @@ jobs:
           export SOPS_AGE_KEY=${{ secrets.SOPS_AGE_KEY }}
           if [ -f "$chartDir/values.sops.yaml" ]; then
             umask 077
-            # Use a portable mktemp pattern (Xs must be at end for BusyBox compatibility), then append suffix
             : "${RUNNER_TEMP:=/tmp}"
             _tmp_file="$(mktemp "${RUNNER_TEMP}/values.dec.XXXXXX")"
             TMP_VALUES="${_tmp_file}.yaml"
@@ -163,7 +168,6 @@ jobs:
           set -euo pipefail
           chartDir="${{ inputs.path }}"
           echo "Resolving Helm chart dependencies..."
-          # Add missing HTTP(S) repos declared in dependencies
           if [ -f "$chartDir/Chart.yaml" ]; then
             repos=$(yq e -r '.dependencies[]?.repository' "$chartDir/Chart.yaml" 2>/dev/null | sort -u || true)
             for repoUrl in $repos; do
@@ -175,7 +179,7 @@ jobs:
                     helm repo add "$repoName" "$repoUrl" >/dev/null 2>&1 || true
                   fi
                   ;;
-                oci://*) : ;; # OCI handled implicitly
+                oci://*) : ;;
               esac
             done
             helm repo update >/dev/null 2>&1 || true
@@ -237,9 +241,15 @@ jobs:
           args=()
           [ -n "${VALUES_FILE:-}" ] && args+=(-f "$VALUES_FILE")
           [ -z "${VALUES_FILE:-}" ] && [ -f "$chartDir/values.yaml" ] && args+=(-f "$chartDir/values.yaml")
-          if [ -n "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
-            args+=(--set "${{ inputs.image_tag_key }}=${{ inputs.tag }}")
+          # Inject shared image repository/tag by default
+          if [ -n "${{ inputs.image_repository }}" ]; then
+            args+=(--set-string "${{ inputs.image_repository_key || '_shared_config.image.repository' }}=${{ inputs.image_repository }}")
           fi
+          if [ -n "${{ inputs.tag }}" ]; then
+            args+=(--set-string "${{ inputs.image_tag_key || '_shared_config.image.tag' }}=${{ inputs.tag }}")
+          fi
+          # Optional custom path still supported for tag (already covered by image_tag_key)
+
           helm plugin list | grep -q 'diff' || helm plugin install https://github.com/databus23/helm-diff
           helm diff upgrade "$release" "$chartDir" --namespace "$ns" --allow-unreleased --suppress-secrets --no-color "${args[@]}" > helm-diff.txt 2>&1 || true
           {
@@ -285,9 +295,12 @@ jobs:
             helmCmd="$helmCmd --values \"$valuesFile\""
           fi
 
-          # Optional dynamic image tag injection
-          if [ -n "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
-            helmCmd="$helmCmd --set ${{ inputs.image_tag_key }}='${{ inputs.tag }}'"
+          # Shared image overrides (default to shared _shared_config.* keys)
+          if [ -n "${{ inputs.image_repository }}" ]; then
+            helmCmd="$helmCmd --set-string ${{ inputs.image_repository_key || '_shared_config.image.repository' }}='${{ inputs.image_repository }}'"
+          fi
+          if [ -n "${{ inputs.tag }}" ]; then
+            helmCmd="$helmCmd --set-string ${{ inputs.image_tag_key || '_shared_config.image.tag' }}='${{ inputs.tag }}'"
           fi
 
           helmOutput=$(eval "$helmCmd" 2>&1)
@@ -365,8 +378,12 @@ jobs:
 
           helmCmd=(helm template "$chartName" "$chartDir" --namespace "$ns")
           [ -n "$valuesFile" ] && helmCmd+=(--values "$valuesFile")
-          if [ -n "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
-            helmCmd+=(--set "${{ inputs.image_tag_key }}=${{ inputs.tag }}")
+          # Inject shared image overrides for rendering too
+          if [ -n "${{ inputs.image_repository }}" ]; then
+            helmCmd+=(--set-string "${{ inputs.image_repository_key || '_shared_config.image.repository' }}=${{ inputs.image_repository }}")
+          fi
+          if [ -n "${{ inputs.tag }}" ]; then
+            helmCmd+=(--set-string "${{ inputs.image_tag_key || '_shared_config.image.tag' }}=${{ inputs.tag }}")
           fi
 
           echo "Rendering helm templates to $rendered"
