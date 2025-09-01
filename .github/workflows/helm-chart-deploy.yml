@@ -427,6 +427,13 @@ jobs:
             const chartValuesPath = path.join(process.cwd(), 'chart-values.yaml');
             const sopsUsed = (process.env.SOPS_USED || '').toLowerCase() === 'true';
 
+            function detailsBlock(title, bodyMarkdown) {
+              return `\n<details><summary><strong>${title}</strong></summary>\n\n${bodyMarkdown}\n</details>\n`;
+            }
+            function fenced(lang, content) {
+              return '```' + lang + '\n' + content.replace(/```/g,'`\u200b``') + '\n```';
+            }
+
             core.summary
               .addHeading('Deployment Overview', 2)
               .addRaw(overallStats).addEOL().addSeparator();
@@ -441,46 +448,43 @@ jobs:
             }
 
             if (helmDiff) {
-              core.summary.addHeading('Helm Diff (proposed vs current)', 3).addCodeBlock(helmDiff, 'diff');
+              core.summary.addRaw(detailsBlock('Helm Diff (proposed vs current)', fenced('diff', helmDiff)));
             }
-
             if (helmOutput) {
-              core.summary.addHeading('Helm Command Output', 3).addCodeBlock(helmOutput, 'bash');
+              core.summary.addRaw(detailsBlock('Helm Command Output', fenced('bash', helmOutput)));
             }
-
             if (fs.existsSync(chartYamlPath)) {
-              core.summary.addHeading('Chart.yaml', 3).addCodeBlock(fs.readFileSync(chartYamlPath, 'utf8'), 'yaml');
+              const chartYaml = fs.readFileSync(chartYamlPath, 'utf8');
+              core.summary.addRaw(detailsBlock('Chart.yaml', fenced('yaml', chartYaml)));
             }
-
             if (fs.existsSync(chartValuesPath)) {
               if (sopsUsed) {
-                core.summary.addHeading('Values used for render', 3).addRaw('Suppressed (SOPS secrets in use)').addEOL();
+                core.summary.addRaw(detailsBlock('Values used for render', 'Suppressed (SOPS secrets in use)'));
               } else {
-                core.summary.addHeading('Values used for render', 3).addCodeBlock(fs.readFileSync(chartValuesPath, 'utf8'), 'yaml');
+                core.summary.addRaw(detailsBlock('Values used for render', fenced('yaml', fs.readFileSync(chartValuesPath, 'utf8'))));
               }
             }
-
             if (fs.existsSync(templateListPath)) {
               const files = fs.readFileSync(templateListPath, 'utf8').trim().split('\n').filter(Boolean);
               if (files.length) {
-                core.summary.addHeading('Chart template files', 3);
+                let tmplBody = '';
                 for (const f of files) {
                   try {
                     const name = path.basename(f);
-                    core.summary.addHeading(name, 4).addCodeBlock(fs.readFileSync(f, 'utf8'), 'yaml');
+                    const content = fs.readFileSync(f, 'utf8');
+                    tmplBody += `\n### ${name}\n\n` + fenced('yaml', content) + '\n';
                   } catch {}
                 }
+                if (tmplBody) core.summary.addRaw(detailsBlock('Chart template files', tmplBody));
               }
             }
-
             if (fs.existsSync(renderedPath)) {
               const rendered = fs.readFileSync(renderedPath, 'utf8');
               const containsSecret = /\bkind:\s+Secret\b/i.test(rendered);
               if (sopsUsed || containsSecret) {
-                core.summary.addHeading('Rendered Kubernetes Manifests', 3)
-                           .addRaw('Suppressed due to presence of secrets (SOPS or Secret kind detected).');
+                core.summary.addRaw(detailsBlock('Rendered Kubernetes Manifests', 'Suppressed due to presence of secrets (SOPS or Secret kind detected).'));
               } else {
-                core.summary.addHeading('Rendered Kubernetes Manifests', 3).addCodeBlock(rendered, 'yaml');
+                core.summary.addRaw(detailsBlock('Rendered Kubernetes Manifests', fenced('yaml', rendered)));
               }
             }
 
