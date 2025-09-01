@@ -89,11 +89,11 @@ jobs:
           kubectl get nodes -o wide
 
       - name: Mask SOPS key (if provided)
-        if: ${{ env.SOPS_AGE_KEY }}
+        if: ${{ env.SOPS_AGE_KEY != '' }}
         run: echo "::add-mask::${SOPS_AGE_KEY}"
 
       - name: Decrypt SOPS file (secure temp, auto-clean)
-        if: ${{ env.SOPS_AGE_KEY }}
+        if: ${{ env.SOPS_AGE_KEY != '' }}
         id: decrypt_sops
         env:
           RUNNER_TEMP: ${{ runner.temp }}
