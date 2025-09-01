@@ -203,7 +203,11 @@ jobs:
             lint_status=$?
             echo "::error::Helm lint failed (exit $lint_status). Skipping diff/deploy." >&2
           fi
-          ns=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || echo default)
+          if [ -n "${VALUES_FILE:-}" ]; then
+            ns=$(yq e '.namespace' "$VALUES_FILE" 2>/dev/null || echo default)
+          else
+            ns=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || echo default)
+          fi
           if [ $lint_status -eq 0 ]; then
             if [ -n "${VALUES_FILE:-}" ]; then
               helm template "$chartDir" --namespace "$ns" -f "$VALUES_FILE" >/dev/null || true
