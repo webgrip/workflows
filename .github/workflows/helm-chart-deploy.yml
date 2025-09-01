@@ -268,7 +268,7 @@ jobs:
           fi
 
           cp -f "$chartDir/Chart.yaml" chart-Chart.yaml 2>/dev/null || true
-          if [ -z "${{ steps.decrypt_sops.outputs.sops_used }}" ] || [ "${{ steps.decrypt_sops.outputs.sops_used }}" != "true" ]; then
+          if [ "${{ steps.decrypt_sops.outputs.sops_used }}" = "true" ]; then
             [ -n "$valuesFile" ] && cp -f "$valuesFile" chart-values.yaml 2>/dev/null || true
           fi
 
