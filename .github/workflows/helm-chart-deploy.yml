@@ -62,6 +62,23 @@ jobs:
       - name: Check out code
         uses: actions/checkout@v4
 
+      - name: Validate inputs (non-fatal warnings)
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.tag }}" ] && [ -z "${{ inputs.image_tag_key }}" ]; then
+            echo "::warning::'tag' provided but 'image_tag_key' is empty. The tag will NOT be injected into the chart." >&2
+          fi
+          if [ -z "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
+            echo "::notice::'image_tag_key' provided but no 'tag' value. No --set injection will occur." >&2
+          fi
+
+      - name: Init deployment stats placeholder
+        run: |
+          set -euo pipefail
+          # Ensure placeholder files exist so later collection never fails
+          echo 'Chart,Namespace,Time,Status,Error' > deployment-stats.csv
+          echo 'No deployment attempted yet.' > overall-stats.txt
+
       - name: Authenticate doctl
         env:
           DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
@@ -87,11 +104,17 @@ jobs:
           chmod 600 "$DO_KUBECONFIG_FILE" || true
           echo "KUBECONFIG=$DO_KUBECONFIG_FILE" >> "$GITHUB_ENV"
 
-      - name: Cluster preflight (quick sanity)
+      - name: Cluster preflight (non-fatal)
+        continue-on-error: true
         run: |
-          set -euo pipefail
-          kubectl version --short
-          kubectl get nodes -o wide
+          set +e
+          echo "Gathering cluster info (will not fail deployment if this step has issues)..."
+          if kubectl version --output=yaml >/dev/null 2>&1; then
+            echo "kubectl version (yaml):" && kubectl version --output=yaml | sed -n '1,25p'
+          else
+            echo "kubectl version (standard):" && kubectl version 2>/dev/null | sed -n '1,15p' || true
+          fi
+          kubectl get nodes -o wide 2>/dev/null || echo "::warning::Could not list nodes (cluster may be initializing or credentials issue)."
 
       - name: Mask SOPS key (if provided)
         if: ${{ env.SOPS_AGE_KEY != '' }}
@@ -122,7 +145,21 @@ jobs:
         run: |
           set -euo pipefail
           chartDir="${{ inputs.path }}"
-          helm dependency update "$chartDir"
+          echo "Resolving Helm chart dependencies..."
+          if [ -f "$chartDir/Chart.lock" ]; then
+            echo "Chart.lock found. Running 'helm dependency build' for reproducible deps."
+            if ! helm dependency build "$chartDir" 2>dep_err.log; then
+              echo "helm dependency build failed; showing dep_err.log:" >&2
+              cat dep_err.log >&2 || true
+              echo "Falling back to 'helm dependency update' (may refresh versions)." >&2
+              helm dependency update "$chartDir"
+            fi
+          else
+            echo "No Chart.lock present. Running 'helm dependency update'."
+            helm dependency update "$chartDir"
+          fi
+          echo "Dependency charts directory contents:" && ls -1 "$chartDir/charts" 2>/dev/null || echo "(charts/ directory empty or missing)"
+          echo "Listing dependencies declared in Chart.yaml:" && yq e '.dependencies[] | .name + " " + (.version // "") + " " + (.repository // "")' "$chartDir/Chart.yaml" 2>/dev/null || echo "(no dependencies section)"
           helm lint "$chartDir"
           ns=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || echo default)
           if [ -n "${VALUES_FILE:-}" ]; then
@@ -233,8 +270,16 @@ jobs:
         if: always()
         run: |
           set -euo pipefail
-          stats=$(cat deployment-stats.csv)
-          overall=$(cat overall-stats.txt)
+          if [ -f deployment-stats.csv ]; then
+            stats=$(cat deployment-stats.csv)
+          else
+            stats='Chart,Namespace,Time,Status,Error' # header only
+          fi
+          if [ -f overall-stats.txt ]; then
+            overall=$(cat overall-stats.txt)
+          else
+            overall='No overall deployment stats available.'
+          fi
           {
             echo "stats<<'EOF'"
             echo "$stats"
