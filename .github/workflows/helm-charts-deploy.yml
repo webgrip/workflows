@@ -14,11 +14,15 @@ on:
         description: 'Digital Ocean API Key'
         required: true
       DOCKER_USERNAME:
-        description: 'Docker Username'
-        required: true
+        description: >-
+          Docker Username (optional, for pulling private images
+          during deployment)
+        required: false
       DOCKER_TOKEN:
-        description: 'Docker Token'
-        required: true
+        description: >-
+          Docker Token (optional, for pulling private images
+          during deployment)
+        required: false
       SOPS_AGE_KEY:
         description: 'SOPS Age private key'
         required: false
