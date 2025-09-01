@@ -43,6 +43,10 @@ on:
         type: string
         required: false
         default: '_shared_config.image.repository'
+      namespace:
+        description: 'Kubernetes namespace to deploy to (overrides any values file namespace)'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -217,10 +221,15 @@ jobs:
             lint_status=$?
             echo "::error::Helm lint failed (exit $lint_status). Skipping diff/deploy." >&2
           fi
-          if [ -n "${VALUES_FILE:-}" ]; then
+          if [ -n "${{ inputs.namespace || '' }}" ]; then
+            ns='${{ inputs.namespace }}'
+            echo "Namespace explicitly set via input: $ns"
+          elif [ -n "${VALUES_FILE:-}" ]; then
             ns=$(yq e '.namespace' "$VALUES_FILE" 2>/dev/null || echo default)
+            echo "Namespace derived from decrypted values file: $ns"
           else
             ns=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || echo default)
+            echo "Namespace derived from chart values.yaml (or default): $ns"
           fi
           if [ $lint_status -eq 0 ]; then
             echo "Template (pre-diff) command: helm template $chartDir --namespace $ns ${override_args[*]}"
@@ -251,6 +260,7 @@ jobs:
           chartDir="${{ inputs.path }}"
           release=$(basename "$chartDir")
           ns="${{ steps.lint.outputs.namespace || 'default' }}"
+          echo "Using namespace for diff: $ns (lint output)."
           args=()
           [ -n "${VALUES_FILE:-}" ] && args+=(-f "$VALUES_FILE")
           [ -z "${VALUES_FILE:-}" ] && [ -f "$chartDir/values.yaml" ] && args+=(-f "$chartDir/values.yaml")
@@ -286,6 +296,7 @@ jobs:
           chartDir="${{ inputs.path }}"
           chartName=$(basename "$chartDir")
           namespace="${NS:-default}"
+          echo "Using namespace for deploy: $namespace (from lint output)."
 
           if [ -n "${VALUES_FILE:-}" ]; then
             valuesFile="$VALUES_FILE"
@@ -383,6 +394,7 @@ jobs:
           chartName=$(basename "$chartDir")
           rendered="rendered-manifests.yaml"
           ns="${{ steps.lint.outputs.namespace || 'default' }}"
+          echo "Using namespace for render: $ns (from lint output)."
 
           valuesFile=""
           if [ -n "${VALUES_FILE:-}" ]; then
@@ -535,6 +547,7 @@ jobs:
           chartDir="${{ inputs.path }}"
             release=$(basename "$chartDir")
           ns="${{ steps.lint.outputs.namespace || 'default' }}"
+          echo "Using namespace for post-deploy verification: $ns (from lint output)."
           echo "Fetching final release values (sanitized)..."
           helm get values "$release" -n "$ns" || true
           echo "Listing images in deployed workloads (grep image:)."
