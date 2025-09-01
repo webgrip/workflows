@@ -29,16 +29,30 @@ on:
         description: 'Tag to deploy'
         type: string
         required: false
+      image_tag_key:
+        description: 'Helm --set key path for the image tag (e.g., image.tag or controllers.api.image.tag). If empty, tag is not injected.'
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: deploy-${{ inputs.environment }}-${{ inputs.path }}
+  cancel-in-progress: false
 
 jobs:
   deploy-helm:
+    name: ${{ inputs.path }}
+    runs-on: arc-runner-set
+    timeout-minutes: 30
     container:
       image: webgrip/helm-deploy:latest
       credentials:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_TOKEN }}
-    name: ${{ inputs.path }}
-    runs-on: arc-runner-set
     env:
       DO_CLUSTER_NAME: webgrip-${{ inputs.environment }}-cluster
       DO_KUBECONFIG_FILE: './doks-kubeconfig'
@@ -49,84 +63,139 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Authenticate doctl
-        run: doctl auth init --access-token ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+        env:
+          DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${DIGITAL_OCEAN_API_KEY}"
+          doctl auth init --access-token "${DIGITAL_OCEAN_API_KEY}"
+
+      - name: Helm registry login (for OCI deps like ghcr.io)
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${DOCKER_TOKEN}"
+          helm version
+          echo "${DOCKER_TOKEN}" | helm registry login ghcr.io --username "${DOCKER_USERNAME}" --password-stdin || true
 
       - name: Fetch DOKS kubeconfig
-        run: doctl kubernetes cluster kubeconfig save $DO_CLUSTER_NAME
-
-      - name: Configure kubeconfig
         run: |
-          export KUBECONFIG=$DO_KUBECONFIG_FILE
+          set -euo pipefail
+          KUBECONFIG="$DO_KUBECONFIG_FILE" doctl kubernetes cluster kubeconfig save "$DO_CLUSTER_NAME"
+          chmod 600 "$DO_KUBECONFIG_FILE" || true
+          echo "KUBECONFIG=$DO_KUBECONFIG_FILE" >> "$GITHUB_ENV"
 
-      - name: Decrypt SOPS file
-        if: ${{ env.SOPS_AGE_KEY }}
+      - name: Cluster preflight (quick sanity)
+        run: |
+          set -euo pipefail
+          kubectl version --short
+          kubectl get nodes -o wide
+
+      - name: Mask SOPS key (if provided)
+        if: ${{ env.SOPS_AGE_KEY != '' }}
+        run: echo "::add-mask::${SOPS_AGE_KEY}"
+
+      - name: Decrypt SOPS file (secure temp, auto-clean)
+        if: ${{ env.SOPS_AGE_KEY != '' }}
         id: decrypt_sops
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
         run: |
+          set -euo pipefail
           chartDir="${{ inputs.path }}"
-          # Set the SOPS age key for decryption
           export SOPS_AGE_KEY=${{ secrets.SOPS_AGE_KEY }}
           if [ -f "$chartDir/values.sops.yaml" ]; then
-            echo "Decrypting SOPS file: $chartDir/values.sops.yaml"
-            sops --decrypt "$chartDir/values.sops.yaml" > "$chartDir/values.dec.yaml"
+            umask 077
+            TMP_VALUES="$(mktemp "${RUNNER_TEMP}/values.dec.XXXX.yaml")"
+            sops --decrypt "$chartDir/values.sops.yaml" > "$TMP_VALUES"
             echo "sops_used=true" >> "$GITHUB_OUTPUT"
+            echo "VALUES_FILE=$TMP_VALUES" >> "$GITHUB_ENV"
+            echo "TMP_VALUES=$TMP_VALUES" >> "$GITHUB_ENV"
           else
-            echo "No SOPS file found at $chartDir/values.sops.yaml, skipping."
             echo "sops_used=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Helm lint & template (fail-fast)
+        id: lint
+        run: |
+          set -euo pipefail
+          chartDir="${{ inputs.path }}"
+          helm dependency update "$chartDir"
+          helm lint "$chartDir"
+          ns=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || echo default)
+          if [ -n "${VALUES_FILE:-}" ]; then
+            helm template "$chartDir" --namespace "$ns" -f "$VALUES_FILE" >/dev/null
+          elif [ -f "$chartDir/values.yaml" ]; then
+            helm template "$chartDir" --namespace "$ns" -f "$chartDir/values.yaml" >/dev/null
+          else
+            helm template "$chartDir" --namespace "$ns" >/dev/null
+          fi
+          echo "namespace=$ns" >> "$GITHUB_OUTPUT"
+
+      - name: Helm diff (captured, non-blocking)
+        id: diff
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          chartDir="${{ inputs.path }}"
+          release=$(basename "$chartDir")
+          ns="${{ steps.lint.outputs.namespace || 'default' }}"
+          args=()
+          [ -n "${VALUES_FILE:-}" ] && args+=(-f "$VALUES_FILE")
+          [ -z "${VALUES_FILE:-}" ] && [ -f "$chartDir/values.yaml" ] && args+=(-f "$chartDir/values.yaml")
+          if [ -n "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
+            args+=(--set "${{ inputs.image_tag_key }}=${{ inputs.tag }}")
+          fi
+          helm plugin list | grep -q 'diff' || helm plugin install https://github.com/databus23/helm-diff
+          helm diff upgrade "$release" "$chartDir" --namespace "$ns" --allow-unreleased --suppress-secrets --no-color "${args[@]}" > helm-diff.txt 2>&1 || true
+          {
+            echo "diff<<'EOF'"
+            sed -e 's/[[:cntrl:]]//g' helm-diff.txt
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Deploy the specified Helm chart
         id: deploy
         continue-on-error: true
+        env:
+          NS: ${{ steps.lint.outputs.namespace }}
         run: |
-          set +e  # Allow the script to continue on errors
+          set +e
 
           echo "Chart,Namespace,Time,Status,Error" > deployment-stats.csv
           chartDir="${{ inputs.path }}"
-
-          if [ ! -d "$chartDir" ]; then
-            echo "ERROR: Directory '$chartDir' does not exist."
-            echo "paths=[]" >> $GITHUB_OUTPUT
-            echo "exit_code=1" >> $GITHUB_OUTPUT
-            echo "NonexistentDir,default,00:00:00,Failed ❌,Directory not found" >> deployment-stats.csv
-            exit 0
-          fi
-
           chartName=$(basename "$chartDir")
-          # Default to values.yaml for namespace unless a SOPS file is used
-          namespace=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || echo "default")
+          namespace="${NS:-default}"
 
-          # Prefer the decrypted values file if it exists
-          if [ -f "$chartDir/values.dec.yaml" ]; then
-            namespace=$(yq e '.namespace' "$chartDir/values.dec.yaml" 2>/dev/null || echo "default")
-            valuesFile="$chartDir/values.dec.yaml"
+          if [ -n "${VALUES_FILE:-}" ]; then
+            valuesFile="$VALUES_FILE"
           elif [ -f "$chartDir/values.yaml" ]; then
             valuesFile="$chartDir/values.yaml"
           else
-            echo "WARNING: No values file found, continuing with Helm defaults."
             valuesFile=""
           fi
 
           echo "Deploying chart '$chartName' to namespace '$namespace'..."
           start=$(date +%s)
 
-          helm dependency update "$chartDir"
-
-          # --force sometimes helps with image updates
           helmCmd="helm upgrade --install \"$chartName\" \"$chartDir\" \
             --namespace \"$namespace\" \
             --create-namespace \
-            --wait --timeout 10m --force \
+            --wait --timeout 10m \
+            --history-max 10 \
             --atomic --cleanup-on-fail"
 
           if [ -n "$valuesFile" ]; then
             helmCmd="$helmCmd --values \"$valuesFile\""
           fi
 
-          if [ -n "${{ inputs.tag }}" ]; then
-            helmCmd="$helmCmd --set n8n.image.tag=${{ inputs.tag }}"
+          # Optional dynamic image tag injection
+          if [ -n "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
+            helmCmd="$helmCmd --set ${{ inputs.image_tag_key }}='${{ inputs.tag }}'"
           fi
 
-          # Capture the Helm output (stdout + stderr)
           helmOutput=$(eval "$helmCmd" 2>&1)
           helmExitCode=$?
 
@@ -147,11 +216,11 @@ jobs:
           echo "$chartName,$namespace,$duration_formatted,$status,$error" >> deployment-stats.csv
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
 
-          # Publish the Helm output for later steps
-          #  - Note: make sure to properly handle multi-line outputs.
-          echo "helm_output<<EOF" >> $GITHUB_OUTPUT
-          echo "$helmOutput" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "helm_output<<'EOF'"
+            printf "%s\n" "$helmOutput"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
           if [ $exit_code -eq 0 ]; then
             echo "Overall, 1 chart deployed in $duration_formatted ⏱️" > overall-stats.txt
@@ -163,13 +232,14 @@ jobs:
         id: collect-stats
         if: always()
         run: |
+          set -euo pipefail
           stats=$(cat deployment-stats.csv)
           overall=$(cat overall-stats.txt)
           {
-            echo "stats<<EOF"
+            echo "stats<<'EOF'"
             echo "$stats"
             echo "EOF"
-            echo "overall<<EOF"
+            echo "overall<<'EOF'"
             echo "$overall"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
@@ -182,22 +252,19 @@ jobs:
           chartDir="${{ inputs.path }}"
           chartName=$(basename "$chartDir")
           rendered="rendered-manifests.yaml"
-          valuesFile=""
+          ns="${{ steps.lint.outputs.namespace || 'default' }}"
 
-          if [ -f "$chartDir/values.dec.yaml" ]; then
-            valuesFile="$chartDir/values.dec.yaml"
+          valuesFile=""
+          if [ -n "${VALUES_FILE:-}" ]; then
+            valuesFile="$VALUES_FILE"
           elif [ -f "$chartDir/values.yaml" ]; then
             valuesFile="$chartDir/values.yaml"
           fi
 
-          ns=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || echo default)
-
           helmCmd=(helm template "$chartName" "$chartDir" --namespace "$ns")
-          if [ -n "$valuesFile" ]; then
-            helmCmd+=(--values "$valuesFile")
-          fi
-          if [ -n "${{ inputs.tag }}" ]; then
-            helmCmd+=(--set "n8n.image.tag=${{ inputs.tag }}")
+          [ -n "$valuesFile" ] && helmCmd+=(--values "$valuesFile")
+          if [ -n "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
+            helmCmd+=(--set "${{ inputs.image_tag_key }}=${{ inputs.tag }}")
           fi
 
           echo "Rendering helm templates to $rendered"
@@ -210,11 +277,19 @@ jobs:
           fi
 
           cp -f "$chartDir/Chart.yaml" chart-Chart.yaml 2>/dev/null || true
-          if [ -n "$valuesFile" ]; then cp -f "$valuesFile" chart-values.yaml 2>/dev/null || true; fi
+          if [ "${{ steps.decrypt_sops.outputs.sops_used }}" = "true" ]; then
+            [ -n "$valuesFile" ] && cp -f "$valuesFile" chart-values.yaml 2>/dev/null || true
+          fi
 
       - name: Generate Job Summary with Deployment Stats
         if: always()
         uses: actions/github-script@v7
+        env:
+          DEPLOYMENT_STATS: ${{ steps.collect-stats.outputs.stats }}
+          OVERALL_STATS: ${{ steps.collect-stats.outputs.overall }}
+          HELM_OUTPUT: ${{ steps.deploy.outputs.helm_output }}
+          HELM_DIFF: ${{ steps.diff.outputs.diff }}
+          SOPS_USED: ${{ steps.decrypt_sops.outputs.sops_used }}
         with:
           script: |
             const fs = require('fs');
@@ -222,7 +297,7 @@ jobs:
             const statsCSV = process.env.DEPLOYMENT_STATS || '';
             const overallStats = process.env.OVERALL_STATS || '';
             const helmOutput = process.env.HELM_OUTPUT || '';
-            const chartDir = process.env.CHART_DIR || '';
+            const helmDiff = process.env.HELM_DIFF || '';
             const renderedPath = path.join(process.cwd(), 'rendered-manifests.yaml');
             const templateListPath = path.join(process.cwd(), 'template-files.txt');
             const chartYamlPath = path.join(process.cwd(), 'chart-Chart.yaml');
@@ -231,85 +306,81 @@ jobs:
 
             core.summary
               .addHeading('Deployment Overview', 2)
-              .addRaw(overallStats)
-              .addEOL()
-              .addSeparator();
+              .addRaw(overallStats).addEOL().addSeparator();
 
-            if (!statsCSV) {
-              core.summary
-                .addRaw('No deployment statistics available.')
-                .addEOL();
-            } else {
+            if (statsCSV) {
               const lines = statsCSV.trim().split('\n');
               const header = lines.shift().split(',');
-              const dataRows = lines.map(line => line.split(','));
+              const dataRows = lines.map(l => l.split(','));
+              core.summary.addHeading('Per-Chart Deployment Details', 3).addTable([header, ...dataRows]);
+            } else {
+              core.summary.addRaw('No deployment statistics available.').addEOL();
+            }
 
-              core.summary
-                .addHeading('Per-Chart Deployment Details', 3)
-                .addTable([header, ...dataRows]);
+            if (helmDiff) {
+              core.summary.addHeading('Helm Diff (proposed vs current)', 3).addCodeBlock(helmDiff, 'diff');
             }
 
             if (helmOutput) {
-              core.summary
-                .addHeading('Helm Command Output', 3)
-                .addCodeBlock(helmOutput, 'bash');
+              core.summary.addHeading('Helm Command Output', 3).addCodeBlock(helmOutput, 'bash');
             }
 
-            // Add Chart metadata and templates
-            try {
-              if (fs.existsSync(chartYamlPath)) {
-                const chartYaml = fs.readFileSync(chartYamlPath, 'utf8');
-                core.summary.addHeading('Chart.yaml', 3).addCodeBlock(chartYaml, 'yaml');
-              }
-            } catch (e) {}
+            if (fs.existsSync(chartYamlPath)) {
+              core.summary.addHeading('Chart.yaml', 3).addCodeBlock(fs.readFileSync(chartYamlPath, 'utf8'), 'yaml');
+            }
 
-            try {
-              if (fs.existsSync(chartValuesPath)) {
-                if (sopsUsed) {
-                  core.summary.addHeading('Values used for render', 3).addRaw('Suppressed (SOPS secrets in use)').addEOL();
-                } else {
-                  const chartValues = fs.readFileSync(chartValuesPath, 'utf8');
-                  core.summary.addHeading('Values used for render', 3).addCodeBlock(chartValues, 'yaml');
+            if (fs.existsSync(chartValuesPath)) {
+              if (sopsUsed) {
+                core.summary.addHeading('Values used for render', 3).addRaw('Suppressed (SOPS secrets in use)').addEOL();
+              } else {
+                core.summary.addHeading('Values used for render', 3).addCodeBlock(fs.readFileSync(chartValuesPath, 'utf8'), 'yaml');
+              }
+            }
+
+            if (fs.existsSync(templateListPath)) {
+              const files = fs.readFileSync(templateListPath, 'utf8').trim().split('\n').filter(Boolean);
+              if (files.length) {
+                core.summary.addHeading('Chart template files', 3);
+                for (const f of files) {
+                  try {
+                    const name = path.basename(f);
+                    core.summary.addHeading(name, 4).addCodeBlock(fs.readFileSync(f, 'utf8'), 'yaml');
+                  } catch {}
                 }
               }
-            } catch (e) {}
+            }
 
-            try {
-              if (fs.existsSync(templateListPath)) {
-                const files = fs.readFileSync(templateListPath, 'utf8').trim().split('\n').filter(Boolean);
-                if (files.length) {
-                  core.summary.addHeading('Chart template files', 3);
-                  for (const f of files) {
-                    try {
-                      const content = fs.readFileSync(f, 'utf8');
-                      const name = path.basename(f);
-                      core.summary.addHeading(name, 4).addCodeBlock(content, 'yaml');
-                    } catch (e) {}
-                  }
-                }
+            if (fs.existsSync(renderedPath)) {
+              const rendered = fs.readFileSync(renderedPath, 'utf8');
+              const containsSecret = /\bkind:\s+Secret\b/i.test(rendered);
+              if (sopsUsed || containsSecret) {
+                core.summary.addHeading('Rendered Kubernetes Manifests', 3)
+                           .addRaw('Suppressed due to presence of secrets (SOPS or Secret kind detected).');
+              } else {
+                core.summary.addHeading('Rendered Kubernetes Manifests', 3).addCodeBlock(rendered, 'yaml');
               }
-            } catch (e) {}
-
-            // Add rendered manifests (suppress if secrets present)
-            try {
-              if (fs.existsSync(renderedPath)) {
-                const rendered = fs.readFileSync(renderedPath, 'utf8');
-                const containsSecret = /\bkind:\s+Secret\b/i.test(rendered);
-                if (sopsUsed || containsSecret) {
-                  core.summary.addHeading('Rendered Kubernetes Manifests', 3)
-                    .addRaw('Suppressed due to presence of secrets (SOPS or Secret kind detected).');
-                } else {
-                  core.summary.addHeading('Rendered Kubernetes Manifests', 3).addCodeBlock(rendered, 'yaml');
-                }
-              }
-            } catch (e) {}
+            }
 
             await core.summary.write();
-        env:
-          DEPLOYMENT_STATS: ${{ steps.collect-stats.outputs.stats }}
-          OVERALL_STATS: ${{ steps.collect-stats.outputs.overall }}
-          HELM_OUTPUT: ${{ steps.deploy.outputs.helm_output }}
-          SOPS_USED: ${{ steps.decrypt_sops.outputs.sops_used }}
+
+      - name: Upload artifacts (no secrets)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-artifacts
+          if-no-files-found: ignore
+          path: |
+            rendered-manifests.yaml
+            template-files.txt
+            chart-Chart.yaml
+            helm-diff.txt
+          retention-days: 1
+
+      - name: Secure cleanup (remove decrypted temp)
+        if: always()
+        run: |
+          set -euo pipefail
+          [ -n "${TMP_VALUES:-}" ] && (shred -u "$TMP_VALUES" 2>/dev/null || rm -f "$TMP_VALUES") || true
 
       - name: Fail if Helm Failed
         if: steps.deploy.outputs.exit_code == '1'
