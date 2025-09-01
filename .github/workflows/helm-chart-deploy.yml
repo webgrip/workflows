@@ -108,13 +108,13 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          echo "Gathering cluster info (will not fail deployment if this step has issues)..."
-          if kubectl version --output=yaml >/dev/null 2>&1; then
-            echo "kubectl version (yaml):" && kubectl version --output=yaml | sed -n '1,25p'
+          echo "Cluster preflight (redacted): checking reachability only..."
+          if kubectl get namespace kube-system >/dev/null 2>&1; then
+            echo "Cluster reachable ✅"
           else
-            echo "kubectl version (standard):" && kubectl version 2>/dev/null | sed -n '1,15p' || true
+            echo "::warning::Cluster not reachable (kube-system ns query failed)"
           fi
-          kubectl get nodes -o wide 2>/dev/null || echo "::warning::Could not list nodes (cluster may be initializing or credentials issue)."
+          # Intentionally not outputting version, nodes, IPs, or other sensitive details.
 
       - name: Mask SOPS key (if provided)
         if: ${{ env.SOPS_AGE_KEY != '' }}
