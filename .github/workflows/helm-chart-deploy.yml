@@ -538,5 +538,5 @@ jobs:
           echo "Fetching final release values (sanitized)..."
           helm get values "$release" -n "$ns" || true
           echo "Listing images in deployed workloads (grep image:)."
-          helm get manifest "$release" -n "$ns" | grep -E "^[[:space:]]*image:" || echo "No image lines found." 
+          helm get manifest "$release" -n "$ns" | grep -E "^[[:space:]]*image:" || echo "No image lines found."
           echo "If expected tag not present, verify that key path '${{ inputs.image_tag_key }}' exists in chart values and is referenced by templates."
