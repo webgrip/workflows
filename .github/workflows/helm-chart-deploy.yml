@@ -199,7 +199,21 @@ jobs:
           echo "Dependency charts directory contents:" && ls -1 "$chartDir/charts" 2>/dev/null || echo "(charts/ directory empty or missing)"
           echo "Listing dependencies declared in Chart.yaml:" && yq e '.dependencies[] | .name + " " + (.version // "") + " " + (.repository // "")' "$chartDir/Chart.yaml" 2>/dev/null || echo "(no dependencies section)"
           lint_status=0
-          if ! helm lint "$chartDir"; then
+          # Build override args (values file + image repo/tag overrides) so lint reflects intended deployment
+          override_args=()
+          if [ -n "${VALUES_FILE:-}" ]; then
+            override_args+=( -f "$VALUES_FILE" )
+          elif [ -f "$chartDir/values.yaml" ]; then
+            override_args+=( -f "$chartDir/values.yaml" )
+          fi
+          if [ -n "${{ inputs.image_repository }}" ]; then
+            override_args+=( --set-string "${{ inputs.image_repository_key || '_shared_config.image.repository' }}=${{ inputs.image_repository }}" )
+          fi
+          if [ -n "${{ inputs.tag }}" ]; then
+            override_args+=( --set-string "${{ inputs.image_tag_key || '_shared_config.image.tag' }}=${{ inputs.tag }}" )
+          fi
+          echo "Lint command: helm lint $chartDir ${override_args[*]}"
+          if ! helm lint "$chartDir" "${override_args[@]}"; then
             lint_status=$?
             echo "::error::Helm lint failed (exit $lint_status). Skipping diff/deploy." >&2
           fi
@@ -209,13 +223,8 @@ jobs:
             ns=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || echo default)
           fi
           if [ $lint_status -eq 0 ]; then
-            if [ -n "${VALUES_FILE:-}" ]; then
-              helm template "$chartDir" --namespace "$ns" -f "$VALUES_FILE" >/dev/null || true
-            elif [ -f "$chartDir/values.yaml" ]; then
-              helm template "$chartDir" --namespace "$ns" -f "$chartDir/values.yaml" >/dev/null || true
-            else
-              helm template "$chartDir" --namespace "$ns" >/dev/null || true
-            fi
+            echo "Template (pre-diff) command: helm template $chartDir --namespace $ns ${override_args[*]}"
+            helm template "$chartDir" --namespace "$ns" "${override_args[@]}" >/dev/null || true
           fi
           echo "namespace=$ns" >> "$GITHUB_OUTPUT"
           echo "lint_exit_code=$lint_status" >> "$GITHUB_OUTPUT"
@@ -255,6 +264,7 @@ jobs:
           # Optional custom path still supported for tag (already covered by image_tag_key)
 
           helm plugin list | grep -q 'diff' || helm plugin install https://github.com/databus23/helm-diff
+          echo "Diff command: helm diff upgrade $release $chartDir --namespace $ns --allow-unreleased --suppress-secrets --no-color ${args[*]}" >&2
           helm diff upgrade "$release" "$chartDir" --namespace "$ns" --allow-unreleased --suppress-secrets --no-color "${args[@]}" > helm-diff.txt 2>&1 || true
           {
             echo "diff<<DIFF_EOF"
@@ -307,6 +317,7 @@ jobs:
             helmCmd="$helmCmd --set-string ${{ inputs.image_tag_key || '_shared_config.image.tag' }}='${{ inputs.tag }}'"
           fi
 
+          echo "Deploy command: $helmCmd"
           helmOutput=$(eval "$helmCmd" 2>&1)
           helmExitCode=$?
 
@@ -390,6 +401,7 @@ jobs:
             helmCmd+=(--set-string "${{ inputs.image_tag_key || '_shared_config.image.tag' }}=${{ inputs.tag }}")
           fi
 
+          echo "Render command: ${helmCmd[*]}"
           echo "Rendering helm templates to $rendered"
           "${helmCmd[@]}" > "$rendered" 2>&1 || true
 
@@ -515,3 +527,16 @@ jobs:
         run: |
           echo "Deployment was not successful. Marking job as failed."
           exit 1
+
+      - name: Post-deploy image verification (debug)
+        if: steps.deploy.outputs.exit_code == '0'
+        run: |
+          set -euo pipefail
+          chartDir="${{ inputs.path }}"
+            release=$(basename "$chartDir")
+          ns="${{ steps.lint.outputs.namespace || 'default' }}"
+          echo "Fetching final release values (sanitized)..."
+          helm get values "$release" -n "$ns" || true
+          echo "Listing images in deployed workloads (grep image:)."
+          helm get manifest "$release" -n "$ns" | grep -E "^[[:space:]]*image:" || echo "No image lines found." 
+          echo "If expected tag not present, verify that key path '${{ inputs.image_tag_key }}' exists in chart values and is referenced by templates."
