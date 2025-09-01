@@ -115,7 +115,7 @@ jobs:
           helmCmd="helm upgrade --install \"$chartName\" \"$chartDir\" \
             --namespace \"$namespace\" \
             --create-namespace \
-            --wait --timeout 5m --force \
+            --wait --timeout 10m --force \
             --atomic --cleanup-on-fail"
 
           if [ -n "$valuesFile" ]; then
