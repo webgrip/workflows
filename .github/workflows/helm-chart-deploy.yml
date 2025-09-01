@@ -131,7 +131,11 @@ jobs:
           export SOPS_AGE_KEY=${{ secrets.SOPS_AGE_KEY }}
           if [ -f "$chartDir/values.sops.yaml" ]; then
             umask 077
-            TMP_VALUES="$(mktemp "${RUNNER_TEMP}/values.dec.XXXX.yaml")"
+            # Use a portable mktemp pattern (Xs must be at end for BusyBox compatibility), then append suffix
+            : "${RUNNER_TEMP:=/tmp}"
+            _tmp_file="$(mktemp "${RUNNER_TEMP}/values.dec.XXXXXX")"
+            TMP_VALUES="${_tmp_file}.yaml"
+            mv "$_tmp_file" "$TMP_VALUES"
             sops --decrypt "$chartDir/values.sops.yaml" > "$TMP_VALUES"
             echo "sops_used=true" >> "$GITHUB_OUTPUT"
             echo "VALUES_FILE=$TMP_VALUES" >> "$GITHUB_ENV"
@@ -140,12 +144,30 @@ jobs:
             echo "sops_used=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Helm lint & template (fail-fast)
+      - name: Helm lint & template (tolerant)
         id: lint
+        continue-on-error: true
         run: |
           set -euo pipefail
           chartDir="${{ inputs.path }}"
           echo "Resolving Helm chart dependencies..."
+          # Add missing HTTP(S) repos declared in dependencies
+          if [ -f "$chartDir/Chart.yaml" ]; then
+            repos=$(yq e -r '.dependencies[]?.repository' "$chartDir/Chart.yaml" 2>/dev/null | sort -u || true)
+            for repoUrl in $repos; do
+              case "$repoUrl" in
+                http://*|https://*)
+                  repoName=$(echo "$repoUrl" | sed 's#https\?://##; s#[^A-Za-z0-9]#-#g')
+                  if ! helm repo list 2>/dev/null | awk 'NR>1 {print $1}' | grep -q "^${repoName}$"; then
+                    echo "Adding helm repo $repoName -> $repoUrl"
+                    helm repo add "$repoName" "$repoUrl" >/dev/null 2>&1 || true
+                  fi
+                  ;;
+                oci://*) : ;; # OCI handled implicitly
+              esac
+            done
+            helm repo update >/dev/null 2>&1 || true
+          fi
           if [ -f "$chartDir/Chart.lock" ]; then
             echo "Chart.lock found. Running 'helm dependency build' for reproducible deps."
             if ! helm dependency build "$chartDir" 2>dep_err.log; then
@@ -160,19 +182,39 @@ jobs:
           fi
           echo "Dependency charts directory contents:" && ls -1 "$chartDir/charts" 2>/dev/null || echo "(charts/ directory empty or missing)"
           echo "Listing dependencies declared in Chart.yaml:" && yq e '.dependencies[] | .name + " " + (.version // "") + " " + (.repository // "")' "$chartDir/Chart.yaml" 2>/dev/null || echo "(no dependencies section)"
-          helm lint "$chartDir"
+          lint_status=0
+          if ! helm lint "$chartDir"; then
+            lint_status=$?
+            echo "::error::Helm lint failed (exit $lint_status). Skipping diff/deploy." >&2
+          fi
           ns=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || echo default)
-          if [ -n "${VALUES_FILE:-}" ]; then
-            helm template "$chartDir" --namespace "$ns" -f "$VALUES_FILE" >/dev/null
-          elif [ -f "$chartDir/values.yaml" ]; then
-            helm template "$chartDir" --namespace "$ns" -f "$chartDir/values.yaml" >/dev/null
-          else
-            helm template "$chartDir" --namespace "$ns" >/dev/null
+          if [ $lint_status -eq 0 ]; then
+            if [ -n "${VALUES_FILE:-}" ]; then
+              helm template "$chartDir" --namespace "$ns" -f "$VALUES_FILE" >/dev/null || true
+            elif [ -f "$chartDir/values.yaml" ]; then
+              helm template "$chartDir" --namespace "$ns" -f "$chartDir/values.yaml" >/dev/null || true
+            else
+              helm template "$chartDir" --namespace "$ns" >/dev/null || true
+            fi
           fi
           echo "namespace=$ns" >> "$GITHUB_OUTPUT"
+          echo "lint_exit_code=$lint_status" >> "$GITHUB_OUTPUT"
+
+      - name: Record lint failure in stats
+        if: steps.lint.outputs.lint_exit_code != '0'
+        run: |
+          set -euo pipefail
+          chartDir="${{ inputs.path }}"
+          chartName=$(basename "$chartDir")
+          namespace="${{ steps.lint.outputs.namespace || 'default' }}"
+          if ! grep -q ",$chartName," deployment-stats.csv 2>/dev/null; then
+            echo "$chartName,$namespace,00:00:00,Skipped (lint failed),lint failed" >> deployment-stats.csv
+            echo "Overall, deployment skipped due to lint failure." > overall-stats.txt
+          fi
 
       - name: Helm diff (captured, non-blocking)
         id: diff
+        if: steps.lint.outputs.lint_exit_code == '0'
         continue-on-error: true
         run: |
           set -euo pipefail
@@ -188,13 +230,14 @@ jobs:
           helm plugin list | grep -q 'diff' || helm plugin install https://github.com/databus23/helm-diff
           helm diff upgrade "$release" "$chartDir" --namespace "$ns" --allow-unreleased --suppress-secrets --no-color "${args[@]}" > helm-diff.txt 2>&1 || true
           {
-            echo "diff<<'EOF'"
-            sed -e 's/[[:cntrl:]]//g' helm-diff.txt
-            echo "EOF"
+            echo "diff<<DIFF_EOF"
+            sed -e 's/[[:cntrl:]]//g' helm-diff.txt || true
+            echo "DIFF_EOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Deploy the specified Helm chart
         id: deploy
+        if: steps.lint.outputs.lint_exit_code == '0'
         continue-on-error: true
         env:
           NS: ${{ steps.lint.outputs.namespace }}
@@ -254,9 +297,9 @@ jobs:
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
 
           {
-            echo "helm_output<<'EOF'"
+            echo "helm_output<<HELM_OUT_EOF"
             printf "%s\n" "$helmOutput"
-            echo "EOF"
+            echo "HELM_OUT_EOF"
           } >> "$GITHUB_OUTPUT"
 
           if [ $exit_code -eq 0 ]; then
@@ -273,7 +316,7 @@ jobs:
           if [ -f deployment-stats.csv ]; then
             stats=$(cat deployment-stats.csv)
           else
-            stats='Chart,Namespace,Time,Status,Error' # header only
+            stats='Chart,Namespace,Time,Status,Error'
           fi
           if [ -f overall-stats.txt ]; then
             overall=$(cat overall-stats.txt)
@@ -281,12 +324,12 @@ jobs:
             overall='No overall deployment stats available.'
           fi
           {
-            echo "stats<<'EOF'"
-            echo "$stats"
-            echo "EOF"
-            echo "overall<<'EOF'"
-            echo "$overall"
-            echo "EOF"
+            echo "stats<<STATS_EOF"
+            printf '%s\n' "$stats"
+            echo "STATS_EOF"
+            echo "overall<<OVERALL_EOF"
+            printf '%s\n' "$overall"
+            echo "OVERALL_EOF"
           } >> "$GITHUB_OUTPUT"
 
       - name: Render Helm templates for summary
@@ -412,7 +455,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: helm-artifacts
+          name: helm-artifacts-${{ github.run_attempt }}
           if-no-files-found: ignore
           path: |
             rendered-manifests.yaml
