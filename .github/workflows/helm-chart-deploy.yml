@@ -100,7 +100,19 @@ jobs:
       - name: Fetch DOKS kubeconfig
         run: |
           set -euo pipefail
-          KUBECONFIG="$DO_KUBECONFIG_FILE" doctl kubernetes cluster kubeconfig save "$DO_CLUSTER_NAME"
+          # Mask the cluster name to avoid leaking it in subsequent logs
+          echo "::add-mask::${DO_CLUSTER_NAME}"
+          # Fetch kubeconfig while suppressing noisy informational warnings that expose cluster details
+          # Retain only real errors (non-zero exit). We capture stderr to a temp file, filter benign lines, then delete it.
+          tmp_err="$(mktemp)"
+          if ! KUBECONFIG="$DO_KUBECONFIG_FILE" doctl kubernetes cluster kubeconfig save "$DO_CLUSTER_NAME" 2>"$tmp_err"; then
+            echo "::error::Failed retrieving kubeconfig for cluster (masked)." >&2
+            sed -e 's/'"$DO_CLUSTER_NAME"'/[REDACTED]/g' "$tmp_err" >&2 || true
+            exit 1
+          fi
+          # Show only unexpected stderr lines (exclude benign notices / warnings)
+          grep -Ev 'Config not found|Adding cluster credentials|Setting current-context' "$tmp_err" | sed -e 's/'"$DO_CLUSTER_NAME"'/[REDACTED]/g' || true
+          rm -f "$tmp_err"
           chmod 600 "$DO_KUBECONFIG_FILE" || true
           echo "KUBECONFIG=$DO_KUBECONFIG_FILE" >> "$GITHUB_ENV"
 
