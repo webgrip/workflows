@@ -193,7 +193,7 @@ jobs:
 
           # Optional dynamic image tag injection
           if [ -n "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
-            helmCmd="$helmCmd --set ${${{ inputs.image_tag_key }}:+}${{ inputs.image_tag_key }}='${{ inputs.tag }}'"
+            helmCmd="$helmCmd --set ${{ inputs.image_tag_key }}='${{ inputs.tag }}'"
           fi
 
           helmOutput=$(eval "$helmCmd" 2>&1)
