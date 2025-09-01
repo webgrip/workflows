@@ -165,6 +165,33 @@ jobs:
             echo "sops_used=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Resolve target namespace
+        id: resolve_namespace
+        run: |
+          set -euo pipefail
+          chartDir="${{ inputs.path }}"
+          chosen=""
+          if [ -n "${{ inputs.namespace || '' }}" ]; then
+            chosen='${{ inputs.namespace }}'
+            echo "Namespace chosen from workflow input: $chosen"
+          elif [ -n "${VALUES_FILE:-}" ]; then
+            chosen=$(yq e '.namespace' "$VALUES_FILE" 2>/dev/null || true)
+            if [ -n "$chosen" ] && [ "$chosen" != "null" ]; then
+              echo "Namespace derived from decrypted values: $chosen"
+            fi
+          elif [ -f "$chartDir/values.yaml" ]; then
+            chosen=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || true)
+            if [ -n "$chosen" ] && [ "$chosen" != "null" ]; then
+              echo "Namespace derived from chart values.yaml: $chosen"
+            fi
+          fi
+          if [ -z "$chosen" ] || [ "$chosen" = "null" ]; then
+            chosen="default"
+            echo "Namespace fallback to default: $chosen"
+          fi
+            echo "namespace=$chosen" >> "$GITHUB_OUTPUT"
+          echo "RESOLVED_NAMESPACE=$chosen" >> "$GITHUB_ENV"
+
       - name: Helm lint & template (tolerant)
         id: lint
         continue-on-error: true
@@ -221,21 +248,12 @@ jobs:
             lint_status=$?
             echo "::error::Helm lint failed (exit $lint_status). Skipping diff/deploy." >&2
           fi
-          if [ -n "${{ inputs.namespace || '' }}" ]; then
-            ns='${{ inputs.namespace }}'
-            echo "Namespace explicitly set via input: $ns"
-          elif [ -n "${VALUES_FILE:-}" ]; then
-            ns=$(yq e '.namespace' "$VALUES_FILE" 2>/dev/null || echo default)
-            echo "Namespace derived from decrypted values file: $ns"
-          else
-            ns=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || echo default)
-            echo "Namespace derived from chart values.yaml (or default): $ns"
-          fi
+          ns='${{ steps.resolve_namespace.outputs.namespace }}'
+          echo "Namespace (resolved step) for lint/template: $ns"
           if [ $lint_status -eq 0 ]; then
             echo "Template (pre-diff) command: helm template $chartDir --namespace $ns ${override_args[*]}"
             helm template "$chartDir" --namespace "$ns" "${override_args[@]}" >/dev/null || true
           fi
-          echo "namespace=$ns" >> "$GITHUB_OUTPUT"
           echo "lint_exit_code=$lint_status" >> "$GITHUB_OUTPUT"
 
       - name: Record lint failure in stats
@@ -259,7 +277,7 @@ jobs:
           set -euo pipefail
           chartDir="${{ inputs.path }}"
           release=$(basename "$chartDir")
-          ns="${{ steps.lint.outputs.namespace || 'default' }}"
+          ns="${{ steps.resolve_namespace.outputs.namespace || 'default' }}"
           echo "Using namespace for diff: $ns (lint output)."
           args=()
           [ -n "${VALUES_FILE:-}" ] && args+=(-f "$VALUES_FILE")
@@ -287,7 +305,7 @@ jobs:
         if: steps.lint.outputs.lint_exit_code == '0'
         continue-on-error: true
         env:
-          NS: ${{ steps.lint.outputs.namespace }}
+          NS: ${{ steps.resolve_namespace.outputs.namespace }}
         shell: bash
         run: |
           set +e
@@ -393,7 +411,7 @@ jobs:
           chartDir="${{ inputs.path }}"
           chartName=$(basename "$chartDir")
           rendered="rendered-manifests.yaml"
-          ns="${{ steps.lint.outputs.namespace || 'default' }}"
+          ns="${{ steps.resolve_namespace.outputs.namespace || 'default' }}"
           echo "Using namespace for render: $ns (from lint output)."
 
           valuesFile=""
@@ -546,7 +564,7 @@ jobs:
           set -euo pipefail
           chartDir="${{ inputs.path }}"
             release=$(basename "$chartDir")
-          ns="${{ steps.lint.outputs.namespace || 'default' }}"
+          ns="${{ steps.resolve_namespace.outputs.namespace || 'default' }}"
           echo "Using namespace for post-deploy verification: $ns (from lint output)."
           echo "Fetching final release values (sanitized)..."
           helm get values "$release" -n "$ns" || true
