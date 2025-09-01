@@ -29,6 +29,11 @@ on:
         description: 'Tag to deploy'
         type: string
         required: false
+      image_tag_key:
+        description: 'Helm --set key path for the image tag (e.g., image.tag or controllers.api.image.tag). If empty, tag is not injected.'
+        type: string
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -140,7 +145,9 @@ jobs:
           args=()
           [ -n "${VALUES_FILE:-}" ] && args+=(-f "$VALUES_FILE")
           [ -z "${VALUES_FILE:-}" ] && [ -f "$chartDir/values.yaml" ] && args+=(-f "$chartDir/values.yaml")
-          [ -n "${{ inputs.tag }}" ] && args+=(--set "invoiceninja.controllers.main.containers.app.image.tag=${{ inputs.tag }}")
+          if [ -n "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
+            args+=(--set "${{ inputs.image_tag_key }}=${{ inputs.tag }}")
+          fi
           helm plugin list | grep -q 'diff' || helm plugin install https://github.com/databus23/helm-diff
           helm diff upgrade "$release" "$chartDir" --namespace "$ns" --allow-unreleased --suppress-secrets --no-color "${args[@]}" > helm-diff.txt 2>&1 || true
           {
@@ -184,9 +191,9 @@ jobs:
             helmCmd="$helmCmd --values \"$valuesFile\""
           fi
 
-          # Correct image tag path
-          if [ -n "${{ inputs.tag }}" ]; then
-            helmCmd="$helmCmd --set invoiceninja.controllers.main.containers.app.image.tag='${{ inputs.tag }}'"
+          # Optional dynamic image tag injection
+          if [ -n "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
+            helmCmd="$helmCmd --set ${${{ inputs.image_tag_key }}:+}${{ inputs.image_tag_key }}='${{ inputs.tag }}'"
           fi
 
           helmOutput=$(eval "$helmCmd" 2>&1)
@@ -256,7 +263,9 @@ jobs:
 
           helmCmd=(helm template "$chartName" "$chartDir" --namespace "$ns")
           [ -n "$valuesFile" ] && helmCmd+=(--values "$valuesFile")
-          [ -n "${{ inputs.tag }}" ] && helmCmd+=(--set "invoiceninja.controllers.main.containers.app.image.tag=${{ inputs.tag }}")
+          if [ -n "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
+            helmCmd+=(--set "${{ inputs.image_tag_key }}=${{ inputs.tag }}")
+          fi
 
           echo "Rendering helm templates to $rendered"
           "${helmCmd[@]}" > "$rendered" 2>&1 || true
