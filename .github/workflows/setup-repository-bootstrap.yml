@@ -80,11 +80,11 @@ jobs:
           private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
           owner: ${{ env.ORG }}
 
-      - name: Check out new repo (development)
+      - name: Check out new repo
         uses: actions/checkout@v4
         with:
           repository: ${{ env.ORG }}/${{ env.NEW_REPO }}
-          ref: development
+          ref: main
           fetch-depth: 0
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
@@ -283,7 +283,7 @@ jobs:
           set -euo pipefail
           git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${ORG}/${NEW_REPO}.git"
 
-      - name: Commit and push changes to development (if any)
+      - name: Commit and push changes to main (if any)
         run: |
           set -euo pipefail
           git config user.name  "${{ steps.bot-email.outputs.name }}"
@@ -316,7 +316,7 @@ jobs:
             echo "Nothing to commit."
           else
             git commit -m "chore(init): personalize ${NEW_REPO}"
-            git push origin HEAD:development
+            git push origin HEAD:main
           fi
 
       - name: Compute repository URL output
@@ -324,27 +324,6 @@ jobs:
         run: |
           set -euo pipefail
           echo "repository_url=https://github.com/${ORG}/${NEW_REPO}" >> "$GITHUB_OUTPUT"
-
-      - name: Open PR from development to main (idempotent)
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ steps.app-token.outputs.token }}
-          script: |
-            const owner = process.env.ORG;
-            const repo  = process.env.NEW_REPO;
-            const { data: prs } = await github.request('GET /repos/{owner}/{repo}/pulls', {
-              owner, repo, state: 'open', base: 'main', head: `${owner}:development`
-            });
-            if (Array.isArray(prs) && prs.length > 0) {
-              core.info(`PR already open: #${prs[0].number} ${prs[0].html_url}`);
-              return;
-            }
-            const title = "chore(init): personalize repository";
-            const body  = "Automated initialization PR from `development` to `main`.";
-            const { data: pr } = await github.request('POST /repos/{owner}/{repo}/pulls', {
-              owner, repo, title, body, base: 'main', head: 'development', maintainer_can_modify: true, draft: false
-            });
-            core.info(`PR opened: #${pr.number} ${pr.html_url}`);
 
       - name: Ensure gh-pages branch, configure Pages, and set homepage (best-effort, opt-in)
         if: ${{ inputs.configure_pages }}
@@ -366,7 +345,7 @@ jobs:
               const { data } = await github.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch });
               return data.commit.sha;
             }
-            const baseSha = await (await branchExists('development') ? getSha('development') : getSha('main'));
+            const baseSha = await getSha('main');
 
             try {
               await github.request('GET /repos/{owner}/{repo}/branches/{branch}', { owner, repo, branch: 'gh-pages' });
