@@ -13,6 +13,11 @@ on:
         description: 'Perform a dry run without making changes'
         required: false
         default: false
+      paths:
+        type: string
+        description: 'Comma-separated list of file paths to sync'
+        required: false
+        default: ''
 
 jobs:
   sync-files:
