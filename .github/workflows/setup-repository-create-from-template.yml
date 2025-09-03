@@ -107,12 +107,12 @@ jobs:
               has_wiki: false,
               is_template: false,
               security_and_analysis: {
-                advanced_security: { status: enabled },
-                code_security: { status: enabled },
-                secret_scanning: { status: enabled },
-                secret_scanning_push_protection: { status: enabled },
-                secret_scanning_ai_detection: { status: enabled },
-                secret_scanning_non_provider_patterns: { status: enabled }
+                advanced_security: { status: "enabled" },
+                code_security: { status: "enabled" },
+                secret_scanning: { status: "enabled" },
+                secret_scanning_push_protection: { status: "enabled" },
+                secret_scanning_ai_detection: { status: "enabled" },
+                secret_scanning_non_provider_patterns: { status: "enabled" }
               }
             });
             core.info(`Configured merge options for ${org}/${name}.`);
