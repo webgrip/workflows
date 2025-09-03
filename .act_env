@@ -1,0 +1,13 @@
+# ACT Environment Variables
+# These environment variables will be available to all workflows when running with ACT
+
+# Repository information (will be overridden by ACT automatically)
+GITHUB_REPOSITORY=webgrip/workflows
+GITHUB_REPOSITORY_OWNER=webgrip
+GITHUB_REF=refs/heads/main
+GITHUB_SHA=test-commit-sha
+
+# Additional environment variables for testing
+CI=true
+RUNNER_OS=Linux
+RUNNER_ARCH=X64

@@ -1,0 +1,12 @@
+# Scenario definitions for helm-charts-deploy workflow
+workflow: helm-charts-deploy.yml
+trigger: workflow_dispatch
+scenarios:
+  - name: single-path
+    inputs:
+      paths: '[{"path":"ops/secrets/example-chart"}]'
+    expect: success
+  - name: missing-paths
+    inputs: {}
+    expect: failure
+critical: true

@@ -1,0 +1,14 @@
+services:
+  workflows.act:
+    container_name: workflows.act
+    image: webgrip/act-runner:latest
+    pull_policy: always
+    restart: never
+    working_dir: /workspace
+    environment:
+      - GITHUB_WORKSPACE=/workspace
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Mount repo at both conventional paths to satisfy different act variants
+      - ./:/workspace
+      - ./:/github/workspace

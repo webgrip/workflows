@@ -1,0 +1,12 @@
+# Scenario definitions for on_docs_change workflow
+workflow: on_docs_change.yml
+trigger: workflow_dispatch
+scenarios:
+  - name: default-source
+    inputs: {}
+    expect: success
+  - name: custom-source
+    inputs:
+      source-dir: docs/techdocs
+    expect: success
+critical: true

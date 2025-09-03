@@ -1,0 +1,44 @@
+{
+  "ref": "refs/heads/main",
+  "before": "0000000000000000000000000000000000000000",
+  "after": "a92691dfaa123456789012345678901234567890",
+  "commits": [
+    {
+      "id": "a92691dfaa123456789012345678901234567890",
+      "message": "feat: update template configuration files",
+      "author": {
+        "name": "Test User",
+        "email": "test@example.com"
+      },
+      "modified": [
+        ".editorconfig",
+        ".gitignore"
+      ]
+    }
+  ],
+  "head_commit": {
+    "id": "a92691dfaa123456789012345678901234567890",
+    "message": "feat: update template configuration files",
+    "author": {
+      "name": "Test User",
+      "email": "test@example.com"
+    },
+    "modified": [
+      ".editorconfig",
+      ".gitignore"
+    ]
+  },
+  "repository": {
+    "name": "application-template",
+    "full_name": "webgrip/application-template",
+    "owner": {
+      "login": "webgrip",
+      "name": "webgrip"
+    },
+    "default_branch": "main"
+  },
+  "pusher": {
+    "name": "test-user",
+    "email": "test@example.com"
+  }
+}
