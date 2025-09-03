@@ -59,6 +59,7 @@ concurrency:
 jobs:
   deploy-helm:
     name: ${{ inputs.path }}
+    environment: ${{ inputs.environment }}
     runs-on: arc-runner-set
     timeout-minutes: 30
     container:
