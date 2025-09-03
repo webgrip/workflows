@@ -84,7 +84,7 @@ jobs:
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
-  - name: Copy Copilot dirs (copy everything recursively)
+      - name: Copy Copilot dirs (copy everything recursively)
         env:
           COPILOT_REPO: ${{ inputs.copilot_repo }}
           COPILOT_REF: ${{ inputs.copilot_ref }}
