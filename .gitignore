@@ -1,2 +1,6 @@
 .idea/
 .vscode/
+
+.act_secrets
+.act_temp/
+act_output/
