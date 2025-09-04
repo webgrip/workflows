@@ -162,6 +162,13 @@ jobs:
             echo "sops_used=true" >> "$GITHUB_OUTPUT"
             echo "VALUES_FILE=$TMP_VALUES" >> "$GITHUB_ENV"
             echo "TMP_VALUES=$TMP_VALUES" >> "$GITHUB_ENV"
+              # Diagnostic: show first lines of decrypted file, redacting secrets
+              if [ -s "$TMP_VALUES" ]; then
+                echo "--- Decrypted values.sops.yaml (redacted preview) ---" >&2
+                head -20 "$TMP_VALUES" | grep -Ei -v '(secret|password|key|token|private)' >&2 || true
+              else
+                echo "::warning::Decrypted values file is empty!" >&2
+              fi
           else
             echo "sops_used=false" >> "$GITHUB_OUTPUT"
           fi
@@ -244,16 +251,18 @@ jobs:
           if [ -n "${{ inputs.tag }}" ]; then
             override_args+=( --set-string "${{ inputs.image_tag_key || '_shared_config.image.tag' }}=${{ inputs.tag }}" )
           fi
-          echo "Lint command: helm lint $chartDir ${override_args[*]}"
-          if ! helm lint "$chartDir" "${override_args[@]}"; then
-            lint_status=$?
+          echo "Lint command: helm lint --debug $chartDir ${override_args[*]}"
+          helm lint --debug "$chartDir" "${override_args[@]}" > helm-lint-debug.txt 2>&1 || lint_status=$?
+          if [ "${lint_status:-0}" -ne 0 ]; then
             echo "::error::Helm lint failed (exit $lint_status). Skipping diff/deploy." >&2
+            echo "--- Helm lint debug output ---" >&2
+            cat helm-lint-debug.txt >&2 || true
           fi
           ns='${{ steps.resolve_namespace.outputs.namespace }}'
           echo "Namespace (resolved step) for lint/template: $ns"
           if [ $lint_status -eq 0 ]; then
-            echo "Template (pre-diff) command: helm template $chartDir --namespace $ns ${override_args[*]}"
-            helm template "$chartDir" --namespace "$ns" "${override_args[@]}" >/dev/null || true
+            echo "Template (pre-diff) command: helm template --debug $chartDir --namespace $ns ${override_args[*]}"
+            helm template --debug "$chartDir" --namespace "$ns" "${override_args[@]}" > helm-template-debug.txt 2>&1 || true
           fi
           echo "lint_exit_code=$lint_status" >> "$GITHUB_OUTPUT"
 
@@ -293,8 +302,8 @@ jobs:
           # Optional custom path still supported for tag (already covered by image_tag_key)
 
           helm plugin list | grep -q 'diff' || helm plugin install https://github.com/databus23/helm-diff
-          echo "Diff command: helm diff upgrade $release $chartDir --namespace $ns --allow-unreleased --suppress-secrets --no-color ${args[*]}" >&2
-          helm diff upgrade "$release" "$chartDir" --namespace "$ns" --allow-unreleased --suppress-secrets --no-color "${args[@]}" > helm-diff.txt 2>&1 || true
+          echo "Diff command: helm diff upgrade --debug $release $chartDir --namespace $ns --allow-unreleased --suppress-secrets --no-color ${args[*]}" >&2
+          helm diff upgrade --debug "$release" "$chartDir" --namespace "$ns" --allow-unreleased --suppress-secrets --no-color "${args[@]}" > helm-diff.txt 2>&1 || true
           {
             echo "diff<<DIFF_EOF"
             sed -e 's/[[:cntrl:]]//g' helm-diff.txt || true
