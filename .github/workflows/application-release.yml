@@ -1,0 +1,49 @@
+name: 'Release'
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: "The released version"
+        value: ${{ jobs.release.outputs.version }}
+    secrets:
+      WEBGRIP_CI_APP_ID:
+        description: "GitHub App ID (numeric)"
+        required: true
+      WEBGRIP_CI_APP_PRIVATE_KEY:
+        description: "GitHub App private key (PEM)"
+        required: true
+      DOCKER_USERNAME:
+        description: "Docker Hub username"
+        required: true
+      DOCKER_TOKEN:
+        description: "Docker Hub access token or password"
+        required: true
+
+jobs:
+  release:
+    name: 'Release'
+    uses: webgrip/workflows/.github/workflows/semantic-release.yml@main
+    with:
+      use-bot-to-commit: true
+    secrets:
+      WEBGRIP_CI_APP_ID: ${{ secrets.WEBGRIP_CI_APP_ID }}
+      WEBGRIP_CI_APP_PRIVATE_KEY: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
+
+  distribute:
+    name: 'Distribute'
+    needs: [ release ]
+    if: >
+      always()
+      && needs.release.result == 'success'
+      && needs.release.outputs.version != ''
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push.yml@main
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+    with:
+      docker-context: '.'
+      docker-file: './ops/docker/application/Dockerfile'
+      docker-tags: |
+        ${{github.repository_owner}}/${{ github.event.repository.name }}:latest
+        ${{github.repository_owner}}/${{ github.event.repository.name }}:${{ needs.release.outputs.version }}

@@ -1,0 +1,37 @@
+name: 'Release'
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "The released version"
+        type: string
+        required: true
+      environment:
+        description: "The target environment"
+        type: string
+        required: true
+    secrets:
+      DIGITAL_OCEAN_API_KEY:
+        description: "DigitalOcean API Key"
+        required: true
+      DOCKER_USERNAME:
+        description: "Docker Hub username"
+        required: true
+      DOCKER_TOKEN:
+        description: "Docker Hub access token or password"
+        required: true
+
+jobs:
+  deploy-application:
+    name: 'Deploy'
+    uses: webgrip/workflows/.github/workflows/application-helm-chart-deploy.yml@main
+    secrets:
+      DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+    with:
+      environment: ${{ inputs.environment }}
+      path: './ops/helm/${{ github.event.repository.name }}'
+      image_repository: ${{ github.repository }}
+      tag: ${{ inputs.version }}
