@@ -35,3 +35,4 @@ jobs:
       path: './ops/helm/${{ github.event.repository.name }}'
       image_repository: ${{ github.repository }}
       tag: ${{ inputs.version }}
+      image_tag_key: '_shared_config.image.tag'
