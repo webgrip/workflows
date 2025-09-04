@@ -4,7 +4,7 @@ on:
   workflow_call:
 
 jobs:
-  tests-run:
+  run:
     # name: '${{ matrix.testsuite }}'
     runs-on: arc-runner-set
     container:
