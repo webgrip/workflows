@@ -23,6 +23,30 @@ on:
         required: true
 
 jobs:
+  wait-distribution:
+    runs-on: arc-runner-set
+    name: 'Wait on docker image to exist'
+    steps:
+      - name: Check if Docker image tag exists (curl)
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          tag="${{ inputs.version }}"
+          repo_api="${repo#docker.io/}"
+          if [ -z "$repo_api" ] || [ -z "$tag" ]; then
+            echo "Image repository or tag not provided; skipping curl check."
+            exit 1
+          fi
+          url="https://registry.hub.docker.com/v2/repositories/$repo_api/tags/$tag"
+          echo "Checking: $url"
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$url")
+          if [ "$code" != "200" ]; then
+            echo "::error::Image $repo:$tag not found on Docker Hub (HTTP $code)"
+            exit 1
+          fi
+          echo "Image $repo:$tag exists on Docker Hub."
+
+
   deploy-application:
     name: 'Deploy'
     uses: webgrip/workflows/.github/workflows/helm-chart-deploy.yml@main
