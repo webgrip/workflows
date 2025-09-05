@@ -185,6 +185,20 @@ jobs:
             }
             core.setFailed('Timed out waiting for the new repo default branch and first commit.');
 
+      - name: Disable Copilot Agent Firewall
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const org = process.env.ORG;
+            const repo = process.env.NEW_REPO;
+            await github.request('PATCH /repos/{owner}/{repo}/actions/variables/{name}', {
+              owner: org,
+              repo,
+              name: 'COPILOT_AGENT_FIREWALL_ENABLED',
+              value: 'false'
+            });
+            core.info('Set COPILOT_AGENT_FIREWALL_ENABLED to false');
 
       - name: Return pertinent information
         if: >
