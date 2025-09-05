@@ -584,3 +584,15 @@ jobs:
           echo "Listing images in deployed workloads (grep image:)."
           helm get manifest "$release" -n "$ns" | grep -E "^[[:space:]]*image:" || echo "No image lines found."
           echo "If expected tag not present, verify that key path '${{ inputs.image_tag_key }}' exists in chart values and is referenced by templates."
+
+          expected_tag='${{ inputs.tag }}'
+          if [ -n "$expected_tag" ]; then
+            echo "Expected tag: $expected_tag"
+            images=$(helm get manifest "$release" -n "$ns" 2>/dev/null | grep -E "^[[:space:]]*image:" | awk -F'image:' '{print $2}' | xargs || true)
+            echo "Observed images: $images"
+            if ! printf '%s' "$images" | grep -q ":$expected_tag\b"; then
+              echo "::warning::Expected tag '$expected_tag' not found among deployed images." >&2
+            else
+              echo "Tag verification passed: $expected_tag present." >&2
+            fi
+          fi
