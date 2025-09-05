@@ -76,18 +76,25 @@ jobs:
       SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY || '' }}
 
     steps:
-      - name: Docker pull check for released image
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+      - name: Check if Docker image tag exists (curl)
         run: |
           set -euo pipefail
-          if [ -n "${{ inputs.image_repository }}" ] && [ -n "${{ inputs.tag }}" ]; then
-            echo "$DOCKER_TOKEN" | docker login --username "$DOCKER_USERNAME" --password-stdin
-            docker pull "${{ inputs.image_repository }}:${{ inputs.tag }}"
-          else
-            echo "Image repository or tag not provided; skipping docker pull check."
+          repo="${{ inputs.image_repository }}"
+          tag="${{ inputs.tag }}"
+          repo_api="${repo#docker.io/}"
+          if [ -z "$repo_api" ] || [ -z "$tag" ]; then
+            echo "Image repository or tag not provided; skipping curl check."
+            exit 1
           fi
+          url="https://registry.hub.docker.com/v2/repositories/$repo_api/tags/$tag"
+          echo "Checking: $url"
+          code=$(curl -s -o /dev/null -w "%{http_code}" "$url")
+          if [ "$code" != "200" ]; then
+            echo "::error::Image $repo:$tag not found on Docker Hub (HTTP $code)"
+            exit 1
+          fi
+          echo "Image $repo:$tag exists on Docker Hub."
+
       - name: Check out code
         uses: actions/checkout@v4
 
