@@ -47,6 +47,11 @@ on:
         description: 'Kubernetes namespace to deploy to (overrides any values file namespace)'
         type: string
         required: false
+      secondary_image_tag_key:
+        description: 'Optional second key path to set the image tag (e.g. application.controllers.main.containers.app.image.tag) when chart ignores shared key.'
+        type: string
+        required: false
+        default: 'application.controllers.main.containers.app.image.tag'
 
 permissions:
   contents: read
@@ -253,6 +258,7 @@ jobs:
           fi
           if [ -n "${{ inputs.tag }}" ]; then
             override_args+=( --set-string "${{ inputs.image_tag_key || '_shared_config.image.tag' }}=${{ inputs.tag }}" )
+            override_args+=( --set-string "${{ inputs.secondary_image_tag_key }}=${{ inputs.tag }}" )
           fi
           echo "Lint command: helm lint --debug $chartDir ${override_args[*]}"
           helm lint --debug "$chartDir" "${override_args[@]}" > helm-lint-debug.txt 2>&1 || lint_status=$?
@@ -301,6 +307,7 @@ jobs:
           fi
           if [ -n "${{ inputs.tag }}" ]; then
             args+=(--set-string "${{ inputs.image_tag_key || '_shared_config.image.tag' }}=${{ inputs.tag }}")
+            args+=(--set-string "${{ inputs.secondary_image_tag_key }}=${{ inputs.tag }}")
           fi
           # Optional custom path still supported for tag (already covered by image_tag_key)
 
@@ -357,6 +364,7 @@ jobs:
           fi
           if [ -n "${{ inputs.tag }}" ]; then
             helmCmd="$helmCmd --set-string ${{ inputs.image_tag_key || '_shared_config.image.tag' }}='${{ inputs.tag }}'"
+            helmCmd="$helmCmd --set-string ${{ inputs.secondary_image_tag_key }}='${{ inputs.tag }}'"
           fi
 
           echo "Deploy command: $helmCmd"
@@ -442,6 +450,7 @@ jobs:
           fi
           if [ -n "${{ inputs.tag }}" ]; then
             helmCmd+=(--set-string "${{ inputs.image_tag_key || '_shared_config.image.tag' }}=${{ inputs.tag }}")
+            helmCmd+=(--set-string "${{ inputs.secondary_image_tag_key }}=${{ inputs.tag }}")
           fi
 
           echo "Render command: ${helmCmd[*]}"
