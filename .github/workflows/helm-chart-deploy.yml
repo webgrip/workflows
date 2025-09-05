@@ -17,41 +17,35 @@ on:
         required: false
     inputs:
       environment:
-        description: 'Environment to deploy to'
+        description: 'Target deployment environment (e.g. staging, production)'
         type: string
         required: true
-        default: 'staging'
       path:
-        description: 'Path to the Helm chart you wish to deploy'
+        description: 'Path to the Helm chart to deploy'
         type: string
         required: true
-      tag:
-        description: 'Tag to deploy (overrides shared _shared_config.image.tag by default)'
+      image_tag:
+        description: 'Docker image tag to deploy (overrides image.tag in values)'
         type: string
         required: false
-      image_tag_key:
-        description: 'Helm --set key path for the image tag. Defaults to _shared_config.image.tag.'
-        type: string
-        required: false
-        default: '_shared_config.image.tag'
-      image_repository:
-        description: 'Image repository to deploy (overrides shared _shared_config.image.repository).'
-        type: string
-        required: false
-      image_repository_key:
-        description: 'Helm --set key path for the image repository. Defaults to _shared_config.image.repository.'
-        type: string
-        required: false
-        default: '_shared_config.image.repository'
-      namespace:
-        description: 'Kubernetes namespace to deploy to (overrides any values file namespace)'
-        type: string
-        required: false
-      secondary_image_tag_key:
-        description: 'Optional second key path to set the image tag (e.g. application.controllers.main.containers.app.image.tag) when chart ignores shared key.'
+      image_tag_path:
+        description: 'Key path in values.yaml for the image tag (e.g. application.controllers.main.containers.app.image.tag)'
         type: string
         required: false
         default: 'application.controllers.main.containers.app.image.tag'
+      image_repository:
+        description: 'Docker image repository to deploy (overrides image.repository in values)'
+        type: string
+        required: false
+      image_repository_path:
+        description: 'Key path in values.yaml for the image repository (e.g. application.controllers.main.containers.app.image.repository)'
+        type: string
+        required: false
+        default: 'application.controllers.main.containers.app.image.repository'
+      namespace:
+        description: 'Kubernetes namespace to deploy to (overrides values.yaml)'
+        type: string
+        required: false
 
 permissions:
   contents: read
@@ -87,14 +81,17 @@ jobs:
       - name: Validate inputs (non-fatal warnings)
         run: |
           set -euo pipefail
-          if [ -n "${{ inputs.tag }}" ] && [ -z "${{ inputs.image_tag_key }}" ]; then
-            echo "::warning::'tag' provided but 'image_tag_key' is empty. (Default is _shared_config.image.tag) The tag may NOT be injected." >&2
+          if [ -n "${{ inputs.image_tag }}" ] && [ -z "${{ inputs.image_tag_path }}" ]; then
+            echo "::notice::'image_tag' provided with no 'image_tag_path'. Will use default path: application.controllers.main.containers.app.image.tag" >&2
           fi
-          if [ -z "${{ inputs.tag }}" ] && [ -n "${{ inputs.image_tag_key }}" ]; then
-            echo "::notice::'image_tag_key' provided but no 'tag' value. No tag injection will occur." >&2
+          if [ -z "${{ inputs.image_tag }}" ] && [ -n "${{ inputs.image_tag_path }}" ]; then
+            echo "::notice::'image_tag_path' provided but no 'image_tag' value. No tag injection will occur." >&2
           fi
-          if [ -n "${{ inputs.image_repository }}" ] && [ -z "${{ inputs.image_repository_key }}" ]; then
-            echo "::warning::'image_repository' provided but 'image_repository_key' is empty. (Default is _shared_config.image.repository) The repository may NOT be injected." >&2
+          if [ -n "${{ inputs.image_repository }}" ] && [ -z "${{ inputs.image_repository_path }}" ]; then
+            echo "::notice::'image_repository' provided with no 'image_repository_path'. Will use default path: application.controllers.main.containers.app.image.repository" >&2
+          fi
+          if [ -z "${{ inputs.image_repository }}" ] && [ -n "${{ inputs.image_repository_path }}" ]; then
+            echo "::notice::'image_repository_path' provided but no 'image_repository' value. No repository injection will occur." >&2
           fi
 
       - name: Init deployment stats placeholder
@@ -254,11 +251,10 @@ jobs:
             override_args+=( -f "$chartDir/values.yaml" )
           fi
           if [ -n "${{ inputs.image_repository }}" ]; then
-            override_args+=( --set-string "${{ inputs.image_repository_key || '_shared_config.image.repository' }}=${{ inputs.image_repository }}" )
+            override_args+=( --set-string "${{ inputs.image_repository_path:-application.controllers.main.containers.app.image.repository} }=${{ inputs.image_repository }}" )
           fi
-          if [ -n "${{ inputs.tag }}" ]; then
-            override_args+=( --set-string "${{ inputs.image_tag_key || '_shared_config.image.tag' }}=${{ inputs.tag }}" )
-            override_args+=( --set-string "${{ inputs.secondary_image_tag_key }}=${{ inputs.tag }}" )
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            override_args+=( --set-string "${{ inputs.image_tag_path:-application.controllers.main.containers.app.image.tag} }=${{ inputs.image_tag }}" )
           fi
           echo "Lint command: helm lint --debug $chartDir ${override_args[*]}"
           helm lint --debug "$chartDir" "${override_args[@]}" > helm-lint-debug.txt 2>&1 || lint_status=$?
@@ -303,14 +299,11 @@ jobs:
           [ -z "${VALUES_FILE:-}" ] && [ -f "$chartDir/values.yaml" ] && args+=(-f "$chartDir/values.yaml")
           # Inject shared image repository/tag by default
           if [ -n "${{ inputs.image_repository }}" ]; then
-            args+=(--set-string "${{ inputs.image_repository_key || '_shared_config.image.repository' }}=${{ inputs.image_repository }}")
+            args+=(--set-string "${{ inputs.image_repository_path:-'_shared_config.image.repository' }}=${{ inputs.image_repository }}")
           fi
-          if [ -n "${{ inputs.tag }}" ]; then
-            args+=(--set-string "${{ inputs.image_tag_key || '_shared_config.image.tag' }}=${{ inputs.tag }}")
-            args+=(--set-string "${{ inputs.secondary_image_tag_key }}=${{ inputs.tag }}")
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            args+=(--set-string "${{ inputs.image_tag_path:-'_shared_config.image.tag' }}=${{ inputs.image_tag }}")
           fi
-          # Optional custom path still supported for tag (already covered by image_tag_key)
-
           helm plugin list | grep -q 'diff' || helm plugin install https://github.com/databus23/helm-diff
           echo "Diff command: helm diff upgrade --debug $release $chartDir --namespace $ns --allow-unreleased --suppress-secrets --no-color ${args[*]}" >&2
           helm diff upgrade --debug "$release" "$chartDir" --namespace "$ns" --allow-unreleased --suppress-secrets --no-color "${args[@]}" > helm-diff.txt 2>&1 || true
@@ -360,11 +353,10 @@ jobs:
 
           # Shared image overrides (default to shared _shared_config.* keys)
           if [ -n "${{ inputs.image_repository }}" ]; then
-            helmCmd="$helmCmd --set-string ${{ inputs.image_repository_key || '_shared_config.image.repository' }}='${{ inputs.image_repository }}'"
+            helmCmd="$helmCmd --set-string ${{ inputs.image_repository_path:-'_shared_config.image.repository' }}='${{ inputs.image_repository }}'"
           fi
-          if [ -n "${{ inputs.tag }}" ]; then
-            helmCmd="$helmCmd --set-string ${{ inputs.image_tag_key || '_shared_config.image.tag' }}='${{ inputs.tag }}'"
-            helmCmd="$helmCmd --set-string ${{ inputs.secondary_image_tag_key }}='${{ inputs.tag }}'"
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            helmCmd="$helmCmd --set-string ${{ inputs.image_tag_path:-'_shared_config.image.tag' }}='${{ inputs.image_tag }}'"
           fi
 
           echo "Deploy command: $helmCmd"
@@ -446,11 +438,10 @@ jobs:
           [ -n "$valuesFile" ] && helmCmd+=(--values "$valuesFile")
           # Inject shared image overrides for rendering too
           if [ -n "${{ inputs.image_repository }}" ]; then
-            helmCmd+=(--set-string "${{ inputs.image_repository_key || '_shared_config.image.repository' }}=${{ inputs.image_repository }}")
+            helmCmd+=(--set-string "${{ inputs.image_repository_path:-'_shared_config.image.repository' }}=${{ inputs.image_repository }}")
           fi
-          if [ -n "${{ inputs.tag }}" ]; then
-            helmCmd+=(--set-string "${{ inputs.image_tag_key || '_shared_config.image.tag' }}=${{ inputs.tag }}")
-            helmCmd+=(--set-string "${{ inputs.secondary_image_tag_key }}=${{ inputs.tag }}")
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            helmCmd+=(--set-string "${{ inputs.image_tag_path:-'_shared_config.image.tag' }}=${{ inputs.image_tag }}")
           fi
 
           echo "Render command: ${helmCmd[*]}"
@@ -592,9 +583,9 @@ jobs:
           helm get values "$release" -n "$ns" || true
           echo "Listing images in deployed workloads (grep image:)."
           helm get manifest "$release" -n "$ns" | grep -E "^[[:space:]]*image:" || echo "No image lines found."
-          echo "If expected tag not present, verify that key path '${{ inputs.image_tag_key }}' exists in chart values and is referenced by templates."
+          echo "If expected tag not present, verify that key path '${{ inputs.image_tag_path }}' exists in chart values and is referenced by templates."
 
-          expected_tag='${{ inputs.tag }}'
+          expected_tag='${{ inputs.image_tag }}'
           if [ -n "$expected_tag" ]; then
             echo "Expected tag: $expected_tag"
             images=$(helm get manifest "$release" -n "$ns" 2>/dev/null | grep -E "^[[:space:]]*image:" | awk -F'image:' '{print $2}' | xargs || true)
