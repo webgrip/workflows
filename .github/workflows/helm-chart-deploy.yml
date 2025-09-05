@@ -76,6 +76,18 @@ jobs:
       SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY || '' }}
 
     steps:
+      - name: Docker pull check for released image
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.image_repository }}" ] && [ -n "${{ inputs.tag }}" ]; then
+            echo "$DOCKER_TOKEN" | docker login --username "$DOCKER_USERNAME" --password-stdin
+            docker pull "${{ inputs.image_repository }}:${{ inputs.tag }}"
+          else
+            echo "Image repository or tag not provided; skipping docker pull check."
+          fi
       - name: Check out code
         uses: actions/checkout@v4
 
