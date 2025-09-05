@@ -62,6 +62,9 @@ jobs:
     environment: ${{ inputs.environment }}
     runs-on: arc-runner-set
     timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
     container:
       image: webgrip/helm-deploy:latest
       credentials:
