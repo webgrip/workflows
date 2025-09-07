@@ -283,10 +283,16 @@ jobs:
           chartDir="${{ inputs.path }}"
           chartName=$(basename "$chartDir")
           namespace="${{ steps.lint.outputs.namespace || 'default' }}"
-          if ! grep -q ",$chartName," deployment-stats.csv 2>/dev/null; then
+          if ! grep -q ",${chartName}," deployment-stats.csv 2>/dev/null; then
             echo "$chartName,$namespace,00:00:00,Skipped (lint failed),lint failed" >> deployment-stats.csv
             echo "Overall, deployment skipped due to lint failure." > overall-stats.txt
           fi
+
+      - name: Fail if Helm lint failed
+        if: steps.lint.outputs.lint_exit_code != '0'
+        run: |
+          echo "Helm lint failed. Marking job as failed."
+          exit 1
 
       - name: Helm diff (captured, non-blocking)
         id: diff
