@@ -186,19 +186,56 @@ jobs:
             core.setFailed('Timed out waiting for the new repo default branch and first commit.');
 
       - name: Disable Copilot Agent Firewall
+        continue-on-error: true
         uses: actions/github-script@v7
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
             const org = process.env.ORG;
             const repo = process.env.NEW_REPO;
-            await github.request('PATCH /repos/{owner}/{repo}/actions/variables/{name}', {
-              owner: org,
-              repo,
-              name: 'COPILOT_AGENT_FIREWALL_ENABLED',
-              value: 'false'
-            });
-            core.info('Set COPILOT_AGENT_FIREWALL_ENABLED to false');
+
+            async function ensureVarDisabled() {
+              try {
+                // Try update (PATCH) first – works only if variable already exists.
+                await github.request('PATCH /repos/{owner}/{repo}/actions/variables/{name}', {
+                  owner: org,
+                  repo,
+                  name: 'COPILOT_AGENT_FIREWALL_ENABLED',
+                  value: 'false'
+                });
+                core.info('Updated existing variable COPILOT_AGENT_FIREWALL_ENABLED -> false');
+                return;
+              } catch (e) {
+                if (e.status === 404) {
+                  core.info('Variable does not exist yet; creating it.');
+                  try {
+                    await github.request('POST /repos/{owner}/{repo}/actions/variables', {
+                      owner: org,
+                      repo,
+                      name: 'COPILOT_AGENT_FIREWALL_ENABLED',
+                      value: 'false'
+                    });
+                    core.info('Created variable COPILOT_AGENT_FIREWALL_ENABLED=false');
+                    return;
+                  } catch (inner) {
+                    if (inner.status === 403) {
+                      core.warning('403 creating variable: GitHub App lacks Actions Variables write permission.');
+                      return;
+                    }
+                    core.warning(`Failed to create variable (${inner.status||'?'}): ${inner.message}`);
+                    return;
+                  }
+                }
+                if (e.status === 403) {
+                  core.warning('403 updating variable: GitHub App is missing the "Actions: Read and write" (variables) permission or feature not enabled. Skipping.');
+                  return;
+                }
+                core.warning(`Failed to update variable (${e.status||'?'}): ${e.message}`);
+              }
+            }
+
+            await ensureVarDisabled();
+            core.info('Best-effort Copilot Agent Firewall disable step complete.');
 
       - name: Return pertinent information
         if: >
