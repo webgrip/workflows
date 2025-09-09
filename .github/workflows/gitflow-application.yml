@@ -1,0 +1,49 @@
+name: '[Application] Gitflow CI/CD'
+
+# This workflow provides a complete gitflow implementation for applications
+# It should replace the traditional on_source_change.yml workflow
+
+on:
+  push:
+    branches:
+      - 'main'
+      - 'development'
+      - 'develop'
+      - 'feature/**'
+      - 'bugfix/**'
+      - 'hotfix/**'
+    paths:
+      - 'ops/**'
+      - 'src/**'
+      - '.releaserc.json'
+      - '.github/workflows/**'
+  pull_request:
+    branches:
+      - 'main'
+      - 'development'
+      - 'develop'
+    paths:
+      - 'ops/**'
+      - 'src/**'
+      - '.releaserc.json'
+      - '.github/workflows/**'
+
+concurrency:
+  group: gitflow-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gitflow:
+    name: 'Gitflow CI/CD'
+    uses: webgrip/workflows/.github/workflows/gitflow-release.yml@main
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+      DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+    with:
+      source-paths: 'src/**'
+      ops-paths: 'ops/**'
+      static-analysis-enabled: true
+      tests-enabled: true
+      deploy-enabled: true
