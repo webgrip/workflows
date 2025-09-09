@@ -50,6 +50,7 @@ permissions:
   pull-requests: write
   actions: write
   pages: write
+  issues: write
 
 concurrency:
   group: bootstrap-${{ github.repository_id }}-${{ inputs.repo_name }}
@@ -289,6 +290,7 @@ jobs:
           git config user.name  "${{ steps.bot-email.outputs.name }}"
           git config user.email "${{ steps.bot-email.outputs.email }}"
           git add -A
+
           # If no staged changes yet, optionally force-create or touch files listed in force_commit_files
           if git diff --cached --quiet; then
             fc_list="${{ inputs.force_commit_files }}"
@@ -312,12 +314,297 @@ jobs:
               git add -A
             fi
           fi
+
           if git diff --cached --quiet; then
             echo "Nothing to commit."
           else
             git commit -m "chore(init): personalize ${NEW_REPO}"
             git push origin HEAD:main
           fi
+      - name: Fetch issue templates repository
+        uses: actions/checkout@v4
+        with:
+          repository: webgrip/issue-templates
+          path: __issue_templates
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Create project setup issue chain
+        id: create-issues
+        uses: actions/github-script@v7
+        env:
+          PROJECT_NAME: ${{ env.NEW_REPO }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const owner = process.env.ORG;
+            const repo  = process.env.NEW_REPO;
+            const projectName = process.env.PROJECT_NAME;
+            const fs = require('fs');
+            const path = require('path');
+            const root = path.join(process.env.GITHUB_WORKSPACE || process.cwd(), '__issue_templates');
+
+            // Idempotency strategy: Stable hidden markers per logical issue slug, update bodies & titles if changed.
+            const MARKER_PREFIX = '<!-- managed:bootstrap-issue:'; // slug appended, then ' -->'
+            const MARKER_SUFFIX = ' -->';
+            const ISSUE_SPECS = [
+              { slug: 'main',   defaultTitle: (n) => `Set up project ${n}`, templateHints: ['0010-setup-project/0010-documentation.md'] },
+              { slug: 'docs',   defaultTitle: () => 'Set up documentation', templateHints: ['0010-setup-project/0010-documentation.md'] },
+              { slug: 'docker', defaultTitle: () => 'Set up Docker environment', templateHints: ['0020-docker.md'] },
+              { slug: 'helm',   defaultTitle: () => 'Set up Helm chart', templateHints: ['0030-helm.md'] },
+            ];
+
+            async function listIssues(state = 'all', perPage = 50, maxPages = 4) {
+              const out = [];
+              for (let page = 1; page <= maxPages; page++) {
+                const { data } = await github.request('GET /repos/{owner}/{repo}/issues', { owner, repo, state, per_page: perPage, page });
+                if (!data.length) break;
+                out.push(...data.filter(i => !i.pull_request));
+              }
+              return out;
+            }
+
+            function extractFrontMatter(raw) {
+              if (!raw.startsWith('---')) return { front: {}, body: raw };
+              const end = raw.indexOf('\n---', 3);
+              if (end === -1) return { front: {}, body: raw };
+              const meta = raw.slice(3, end).trim();
+              const rest = raw.slice(end + 4).replace(/^\s*\n/, '');
+              const front = {};
+              let currentKey = null;
+              meta.split(/\r?\n/).forEach(line => {
+                if (/^\s*-\s+/.test(line) && currentKey) {
+                  // list item
+                  const val = line.replace(/^\s*-\s+/, '').trim();
+                  if (!Array.isArray(front[currentKey])) front[currentKey] = [];
+                  front[currentKey].push(val.replace(/^"|"$/g,'').replace(/^'|'$/g,''));
+                  return;
+                }
+                const m = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/);
+                if (m) {
+                  currentKey = m[1];
+                  let v = m[2].trim();
+                  if (v === '') { front[currentKey] = []; }
+                  else front[currentKey] = v.replace(/^"|"$/g,'').replace(/^'|'$/g,'');
+                }
+              });
+              return { front, body: rest };
+            }
+
+            function loadTemplate(hints) {
+              for (const base of hints) {
+                const variants = [base, `${base}.md`, `${base}.MD`, base.toLowerCase(), `${base.toLowerCase()}.md`];
+                for (const v of variants) {
+                  const full = path.join(root, v);
+                  if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+                    try { return fs.readFileSync(full, 'utf8'); } catch {}
+                  }
+                }
+              }
+              return null;
+            }
+
+            async function ensureLabel(name, color = '0E8A16', description = '') {
+              const norm = name.trim();
+              try {
+                await github.request('GET /repos/{owner}/{repo}/labels/{name}', { owner, repo, name: norm });
+                return;
+              } catch(e) {
+                if (e.status !== 404) return;
+              }
+              try {
+                await github.request('POST /repos/{owner}/{repo}/labels', { owner, repo, name: norm, color, description });
+              } catch(e) { /* ignore */ }
+            }
+
+            function buildManagedBody(slug, content, blockingNumbers = []) {
+              const marker = `${MARKER_PREFIX}${slug}${MARKER_SUFFIX}`;
+              const blockLine = blockingNumbers.length ? `\n\nBlocked by ${blockingNumbers.map(n => '#' + n).join(' ')}` : '';
+              if (content.includes(marker)) return content; // Already has marker (rare if template shipped marker)
+              return `${marker}\n\n${content.trim()}${blockLine}`.trim() + '\n';
+            }
+
+            function bodyNeedsUpdate(current, desired) {
+              const norm = s => s.replace(/\s+$/gm,'').trim();
+              return norm(current || '') !== norm(desired || '');
+            }
+
+            const existingIssues = await listIssues('all');
+            const bySlug = {};
+            for (const iss of existingIssues) {
+              const m = iss.body && iss.body.match(/<!-- managed:bootstrap-issue:([a-z0-9-]+) -->/);
+              if (m) bySlug[m[1]] = iss;
+            }
+
+            const created = {};
+
+            // First pass create/update without blocked lines; collect numbers.
+            for (const spec of ISSUE_SPECS) {
+              const raw = loadTemplate(spec.templateHints) || '';
+              const { front, body } = extractFrontMatter(raw);
+              const title = front.title ? front.title.replace(/<project name>/gi, projectName) : spec.defaultTitle(projectName);
+              const tags = Array.isArray(front.tags) ? front.tags : [];
+              // Fallback body
+              const baseBody = body ? body : `Placeholder content for ${title} (template not found).`;
+              const existing = bySlug[spec.slug];
+              const managedBody = buildManagedBody(spec.slug, baseBody, []); // blocking added later
+
+              // Ensure labels
+              for (const t of tags) await ensureLabel(t);
+
+              if (!existing) {
+                const { data: newIssue } = await github.request('POST /repos/{owner}/{repo}/issues', {
+                  owner, repo, title, body: managedBody, labels: tags
+                });
+                bySlug[spec.slug] = newIssue;
+                created[spec.slug] = newIssue;
+              } else {
+                // Patch if title/body/labels changed
+                let need = false;
+                const patch = { owner, repo, issue_number: existing.number };
+                if (existing.title !== title) { patch.title = title; need = true; }
+                // Rebuild desired body WITHOUT blocking first (will patch again later if blockers differ)
+                if (bodyNeedsUpdate(existing.body, managedBody)) { patch.body = managedBody; need = true; }
+                // Labels sync (replace) if tags provided
+                if (tags.length) {
+                  const cur = (existing.labels || []).map(l => (typeof l === 'string' ? l : l.name));
+                  const want = [...new Set(tags)];
+                  if (cur.sort().join(',') !== want.sort().join(',')) { patch.labels = want; need = true; }
+                }
+                if (need) {
+                  const { data: upd } = await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', patch);
+                  bySlug[spec.slug] = upd;
+                }
+              }
+            }
+
+            // Second pass: add blocking references per desired dependency graph
+            function updateBlocking(slug, blockers) {
+              const iss = bySlug[slug];
+              if (!iss) return;
+              const marker = `${MARKER_PREFIX}${slug}${MARKER_SUFFIX}`;
+              const bodyWithoutBlock = (iss.body || '').replace(/\n\nBlocked by (#\d+(\s+#\d+)*)$/,'');
+              const desired = buildManagedBody(slug, bodyWithoutBlock.replace(marker,'').trim(), blockers);
+              if (bodyNeedsUpdate(iss.body, desired)) {
+                return github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', { owner, repo, issue_number: iss.number, body: desired });
+              }
+            }
+            // Desired:
+            // docs: no blockers
+            // docker: blocked by docs
+            // helm:   blocked by docker
+            // main:   blocked by docs, docker, helm (all subtasks block parent)
+            await updateBlocking('docs', []);
+            await updateBlocking('docker', [bySlug.docs.number]);
+            await updateBlocking('helm', [bySlug.docker.number]);
+            await updateBlocking('main', [bySlug.docs.number, bySlug.docker.number, bySlug.helm.number]);
+
+            // Checklist inside main referencing others
+            const mainIssue = bySlug.main;
+            if (mainIssue) {
+              const ckLines = [
+                `- [ ] #${bySlug.docs.number} Set up documentation`,
+                `- [ ] #${bySlug.docker.number} Set up Docker environment`,
+                `- [ ] #${bySlug.helm.number} Set up Helm chart`
+              ];
+              const CHECK_HEADER = '### Initial Setup Tasks';
+              let body = mainIssue.body || '';
+              if (!body.includes(CHECK_HEADER)) {
+                body += `\n\n${CHECK_HEADER}\n${ckLines.join('\n')}`;
+                await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', { owner, repo, issue_number: mainIssue.number, body });
+              }
+            }
+
+            core.setOutput('main_issue', bySlug.main.number);
+            core.setOutput('docs_issue', bySlug.docs.number);
+            core.setOutput('docker_issue', bySlug.docker.number);
+            core.setOutput('helm_issue', bySlug.helm.number);
+            core.summary
+              .addHeading('Setup issues (idempotent sync)', 2)
+              .addRaw(`Main: #${bySlug.main.number}`) .addEOL()
+              .addRaw(`Docs: #${bySlug.docs.number}`) .addEOL()
+              .addRaw(`Docker: #${bySlug.docker.number}`) .addEOL()
+              .addRaw(`Helm: #${bySlug.helm.number}`) .addEOL();
+            await core.summary.write();
+            core.info(`Issue chain: main #${bySlug.main.number} -> docs #${bySlug.docs.number} -> docker #${bySlug.docker.number} -> helm #${bySlug.helm.number}`);
+
+            function loadTemplate(nameHints) {
+              for (const base of nameHints) {
+                const candidates = [base, `${base}.md`, `${base}.MD`, base.toLowerCase(), `${base.toLowerCase()}.md`];
+                for (const c of candidates) {
+                  const full = path.join(root, c);
+                  if (fs.existsSync(full) && fs.statSync(full).isFile()) {
+                    try { return fs.readFileSync(full, 'utf8'); } catch {}
+                  }
+                }
+              }
+              return null;
+            }
+
+            const mainTitle  = `Set up project ${projectName}`;
+            const docsTitle  = 'Set up documentation';
+            const dockerTitle= 'Set up Docker environment';
+            const helmTitle  = 'Set up Helm chart';
+
+            const mainBodyTpl   = loadTemplate(['project', 'project-setup', 'main']);
+            const docsBodyTpl   = loadTemplate(['docs', 'documentation']);
+            const dockerBodyTpl = loadTemplate(['docker']);
+            const helmBodyTpl   = loadTemplate(['helm', 'chart']);
+
+            function fallbackBody(purpose) {
+              return `${purpose} for ${projectName}.\n\n> Placeholder body (no matching template file found).`;
+            }
+
+            async function ensureIssue(title, rawBody) {
+              const existing = await findIssueByTitle(title);
+              if (existing) return existing;
+              const { data } = await github.request('POST /repos/{owner}/{repo}/issues', { owner, repo, title, body: rawBody });
+              return data;
+            }
+
+            // Create main issue first (sub-issues will reference it)
+            let mainIssue = await ensureIssue(mainTitle, (mainBodyTpl || `Bootstrap tasks for ${projectName}.\n\nThis issue tracks the initial project setup.`));
+
+            // Docs issue (blocked by main)
+            const docsIssue = await ensureIssue(docsTitle, `${docsBodyTpl || fallbackBody('Create docs structure')}\n\nBlocked by #${mainIssue.number}`);
+
+            // Docker issue (blocked by docs)
+            const dockerIssue = await ensureIssue(dockerTitle, `${dockerBodyTpl || fallbackBody('Create Docker assets')}\n\nBlocked by #${docsIssue.number}`);
+
+            // Helm issue (blocked by docker)
+            const helmIssue = await ensureIssue(helmTitle, `${helmBodyTpl || fallbackBody('Create Helm chart')}\n\nBlocked by #${dockerIssue.number}`);
+
+            // Update main issue body to include checklist referencing sub issues (only if we created it new or body lacks checklist)
+            const checklist = [
+              `- [ ] #${docsIssue.number} ${docsTitle}`,
+              `- [ ] #${dockerIssue.number} ${dockerTitle}`,
+              `- [ ] #${helmIssue.number} ${helmTitle}`
+            ].join('\n');
+
+            if (!/\- \[ \] #\d+ Set up documentation/.test(mainIssue.body || '')) {
+              const newBody = (mainIssue.body || '') + `\n\n### Initial Setup Tasks\n${checklist}`;
+              try {
+                await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', { owner, repo, issue_number: mainIssue.number, body: newBody });
+                mainIssue.body = newBody;
+              } catch (e) {
+                core.warning(`Failed to update main issue checklist: ${e.status||'?'} ${e.message}`);
+              }
+            }
+
+            core.summary
+              .addHeading('Created setup issues', 2)
+              .addRaw(`Main: #${mainIssue.number}`) .addEOL()
+              .addRaw(`Docs: #${docsIssue.number}`) .addEOL()
+              .addRaw(`Docker: #${dockerIssue.number}`) .addEOL()
+              .addRaw(`Helm: #${helmIssue.number}`) .addEOL();
+            await core.summary.write();
+
+            core.setOutput('main_issue', mainIssue.number);
+            core.setOutput('docs_issue', docsIssue.number);
+            core.setOutput('docker_issue', dockerIssue.number);
+            core.setOutput('helm_issue', helmIssue.number);
+            core.info(`Issue chain: main #${mainIssue.number} -> docs #${docsIssue.number} -> docker #${dockerIssue.number} -> helm #${helmIssue.number}`);
 
       - name: Compute repository URL output
         id: compute-urls
