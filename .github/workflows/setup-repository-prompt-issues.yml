@@ -1,0 +1,232 @@
+name: "[Call] Bootstrap repository issues"
+
+on:
+  workflow_call:
+    inputs:
+      repo_name:
+        description: "Name of the new repository"
+        type: string
+        required: true
+    secrets:
+      WEBGRIP_CI_CLIENT_ID:
+        description: "GitHub App ID (numeric)"
+        required: true
+      WEBGRIP_CI_APP_PRIVATE_KEY:
+        description: "GitHub App private key (PEM)"
+        required: true
+
+permissions:
+  issues: write
+  contents: write
+
+jobs:
+  ai-inference:
+    name: "AI Inference (prompt files)"
+    runs-on: arc-runner-set
+    permissions:
+      contents: read
+      models: read
+    strategy:
+      matrix:
+        prompt_file:
+          - ./__agentic_workflows/.github/prompts/set-up-documentation.prompt.yml
+          - ./__agentic_workflows/.github/prompts/set-up-docker.prompt.yml
+          - ./__agentic_workflows/.github/prompts/set-up-helm.prompt.yml
+          # add one line like:
+          # - ./__agentic_workflows/.github/prompts/set-up-ci.prompt.yml
+    steps:
+      - name: Mint GitHub App installation token (owner-based)
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
+          private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout agentic-workflows repo (prompts)
+        uses: actions/checkout@v4
+        with:
+          repository: webgrip/agentic-workflows
+          path: __agentic_workflows
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Run AI Inference
+        id: inference
+        uses: actions/ai-inference@v1
+        with:
+          prompt-file: ${{ matrix.prompt_file }}
+          input: |
+            APP_NAME: ${{ inputs.repo_name }}
+          model: "openai/gpt-5"
+          endpoint: "https://models.github.ai/inference"
+          max-tokens: 16000
+
+      - name: Derive slug + title and normalize body file
+        id: meta
+        shell: bash
+        run: |
+          bn="$(basename "${{ matrix.prompt_file }}")"               # e.g., set-up-helm.prompt.yml
+          slug="${bn%.prompt.yml}"                                   # -> set-up-helm
+          # Title case but keep sentence style ("Set up helm")
+          title="$(echo "$slug" | tr '-' ' ' )"
+          title="$(echo "${title:0:1}" | tr '[:lower:]' '[:upper:]')${title:1}"
+          mkdir -p out
+          cp "${{ steps.inference.outputs.response-file }}" "out/${slug}.md"
+          {
+            echo "slug=$slug"
+            echo "title=$title"
+            echo "body=out/${slug}.md"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload AI body artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-body-${{ steps.meta.outputs.slug }}
+          path: out/${{ steps.meta.outputs.slug }}.md
+
+  bootstrap-issues:
+    name: "Bootstrap repository issues"
+    runs-on: arc-runner-set
+    needs: ai-inference
+    env:
+      ORG: ${{ github.repository_owner }}
+      NEW_REPO: ${{ inputs.repo_name }}
+    steps:
+      - name: Mint GitHub App installation token (owner-based)
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
+          private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
+          owner: ${{ env.ORG }}
+
+      - name: Download all AI body artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ai-body-*
+          path: ai-bodies
+          merge-multiple: true
+
+      - name: Create/update issues (AI bodies + Main)
+        id: create-issues
+        uses: actions/github-script@v7
+        env:
+          PROJECT_NAME: ${{ env.NEW_REPO }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const owner = process.env.ORG;
+            const repo  = process.env.NEW_REPO;
+            const projectName = process.env.PROJECT_NAME;
+
+            const MARKER_PREFIX = '<!-- managed:bootstrap-issue:';
+            const MARKER_SUFFIX = ' -->';
+            const sentenceCase = s => {
+              s = (s||'').trim();
+              if (!s) return s;
+              return s[0].toUpperCase() + s.slice(1);
+            };
+            const slugToTitle = slug => sentenceCase(slug.replace(/-/g,' ')); // "set-up-helm" -> "Set up helm"
+
+            function buildManagedBody(slug, content, blockers = []) {
+              const marker = `${MARKER_PREFIX}${slug}${MARKER_SUFFIX}`;
+              const blockLine = blockers.length ? `\n\nBlocked by ${blockers.map(n => '#' + n).join(' ')}` : '';
+              return `${marker}\n\n${(content || '').trim()}${blockLine}`.trim() + '\n';
+            }
+            function bodyNeedsUpdate(current, desired) {
+              const norm = s => (s || '').replace(/\s+$/gm,'').trim();
+              return norm(current) !== norm(desired);
+            }
+            async function listIssues(state = 'all') {
+              const out = [];
+              for (let page = 1; ; page++) {
+                const { data } = await github.request('GET /repos/{owner}/{repo}/issues', {
+                  owner, repo, state, per_page: 50, page
+                });
+                if (!data.length) break;
+                out.push(...data.filter(i => !i.pull_request));
+              }
+              return out;
+            }
+
+            // Read all AI bodies -> derive slug from filename "<slug>.md"
+            const bodyDir = 'ai-bodies';
+            const files = fs.existsSync(bodyDir) ? fs.readdirSync(bodyDir).filter(f => f.endsWith('.md')) : [];
+            const promptIssues = files.map(f => {
+              const slug = path.basename(f, '.md');
+              const body = fs.readFileSync(path.join(bodyDir, f), 'utf8');
+              return { slug, title: slugToTitle(slug), body };
+            });
+
+            // Index existing managed issues by slug
+            const existing = Object.fromEntries(
+              (await listIssues('all'))
+                .map(i => {
+                  const m = i.body && i.body.match(/<!-- managed:bootstrap-issue:([a-z0-9-]+) -->/);
+                  return m ? [m[1], i] : null;
+                })
+                .filter(Boolean)
+            );
+
+            // Create/update prompt issues
+            for (const spec of promptIssues) {
+              const managedBody = buildManagedBody(spec.slug, spec.body);
+              const found = existing[spec.slug];
+              if (!found) {
+                const { data } = await github.request('POST /repos/{owner}/{repo}/issues', {
+                  owner, repo, title: spec.title, body: managedBody
+                });
+                existing[spec.slug] = data;
+              } else {
+                const patch = { owner, repo, issue_number: found.number };
+                let need = false;
+                if (found.title !== spec.title) { patch.title = spec.title; need = true; }
+                if (bodyNeedsUpdate(found.body, managedBody)) { patch.body = managedBody; need = true; }
+                if (need) {
+                  const { data } = await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', patch);
+                  existing[spec.slug] = data;
+                }
+              }
+            }
+
+            // MAIN (not AI): blocked by all prompt issues, with an auto checklist
+            const mainSlug = 'main';
+            const checklistHeader = '### Initial Setup Tasks';
+            const checklistLines = promptIssues
+              .map(s => `- [ ] #${existing[s.slug].number} ${s.title}`)
+              .join('\n');
+
+            const mainTitle = `Set up project ${projectName}`;
+            const mainBodyBase = `${checklistHeader}\n${checklistLines}`.trim() + '\n';
+            const mainManaged = buildManagedBody(mainSlug, mainBodyBase, promptIssues.map(s => existing[s.slug].number));
+
+            const currentMain = existing[mainSlug];
+            if (!currentMain) {
+              const { data } = await github.request('POST /repos/{owner}/{repo}/issues', {
+                owner, repo, title: mainTitle, body: mainManaged
+              });
+              existing[mainSlug] = data;
+            } else {
+              const patch = { owner, repo, issue_number: currentMain.number };
+              let need = false;
+              if (currentMain.title !== mainTitle) { patch.title = mainTitle; need = true; }
+              if (bodyNeedsUpdate(currentMain.body, mainManaged)) { patch.body = mainManaged; need = true; }
+              if (need) {
+                const { data } = await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', patch);
+                existing[mainSlug] = data;
+              }
+            }
+
+            core.summary
+              .addHeading('Setup issues (AI bodies + Main)', 2)
+              .addRaw(`Main: #${existing.main.number}`).addEOL()
+              .addRaw(
+                promptIssues.map(s => `${s.slug}: #${existing[s.slug].number}`).join(' | ')
+              ).addEOL();
+            await core.summary.write();
+
+            core.setOutput('main_issue', existing.main.number);
