@@ -21,7 +21,7 @@ on:
         type: string
         description: 'The title of the issue to create'
         required: true
-      issue-repository:
+      target-repository:
         type: string
         description: 'The repository in which to create the issue'
         required: true

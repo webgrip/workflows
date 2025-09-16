@@ -17,11 +17,7 @@ on:
         type: string
         description: 'Comma-separated list of prompt file paths (relative to prompt-repository root)'
         required: true
-      issue-title:
-        type: string
-        description: 'The title of the issue to create'
-        required: true
-      issue-repository:
+      target-repository:
         type: string
         description: 'The repository in which to create the issue'
         required: true
@@ -37,8 +33,8 @@ jobs:
     with:
       prompt-repository: ${{ inputs.prompt-repository }}
       prompt-path: ${{ matrix.prompt-path }}
-      issue-title: ${{ inputs.issue-title }}
-      issue-repository: ${{ inputs.issue-repository }}
+      issue-title: ${{ matrix.prompt-path }}
+      target-repository: ${{ inputs.target-repository }}
     secrets:
       WEBGRIP_CI_CLIENT_ID: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
       WEBGRIP_CI_APP_PRIVATE_KEY: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}

@@ -26,8 +26,7 @@ jobs:
     with:
       prompt-repository: webgrip/agentic-workflows
       prompt-paths: '[".github/prompts/set-up-documentation.prompt.yml",".github/prompts/set-up-docker.prompt.yml",".github/prompts/set-up-helm.prompt.yml"]'
-      issue-title: ${{ inputs.repo_name }}
-      issue-repository: ${{ github.repository }}
+      target-repository: ${{ inputs.repo_name }}
     secrets:
       WEBGRIP_CI_CLIENT_ID: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
       WEBGRIP_CI_APP_PRIVATE_KEY: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
