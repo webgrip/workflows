@@ -21,19 +21,11 @@ permissions:
 
 jobs:
   ai-inference:
-    name: "AI Inference (prompt files)"
+    name: "AI Inference (prompt files, sequential)"
     runs-on: arc-runner-set
     permissions:
       contents: read
       models: read
-    strategy:
-      matrix:
-        prompt_file:
-          - ./__agentic_workflows/.github/prompts/set-up-documentation.prompt.yml
-          - ./__agentic_workflows/.github/prompts/setup-docker.prompt.yml
-          - ./__agentic_workflows/.github/prompts/set-up-helm.prompt.yml
-          # add one line like:
-          # - ./__agentic_workflows/.github/prompts/set-up-ci.prompt.yml
     steps:
       - name: Mint GitHub App installation token (owner-based)
         id: app-token
@@ -52,39 +44,98 @@ jobs:
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
-      - name: Run AI Inference
-        id: inference
+      - name: Run AI Inference for set-up-documentation
+        id: inference_doc
         uses: actions/ai-inference@v1
         with:
-          prompt-file: ${{ matrix.prompt_file }}
+          prompt-file: ./__agentic_workflows/.github/prompts/set-up-documentation.prompt.yml
           input: |
             APP_NAME: ${{ inputs.repo_name }}
           model: "openai/gpt-5"
           endpoint: "https://models.github.ai/inference"
           max-tokens: 16000
 
-      - name: Derive slug + title and normalize body file
-        id: meta
+      - name: Derive slug + title and normalize body file (doc)
+        id: meta_doc
         shell: bash
         run: |
-          bn="$(basename "${{ matrix.prompt_file }}")"               # e.g., set-up-helm.prompt.yml
-          slug="${bn%.prompt.yml}"                                   # -> set-up-helm
-          # Title case but keep sentence style ("Set up helm")
-          title="$(echo "$slug" | tr '-' ' ' )"
-          title="$(echo "${title:0:1}" | tr '[:lower:]' '[:upper:]')${title:1}"
+          slug="set-up-documentation"
+          title="Set up documentation"
           mkdir -p out
-          cp "${{ steps.inference.outputs.response-file }}" "out/${slug}.md"
+          cp "${{ steps.inference_doc.outputs.response-file }}" "out/${slug}.md"
           {
             echo "slug=$slug"
             echo "title=$title"
             echo "body=out/${slug}.md"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Upload AI body artifact
+      - name: Upload AI body artifact (doc)
         uses: actions/upload-artifact@v4
         with:
-          name: ai-body-${{ steps.meta.outputs.slug }}
-          path: out/${{ steps.meta.outputs.slug }}.md
+          name: ai-body-${{ steps.meta_doc.outputs.slug }}
+          path: out/${{ steps.meta_doc.outputs.slug }}.md
+
+      - name: Run AI Inference for set-up-docker
+        id: inference_docker
+        uses: actions/ai-inference@v1
+        with:
+          prompt-file: ./__agentic_workflows/.github/prompts/set-up-docker.prompt.yml
+          input: |
+            APP_NAME: ${{ inputs.repo_name }}
+          model: "openai/gpt-5"
+          endpoint: "https://models.github.ai/inference"
+          max-tokens: 16000
+
+      - name: Derive slug + title and normalize body file (docker)
+        id: meta_docker
+        shell: bash
+        run: |
+          slug="set-up-docker"
+          title="Set up docker"
+          mkdir -p out
+          cp "${{ steps.inference_docker.outputs.response-file }}" "out/${slug}.md"
+          {
+            echo "slug=$slug"
+            echo "title=$title"
+            echo "body=out/${slug}.md"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload AI body artifact (docker)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-body-${{ steps.meta_docker.outputs.slug }}
+          path: out/${{ steps.meta_docker.outputs.slug }}.md
+
+      - name: Run AI Inference for set-up-helm
+        id: inference_helm
+        uses: actions/ai-inference@v1
+        with:
+          prompt-file: ./__agentic_workflows/.github/prompts/set-up-helm.prompt.yml
+          input: |
+            APP_NAME: ${{ inputs.repo_name }}
+          model: "openai/gpt-5"
+          endpoint: "https://models.github.ai/inference"
+          max-tokens: 16000
+
+      - name: Derive slug + title and normalize body file (helm)
+        id: meta_helm
+        shell: bash
+        run: |
+          slug="set-up-helm"
+          title="Set up helm"
+          mkdir -p out
+          cp "${{ steps.inference_helm.outputs.response-file }}" "out/${slug}.md"
+          {
+            echo "slug=$slug"
+            echo "title=$title"
+            echo "body=out/${slug}.md"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Upload AI body artifact (helm)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-body-${{ steps.meta_helm.outputs.slug }}
+          path: out/${{ steps.meta_helm.outputs.slug }}.md
 
   bootstrap-issues:
     name: "Bootstrap repository issues"
