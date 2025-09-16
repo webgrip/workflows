@@ -20,7 +20,7 @@ permissions:
   contents: write
 
 jobs:
-  ai-inference:
+  bootstrap-issues:
     name: "AI Inference (prompt files, sequential)"
     runs-on: arc-runner-set
     permissions:
