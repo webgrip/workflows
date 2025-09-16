@@ -26,6 +26,7 @@ jobs:
     permissions:
       contents: read
       models: read
+
     steps:
       - name: Mint GitHub App installation token (owner-based)
         id: app-token
@@ -34,7 +35,6 @@ jobs:
           app-id: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
           private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-
 
       - name: Checkout agentic-workflows repo (prompts)
         uses: actions/checkout@v4
@@ -50,25 +50,26 @@ jobs:
         with:
           node-version: '24'
 
-
+      # ---------- set-up-documentation ----------
       - name: Run AI Inference for set-up-documentation (with retry)
         id: inference_doc
-        uses: nick-invision/retry@v2
+        uses: Wandalen/wretry.action@v3.8.0
         with:
-          timeout_minutes: 10
-          max_attempts: 5
-          command: |
-            mkdir -p out
-            npx --yes actions/ai-inference@v1 \
-              --prompt-file ./__agentic_workflows/.github/prompts/set-up-documentation.prompt.yml \
-              --input "APP_NAME=${{ inputs.repo_name }}" \
-              --model "openai/gpt-5" \
-              --endpoint "https://models.github.ai/inference" \
-              --max-tokens 16000 \
-              --output-file out/set-up-documentation.md
+          action: actions/ai-inference@v1
+          with: |
+            prompt-file: ./__agentic_workflows/.github/prompts/set-up-documentation.prompt.yml
+            input: |
+              APP_NAME: ${{ inputs.repo_name }}
+            model: openai/gpt-5
+            endpoint: https://models.github.ai/inference
+            max-tokens: 16000
+          attempt_limit: 5
+          attempt_delay: 30000
 
-      - name: Sleep after documentation inference
-        run: sleep 30
+      - name: Save AI response (doc)
+        run: |
+          mkdir -p out
+          cp "${{ fromJSON(steps.inference_doc.outputs.outputs)['response-file'] }}" out/set-up-documentation.md
 
       - name: Derive slug + title and normalize body file (doc)
         id: meta_doc
@@ -88,25 +89,26 @@ jobs:
           name: ai-body-${{ steps.meta_doc.outputs.slug }}
           path: out/${{ steps.meta_doc.outputs.slug }}.md
 
-
+      # ---------- set-up-docker ----------
       - name: Run AI Inference for set-up-docker (with retry)
         id: inference_docker
-        uses: nick-invision/retry@v2
+        uses: Wandalen/wretry.action@v3.8.0
         with:
-          timeout_minutes: 10
-          max_attempts: 5
-          command: |
-            mkdir -p out
-            npx --yes actions/ai-inference@v1 \
-              --prompt-file ./__agentic_workflows/.github/prompts/set-up-docker.prompt.yml \
-              --input "APP_NAME=${{ inputs.repo_name }}" \
-              --model "openai/gpt-5" \
-              --endpoint "https://models.github.ai/inference" \
-              --max-tokens 16000 \
-              --output-file out/set-up-docker.md
+          action: actions/ai-inference@v1
+          with: |
+            prompt-file: ./__agentic_workflows/.github/prompts/set-up-docker.prompt.yml
+            input: |
+              APP_NAME: ${{ inputs.repo_name }}
+            model: openai/gpt-5
+            endpoint: https://models.github.ai/inference
+            max-tokens: 16000
+          attempt_limit: 5
+          attempt_delay: 30000
 
-      - name: Sleep after docker inference
-        run: sleep 30
+      - name: Save AI response (docker)
+        run: |
+          mkdir -p out
+          cp "${{ fromJSON(steps.inference_docker.outputs.outputs)['response-file'] }}" out/set-up-docker.md
 
       - name: Derive slug + title and normalize body file (docker)
         id: meta_docker
@@ -126,25 +128,25 @@ jobs:
           name: ai-body-${{ steps.meta_docker.outputs.slug }}
           path: out/${{ steps.meta_docker.outputs.slug }}.md
 
-
       - name: Run AI Inference for set-up-helm (with retry)
         id: inference_helm
-        uses: nick-invision/retry@v2
+        uses: Wandalen/wretry.action@v3.8.0
         with:
-          timeout_minutes: 10
-          max_attempts: 5
-          command: |
-            mkdir -p out
-            npx --yes actions/ai-inference@v1 \
-              --prompt-file ./__agentic_workflows/.github/prompts/set-up-helm.prompt.yml \
-              --input "APP_NAME=${{ inputs.repo_name }}" \
-              --model "openai/gpt-5" \
-              --endpoint "https://models.github.ai/inference" \
-              --max-tokens 16000 \
-              --output-file out/set-up-helm.md
+          action: actions/ai-inference@v1
+          with: |
+            prompt-file: ./__agentic_workflows/.github/prompts/set-up-helm.prompt.yml
+            input: |
+              APP_NAME: ${{ inputs.repo_name }}
+            model: openai/gpt-5
+            endpoint: https://models.github.ai/inference
+            max-tokens: 16000
+          attempt_limit: 5
+          attempt_delay: 30000
 
-      - name: Sleep after helm inference
-        run: sleep 30
+      - name: Save AI response (helm)
+        run: |
+          mkdir -p out
+          cp "${{ fromJSON(steps.inference_helm.outputs.outputs)['response-file'] }}" out/set-up-helm.md
 
       - name: Derive slug + title and normalize body file (helm)
         id: meta_helm
