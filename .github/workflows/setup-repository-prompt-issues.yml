@@ -79,7 +79,7 @@ jobs:
         id: inference_docker
         uses: actions/ai-inference@v1
         with:
-          prompt-file: ./__agentic_workflows/.github/prompts/setup-docker.prompt.yml
+          prompt-file: ./__agentic_workflows/.github/prompts/set-up-docker.prompt.yml
           input: |
             APP_NAME: ${{ inputs.repo_name }}
           model: "openai/gpt-5"
