@@ -1,0 +1,36 @@
+on:
+  workflow_call:
+    inputs:
+      prompt-repository:
+        type: string
+        description: 'The repository in which the prompt.yml files are located'
+        required: true
+        default: 'webgrip/agentic-workflows'
+      prompt-paths:
+        type: string
+        description: 'Comma-separated list of prompt file paths (relative to prompt-repository root)'
+        required: true
+      issue-title:
+        type: string
+        description: 'The title of the issue to create'
+        required: true
+      issue-repository:
+        type: string
+        description: 'The repository in which to create the issue'
+        required: true
+
+jobs:
+  issues-from-prompts:
+    name: "Create issues from prompt files (matrix)"
+    runs-on: arc-runner-set
+    strategy:
+      matrix:
+        prompt-path: ${{ fromJson(inputs.prompt-paths) }}
+    steps:
+      - name: Call single-issue workflow for each prompt
+        uses: ./.github/workflows/github-issue-create-by-prompt.yml
+        with:
+          prompt-repository: ${{ inputs.prompt-repository }}
+          prompt-path: ${{ matrix.prompt-path }}
+          issue-title: ${{ inputs.issue-title }}
+          issue-repository: ${{ inputs.issue-repository }}

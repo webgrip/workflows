@@ -1,0 +1,128 @@
+on:
+  workflow_call:
+    inputs:
+      prompt-repository:
+        type: string
+        description: 'The repository in which the prompt.yml file is located'
+        required: true
+        default: 'webgrip/agentic-workflows'
+      prompt-path:
+        type: string
+        description: 'The path to the prompt.yml file in the repository (relative to root)'
+        required: true
+      issue-title:
+        type: string
+        description: 'The title of the issue to create'
+        required: true
+      issue-repository:
+        type: string
+        description: 'The repository in which to create the issue'
+        required: true
+
+jobs:
+  ai-inference:
+    name: "AI Inference (single prompt file)"
+    runs-on: arc-runner-set
+    permissions:
+      contents: read
+      models: read
+    steps:
+      - name: Mint GitHub App installation token (owner-based)
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
+          private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout prompt repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.prompt-repository }}
+          path: __prompt-repo
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Run AI Inference for prompt file
+        id: inference
+        uses: actions/ai-inference@v1
+        with:
+          prompt-file: ./__prompt-repo/${{ inputs.prompt-path }}
+          input: APP_NAME=${{ inputs.issue-title }}
+          model: openai/gpt-5
+          endpoint: https://models.github.ai/inference
+          max-tokens: 16000
+
+      - name: Save AI response
+        id: save_response
+        run: |
+          mkdir -p out
+          fname=$(basename "${{ inputs.prompt-path }}" | sed 's/\.[^.]*$//').md
+          echo "fname=$fname" >> $GITHUB_OUTPUT
+          cp "${{ steps.inference.outputs['response-file'] }}" out/$fname
+
+      - name: Upload AI body artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-body-${{ steps.save_response.outputs.fname }}
+          path: out/${{ steps.save_response.outputs.fname }}
+
+  bootstrap-issue:
+    name: "Bootstrap repository issue"
+    runs-on: arc-runner-set
+    needs: ai-inference
+    env:
+      ORG: ${{ github.repository_owner }}
+      NEW_REPO: ${{ inputs.issue-title }}
+    steps:
+      - name: Mint GitHub App installation token (owner-based)
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
+          private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
+          owner: ${{ env.ORG }}
+
+      - name: Download AI body artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ai-body-*
+          path: ai-bodies
+          merge-multiple: true
+
+      - name: Create issue from AI body file
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const [owner, repo] = '${{ inputs.issue-repository }}'.split('/');
+            const title = `${{ inputs.issue-title }}`;
+            // Find the first .md file in ai-bodies
+            const files = fs.readdirSync('ai-bodies').filter(f => f.endsWith('.md'));
+            if (files.length === 0) throw new Error('No AI body file found');
+            const body = fs.readFileSync(path.join('ai-bodies', files[0]), 'utf8');
+            // Check for existing issue with same title
+            const { data: issues } = await github.request('GET /repos/{owner}/{repo}/issues', {
+              owner, repo, state: 'all', per_page: 100
+            });
+            let found = issues.find(i => i.title === title && !i.pull_request);
+            if (!found) {
+              await github.request('POST /repos/{owner}/{repo}/issues', {
+                owner, repo, title, body
+              });
+            } else {
+              // Update if body changed
+              if ((found.body || '').trim() !== body.trim()) {
+                await github.request('PATCH /repos/{owner}/{repo}/issues/{issue_number}', {
+                  owner, repo, issue_number: found.number, body
+                });
+              }
+            }
