@@ -30,7 +30,7 @@ jobs:
       matrix:
         prompt_file:
           - ./__agentic_workflows/.github/prompts/set-up-documentation.prompt.yml
-          - ./__agentic_workflows/.github/prompts/set-up-docker.prompt.yml
+          - ./__agentic_workflows/.github/prompts/setup-docker.prompt.yml
           - ./__agentic_workflows/.github/prompts/set-up-helm.prompt.yml
           # add one line like:
           # - ./__agentic_workflows/.github/prompts/set-up-ci.prompt.yml
