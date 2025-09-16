@@ -61,7 +61,8 @@ jobs:
         uses: actions/ai-inference@v1
         with:
           prompt-file: ./__prompt-repo/${{ inputs.prompt-path }}
-          input: APP_NAME=${{ inputs.issue-title }}
+          input: |
+            APP_NAME=${{ inputs.issue-title }}
           model: openai/gpt-5
           endpoint: https://models.github.ai/inference
           max-tokens: 16000
