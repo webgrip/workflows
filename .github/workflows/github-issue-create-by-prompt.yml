@@ -28,6 +28,15 @@ on:
         type: string
         description: 'The repository in which to create the issue'
         required: true
+      openai-model:
+        type: string
+        default: gpt-4o-mini
+        required: false
+      max-tokens:
+        type: number
+        default: 16000
+        required: false
+
 
 jobs:
   ai-inference:
@@ -66,11 +75,11 @@ jobs:
           prompt-file: ./__prompt-repo/${{ inputs.prompt-path }}
           input: |
             APP_NAME=${{ inputs.issue-title }}
-          model: openai/gpt-4o
+          model: ${{ inputs.openai-model }}
           enable-github-mcp: false
           token: ${{ steps.app-token.outputs.token }}
           endpoint: https://models.github.ai/inference
-          max-tokens: 16000
+          max-tokens: ${{ inputs.max-tokens }}
 
       - name: Save AI response
         id: save_response
