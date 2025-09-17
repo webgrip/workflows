@@ -7,6 +7,9 @@ on:
       WEBGRIP_CI_APP_PRIVATE_KEY:
         description: "GitHub App private key (PEM)"
         required: true
+      OPENAI_API_KEY:
+        description: "OpenAI API key for fallback"
+        required: true
     inputs:
       prompt-repository:
         type: string

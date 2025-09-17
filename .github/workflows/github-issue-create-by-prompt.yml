@@ -7,6 +7,9 @@ on:
       WEBGRIP_CI_APP_PRIVATE_KEY:
         description: "GitHub App private key (PEM)"
         required: true
+      OPENAI_API_KEY:
+        description: "OpenAI API key for fallback"
+        required: true
     inputs:
       prompt-repository:
         type: string
@@ -34,7 +37,7 @@ jobs:
       contents: read
       models: read
     steps:
-      - name: Mint GitHub App installation token (owner-based)
+      - name: Mint GitHub App installation token for webgrip-ci
         id: app-token
         uses: actions/create-github-app-token@v2
         with:
@@ -63,7 +66,9 @@ jobs:
           prompt-file: ./__prompt-repo/${{ inputs.prompt-path }}
           input: |
             APP_NAME=${{ inputs.issue-title }}
-          model: openai/gpt-5
+          model: openai/gpt-4o
+          enable-github-mcp: false
+          token: ${{ steps.app-token.outputs.token }}
           endpoint: https://models.github.ai/inference
           max-tokens: 16000
 
