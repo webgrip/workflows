@@ -484,7 +484,7 @@ jobs:
 
       - name: Generate Job Summary with Deployment Stats
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           DEPLOYMENT_STATS: ${{ steps.collect-stats.outputs.stats }}
           OVERALL_STATS: ${{ steps.collect-stats.outputs.overall }}

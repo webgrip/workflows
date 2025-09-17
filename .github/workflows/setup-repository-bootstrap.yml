@@ -111,7 +111,7 @@ jobs:
 
       - name: Replace values across repository (if provided)
         if: ${{ inputs.replace_values != '' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           REPLACE_VALUES_YAML: ${{ inputs.replace_values }}
         with:
@@ -186,7 +186,7 @@ jobs:
 
       - name: Rename / merge paths based on replace_values keys (if provided)
         if: ${{ inputs.replace_values != '' }}
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           REPLACE_VALUES_YAML: ${{ inputs.replace_values }}
         with:
@@ -262,7 +262,7 @@ jobs:
 
       - name: Resolve bot noreply email
         id: bot-email
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -331,7 +331,7 @@ jobs:
       - name: Ensure gh-pages branch, configure Pages, and set homepage (best-effort, opt-in)
         if: ${{ inputs.configure_pages }}
         continue-on-error: true
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
