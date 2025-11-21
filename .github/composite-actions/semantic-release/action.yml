@@ -62,6 +62,7 @@ runs:
           @semantic-release/github \
           semantic-release-helm3 \
           @semantic-release/release-notes-generator \
-          semantic-release-github-actions-tags
+          semantic-release-github-actions-tags \
+          conventional-changelog-conventionalcommits
 
         npx semantic-release ${{ steps.set-config.outputs.release_config }}
