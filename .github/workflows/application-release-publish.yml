@@ -1,0 +1,25 @@
+name: 'Publish Release'
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: "The released version"
+        value: ${{ jobs.release-publish.outputs.version }}
+    secrets:
+      WEBGRIP_CI_APP_ID:
+        description: "GitHub App ID (numeric)"
+        required: true
+      WEBGRIP_CI_APP_PRIVATE_KEY:
+        description: "GitHub App private key (PEM)"
+        required: true
+
+jobs:
+  release-publish:
+    name: 'Publish'
+    uses: webgrip/workflows/.github/workflows/semantic-release.yml@main
+    with:
+      use-bot-to-commit: true
+    secrets:
+      WEBGRIP_CI_APP_ID: ${{ secrets.WEBGRIP_CI_APP_ID }}
+      WEBGRIP_CI_APP_PRIVATE_KEY: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}

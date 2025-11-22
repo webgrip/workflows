@@ -1,0 +1,30 @@
+name: 'Distribute Release'
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "The version of the published release"
+        required: true
+        type: string
+    secrets:
+      DOCKER_USERNAME:
+        description: "Docker Hub username"
+        required: true
+      DOCKER_TOKEN:
+        description: "Docker Hub access token or password"
+        required: true
+
+jobs:
+  release-distribute:
+    name: 'Distribute'
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push.yml@main
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+    with:
+      docker-context: '.'
+      docker-file: './ops/docker/application/Dockerfile'
+      docker-tags: |
+        ${{github.repository_owner}}/${{ github.event.repository.name }}:latest
+        ${{github.repository_owner}}/${{ github.event.repository.name }}:${{ inputs.version }}
