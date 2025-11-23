@@ -41,9 +41,17 @@ runs:
       shell: bash
       run: |
         if [[ -n "${{ inputs.release-type }}" ]]; then
-          echo "release_config=--extends=./.releaserc.${{ inputs.release-type }}.json" >> $GITHUB_OUTPUT
+          if [[ -f ".releaserc.${{ inputs.release-type }}.js" ]]; then
+            echo "release_config=--extends=./.releaserc.${{ inputs.release-type }}.js" >> "$GITHUB_OUTPUT"
+          elif [[ -f ".releaserc.${{ inputs.release-type }}.json" ]]; then
+            echo "release_config=--extends=./.releaserc.${{ inputs.release-type }}.json" >> "$GITHUB_OUTPUT"
+          fi
         else
-          echo "release_config=" >> $GITHUB_OUTPUT
+          if [[ -f ".releaserc.js" ]]; then
+            echo "release_config=--config=./.releaserc.js" >> "$GITHUB_OUTPUT"
+          elif [[ -f ".releaserc.json" ]]; then
+            echo "release_config=--config=./.releaserc.json" >> "$GITHUB_OUTPUT"
+          fi
         fi
 
     - name: Run semantic-release
