@@ -72,11 +72,23 @@ runs:
       id: set-config
       shell: bash
       run: |
+        CONFIG_FLAG=""
+
         if [[ -n "${{ inputs.release-type }}" ]]; then
-          echo "release_config=--extends=./.releaserc.${{ inputs.release-type }}.json" >> $GITHUB_OUTPUT
+          if [[ -f ".releaserc.${{ inputs.release-type }}.js" ]]; then
+            CONFIG_FLAG="--extends=./.releaserc.${{ inputs.release-type }}.js"
+          elif [[ -f ".releaserc.${{ inputs.release-type }}.json" ]]; then
+            CONFIG_FLAG="--extends=./.releaserc.${{ inputs.release-type }}.json"
+          fi
         else
-          echo "release_config=" >> $GITHUB_OUTPUT
+          if [[ -f ".releaserc.js" ]]; then
+            CONFIG_FLAG="--config=./.releaserc.js"
+          elif [[ -f ".releaserc.json" ]]; then
+            CONFIG_FLAG="--config=./.releaserc.json"
+          fi
         fi
+
+        echo "release_config=${CONFIG_FLAG}" >> "$GITHUB_OUTPUT"
 
     - name: Install semantic-release & plugins
       shell: bash
