@@ -33,6 +33,7 @@ jobs:
       pull-requests: write # If referencing or updating PRs
       issues: write # Needed to comment on issues/PRs
       statuses: write # (Optional) If you need to set commit statuses
+      id-token: write # @semantic-release/npm expects this for GitHub Actions authentication through OIDC
     outputs:
       version: ${{ steps.semantic-release.outputs.version }}
     steps:
