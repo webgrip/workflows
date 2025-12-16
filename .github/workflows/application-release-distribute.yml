@@ -7,6 +7,16 @@ on:
         description: "The version of the published release"
         required: true
         type: string
+      docker_context:
+        description: "The Docker build context"
+        required: false
+        type: string
+        default: "."
+      docker_file:
+        description: "The Dockerfile path"
+        required: false
+        type: string
+        default: "./ops/docker/application/Dockerfile"
     secrets:
       DOCKER_USERNAME:
         description: "Docker Hub username"
@@ -23,8 +33,8 @@ jobs:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
     with:
-      docker-context: '.'
-      docker-file: './ops/docker/application/Dockerfile'
+      docker-context: ${{ inputs.docker_context }}
+      docker-file: ${{ inputs.docker_file }}
       docker-tags: |
         ${{github.repository_owner}}/${{ github.event.repository.name }}:latest
         ${{github.repository_owner}}/${{ github.event.repository.name }}:${{ inputs.version }}
