@@ -1,0 +1,47 @@
+on:
+  workflow_call:
+    secrets:
+      GHCR_TOKEN:
+        description: 'Token with packages:write. Optional; defaults to GITHUB_TOKEN.'
+        required: false
+    inputs:
+      docker-context:
+        type: string
+        description: 'Docker context'
+        required: true
+        default: '.'
+      docker-file:
+        type: string
+        description: 'Dockerfile path from the context'
+        required: true
+        default: 'Dockerfile'
+      docker-tags:
+        type: string
+        description: 'Docker tags'
+        required: true
+      docker-target:
+        type: string
+        description: 'Docker target'
+        required: false
+        default: ''
+
+run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: "Docker Build and Push (GHCR)"
+    runs-on: arc-runner-set
+    steps:
+      - uses: webgrip/workflows/.github/composite-actions/docker-build-push-ghcr@main
+        with:
+          docker-context: ${{ inputs.docker-context }}
+          docker-file: ${{ inputs.docker-file }}
+          docker-tags: ${{ inputs.docker-tags }}
+          docker-target: ${{ inputs.docker-target }}
+        env:
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}

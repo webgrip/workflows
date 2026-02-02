@@ -129,6 +129,31 @@ jobs:
     secrets:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+
+#### `docker-build-and-push-ghcr.yml`
+Builds and pushes Docker images to GitHub Container Registry (GHCR).
+
+**Inputs:**
+- `docker-context` - Build context directory
+- `docker-file` - Dockerfile path
+- `docker-tags` - Image tags
+- `docker-target` (optional) - Multi-stage build target
+
+**Secrets:**
+- `GHCR_TOKEN` (optional) - Token with `packages:write` (defaults to `GITHUB_TOKEN`)
+
+**Example:**
+```yaml
+jobs:
+  docker:
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push-ghcr.yml@main
+    with:
+      docker-context: "."
+      docker-file: "Dockerfile"
+      docker-tags: |
+        ghcr.io/${{ github.repository_owner }}/myapp:latest
+        ghcr.io/${{ github.repository_owner }}/myapp:${{ github.sha }}
+```
 ```
 
 ### Helm & Kubernetes
@@ -217,6 +242,9 @@ Automated semantic versioning and releases using conventional commits.
 
 ### `docker-build-push`
 Reusable composite action for building and pushing Docker images.
+
+### `docker-build-push-ghcr`
+Reusable composite action for building and pushing Docker images to GHCR.
 
 ### `semantic-release`
 Composite action for semantic release automation with Node.js setup.
