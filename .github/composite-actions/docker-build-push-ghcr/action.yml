@@ -1,26 +1,26 @@
-name: '[Action] Build and Push Docker Image (GHCR)'
-description: 'Builds and pushes a Docker image to GitHub Container Registry (ghcr.io)'
+name: "[Action] Build and Push Docker Image (GHCR)"
+description: "Builds and pushes a Docker image to GitHub Container Registry (ghcr.io)"
 
 inputs:
   docker-context:
     type: string
-    description: 'Docker context'
+    description: "Docker context"
     required: true
-    default: '.'
+    default: "."
   docker-file:
     type: string
-    description: 'Dockerfile path from the context'
+    description: "Dockerfile path from the context"
     required: true
-    default: 'Dockerfile'
+    default: "Dockerfile"
   docker-tags:
     type: string
-    description: 'Docker tags'
+    description: "Docker tags"
     required: true
   docker-target:
     type: string
-    description: 'Docker target'
+    description: "Docker target"
     required: false
-    default: ''
+    default: ""
 
 runs:
   using: "composite"
