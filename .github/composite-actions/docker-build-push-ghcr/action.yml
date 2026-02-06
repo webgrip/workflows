@@ -3,21 +3,17 @@ description: "Builds and pushes a Docker image to GitHub Container Registry (ghc
 
 inputs:
   docker-context:
-    type: string
     description: "Docker context"
     required: true
     default: "."
   docker-file:
-    type: string
     description: "Dockerfile path from the context"
     required: true
     default: "Dockerfile"
   docker-tags:
-    type: string
-    description: "Docker tags"
+    description: "One tag per line: OWNER/IMAGE[:TAG] or ghcr.io/OWNER/IMAGE[:TAG] (defaults :latest, enforces ghcr.io)"
     required: true
   docker-target:
-    type: string
     description: "Docker target"
     required: false
     default: ""
@@ -33,14 +29,76 @@ runs:
         registry: ghcr.io
         username: ${{ env.GHCR_USERNAME }}
         password: ${{ env.GHCR_TOKEN }}
+
+    - name: Enforce GHCR tag format
+      id: normalized-tags
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        raw="${{ inputs.docker-tags }}"
+        if [[ -z "${raw//[[:space:]]/}" ]]; then
+          echo "docker-tags input is empty" >&2
+          exit 1
+        fi
+
+        normalized=()
+        while IFS= read -r line; do
+          tag="${line//$'\r'/}"
+
+          # Trim leading/trailing whitespace (pure bash).
+          tag="${tag#"${tag%%[![:space:]]*}"}"
+          tag="${tag%"${tag##*[![:space:]]}"}"
+
+          [[ -z "$tag" ]] && continue
+
+          # Accept either:
+          #   - OWNER/IMAGE[:TAG]
+          #   - ghcr.io/OWNER/IMAGE[:TAG]
+          if [[ "$tag" != ghcr.io/* ]]; then
+            # If the first component looks like a registry, reject unless it's ghcr.io.
+            # Docker treats the first component as a registry only when it contains '.' or ':' or is 'localhost'.
+            first="${tag%%/*}"
+            if [[ "$tag" == */* && ( "$first" == *.* || "$first" == *:* || "$first" == "localhost" ) ]]; then
+              echo "Only ghcr.io registry is allowed: '$tag'" >&2
+              exit 1
+            fi
+
+            if [[ "$tag" != */* ]]; then
+              echo "Tag must be 'OWNER/IMAGE[:TAG]' or 'ghcr.io/OWNER/IMAGE[:TAG]': '$tag'" >&2
+              exit 1
+            fi
+            tag="ghcr.io/$tag"
+          fi
+
+          # Default tag to :latest.
+          if [[ "$tag" == *: ]]; then
+            tag="${tag}latest"
+          elif [[ "$tag" != *:* ]]; then
+            tag="${tag}:latest"
+          fi
+
+          normalized+=("$tag")
+        done <<< "$raw"
+
+        if (( ${#normalized[@]} == 0 )); then
+          echo "No valid tags found" >&2
+          exit 1
+        fi
+
+        {
+          echo 'tags<<EOF'
+          printf '%s\n' "${normalized[@]}"
+          echo 'EOF'
+        } >> "$GITHUB_OUTPUT"
     - name: Get cache tag
       id: cache-tag
       shell: bash
       run: |
-        # Split the docker-tags input by newline, ignore empty lines, and select the first tag.
-        primary=$(echo "${{ inputs.docker-tags }}" | grep -v '^\s*$' | head -n 1)
-        # Use :cache instead of :latest to avoid conflicts with the latest tag.
-        cache="${primary%:latest}:cache"
+        # Split the normalized tags by newline, ignore empty lines, and select the first tag.
+        primary=$(echo "${{ steps.normalized-tags.outputs.tags }}" | grep -v '^\s*$' | head -n 1)
+        # Use :cache to avoid conflicts with the image's actual release tags.
+        cache="${primary%:*}:cache"
         echo "cache_tag=$cache" >> "$GITHUB_OUTPUT"
     - uses: docker/build-push-action@v6
       with:
@@ -49,7 +107,7 @@ runs:
         platforms: linux/amd64,linux/arm64
         push: true
         tags: |
-          ${{ inputs.docker-tags }}
+          ${{ steps.normalized-tags.outputs.tags }}
         target: ${{ inputs.docker-target }}
         cache-from: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }}
         cache-to: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }},mode=max,compression=zstd

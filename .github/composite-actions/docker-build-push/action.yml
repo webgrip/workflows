@@ -1,26 +1,22 @@
-name: '[Action] Build and Push Docker Image'
-description: 'Builds and Pushes a docker image'
+name: "[Action] Build and Push Docker Image"
+description: "Builds and Pushes a docker image"
 
 inputs:
   docker-context:
-    type: string
-    description: 'Docker context'
+    description: "Docker context"
     required: true
-    default: '.'
+    default: "."
   docker-file:
-    type: string
-    description: 'Dockerfile path from the context'
+    description: "Dockerfile path from the context"
     required: true
-    default: 'Dockerfile'
+    default: "Dockerfile"
   docker-tags:
-    type: string
-    description: 'Docker tags'
+    description: "Docker tags"
     required: true
   docker-target:
-    type: string
-    description: 'Docker target'
+    description: "Docker target"
     required: false
-    default: ''
+    default: ""
 
 runs:
   using: "composite"
@@ -38,8 +34,8 @@ runs:
       run: |
         # Split the docker-tags input by newline, ignore empty lines, and select the first tag.
         primary=$(echo "${{ inputs.docker-tags }}" | grep -v '^\s*$' | head -n 1)
-        # Use :cache instead of :latest to avoid conflicts with the latest tag.
-        cache="${primary%:latest}:cache"
+        # Use :cache to avoid conflicts with the image's actual release tags.
+        cache="${primary%:*}:cache"
         echo "cache_tag=$cache" >> "$GITHUB_OUTPUT"
     - uses: docker/build-push-action@v6
       with:
