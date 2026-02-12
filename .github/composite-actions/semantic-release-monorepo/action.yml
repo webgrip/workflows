@@ -9,87 +9,21 @@ inputs:
     description: "Package name used for tag prefix, e.g. helm-deploy"
     required: true
   token:
-    description: "Token to use for checkout/push (e.g., GitHub App token)"
-    required: false
-  release-type:
-    description: "Optional release type suffix to select .releaserc.<type>.{js,json}"
+    description: "Token to use for pushing tags/releases (e.g., GitHub App token)"
     required: false
 
 outputs:
   version:
-    description: "The new version number"
+    description: "The new version number (from exec plugin writing to $GITHUB_OUTPUT)"
     value: ${{ steps.semantic-release.outputs.version }}
 
 runs:
   using: "composite"
   steps:
-    - name: Check out repo
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-        token: ${{ inputs.token || github.token }}
-
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
         node-version: "22"
-
-    - name: Select release config
-      id: config
-      shell: bash
-      run: |
-        set -euo pipefail
-
-        cfg="${GITHUB_WORKSPACE}/.releaserc.js"
-
-        if [[ -n "${{ inputs.release-type }}" ]]; then
-          if [[ -f "${GITHUB_WORKSPACE}/.releaserc.${{ inputs.release-type }}.js" ]]; then
-            cfg="${GITHUB_WORKSPACE}/.releaserc.${{ inputs.release-type }}.js"
-          elif [[ -f "${GITHUB_WORKSPACE}/.releaserc.${{ inputs.release-type }}.json" ]]; then
-            cfg="${GITHUB_WORKSPACE}/.releaserc.${{ inputs.release-type }}.json"
-          fi
-        else
-          if [[ -f "${GITHUB_WORKSPACE}/.releaserc.json" ]]; then
-            cfg="${GITHUB_WORKSPACE}/.releaserc.json"
-          fi
-        fi
-
-        echo "config_path=$cfg" >> "$GITHUB_OUTPUT"
-
-    - name: Prepare temporary package.json
-      shell: bash
-      run: |
-        set -euo pipefail
-
-        pkg_dir="${GITHUB_WORKSPACE}/${{ inputs.package-path }}"
-        pkg_json="$pkg_dir/package.json"
-
-        if [[ ! -d "$pkg_dir" ]]; then
-          echo "package-path does not exist: $pkg_dir" >&2
-          exit 1
-        fi
-
-        if [[ -f "$pkg_json" ]]; then
-          echo "package.json already exists at $pkg_json; leaving it as-is."
-          exit 0
-        fi
-
-        cat > "$pkg_json" <<'JSON'
-        {
-          "name": "__PACKAGE_NAME__",
-          "version": "0.0.0",
-          "private": true
-        }
-        JSON
-
-        # Replace placeholder safely
-        python3 - <<'PY'
-        import json, pathlib
-        p = pathlib.Path("$pkg_json")
-        data = json.loads(p.read_text())
-        data["name"] = "${{ inputs.package-name }}"
-        p.write_text(json.dumps(data, indent=2) + "\n")
-        PY
 
     - name: Run semantic-release
       shell: bash
@@ -101,14 +35,23 @@ runs:
         set -euo pipefail
 
         pkg_dir="${GITHUB_WORKSPACE}/${{ inputs.package-path }}"
+        pkg_name="${{ inputs.package-name }}"
         pkg_json="$pkg_dir/package.json"
+        created_pkg_json="false"
+
+        if [[ ! -d "$pkg_dir" ]]; then
+          echo "package-path does not exist: $pkg_dir" >&2
+          exit 1
+        fi
+
+        if [[ ! -f "$pkg_json" ]]; then
+          printf '{\n  "name": "%s",\n  "version": "0.0.0",\n  "private": true\n}\n' "$pkg_name" > "$pkg_json"
+          created_pkg_json="true"
+        fi
 
         cleanup() {
-          if [[ -f "$pkg_json" ]]; then
-            # Only remove if it looks like our temporary file
-            if grep -q '"version": "0.0.0"' "$pkg_json" && grep -q '"private": true' "$pkg_json"; then
-              rm -f "$pkg_json" || true
-            fi
+          if [[ "$created_pkg_json" == "true" ]]; then
+            rm -f "$pkg_json" || true
           fi
         }
         trap cleanup EXIT
@@ -124,4 +67,4 @@ runs:
           @semantic-release/release-notes-generator \
           conventional-changelog-conventionalcommits
 
-        npx semantic-release --config "${{ steps.config.outputs.config_path }}"
+        npx semantic-release --config "${GITHUB_WORKSPACE}/.releaserc.js"
