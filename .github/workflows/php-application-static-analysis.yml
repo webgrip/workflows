@@ -1,0 +1,61 @@
+name: 'PHP Static Analysis'
+
+on:
+  workflow_call:
+    secrets:
+      COMPOSER_TOKEN:
+        description: 'Composer packagist token. Required to authenticate with for example private packagist. (packagist.com)'
+        required: false
+
+jobs:
+  static-analysis-run:
+    name: 'Static Analysis (PHPStan, PHPMD, PHPCS, Rector)'
+    runs-on: arc-runner-set
+
+    container:
+      image: webgrip/php-ci-runner:latest
+
+    steps:
+      - name: Git safe directory
+        run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
+
+      - uses: actions/checkout@v4
+
+      - name: Cache composer vendor
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
+
+      - name: Install dependencies
+        run: composer install --prefer-dist --no-interaction --ignore-platform-reqs
+
+      - name: Run phpcs
+        run: ./vendor/bin/phpcs -q -s --standard=./phpcs.xml ./src --report=full --exclude=Generic.Files.LineLength
+        if: ${{ hashFiles('phpcs.xml') != '' }}
+        continue-on-error: true
+
+      - name: Run phpcs (Full)
+        run: ./vendor/bin/phpcs -q -s --standard=./phpcs.xml ./src --report=full --ignore-annotations
+        if: ${{ always() && hashFiles('phpcs.xml') != '' }}
+        continue-on-error: true
+
+      - name: Run phpmd
+        run: ./vendor/bin/phpmd --strict --color ./src text ./phpmd.xml
+        if: ${{ always() && hashFiles('phpmd.xml') != '' }}
+        continue-on-error: true
+
+      - name: Run phpstan
+        run: ./vendor/bin/phpstan --configuration=./phpstan.neon analyse ./src --level 8 --error-format=table
+        if: ${{ always() && hashFiles('phpstan.neon') != '' }}
+        continue-on-error: true
+
+      - name: Run psalm
+        run: php ./psalm.phar --config=psalm.xml --output-format=compact --generate-json-map=psalm-output.json
+        if: ${{ always() && hashFiles('psalm.xml') != '' && hashFiles('psalm.phar') != '' }}
+        continue-on-error: true
+
+      - name: Run rector
+        run: ./vendor/bin/rector --config=./rector.php process ./src --dry-run
+        if: ${{ always() && hashFiles('rector.php') != '' }}
+        continue-on-error: true

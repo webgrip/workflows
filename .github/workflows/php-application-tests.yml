@@ -1,0 +1,62 @@
+name: 'Tests'
+
+on:
+  workflow_call:
+
+env:
+  PHP_VERSION: 8.3
+
+jobs:
+  tests-run:
+    name: '${{ matrix.testsuite }}'
+    runs-on: arc-runner-set
+
+    container:
+      image: webgrip/php-ci-runner:latest
+      env:
+        COMPOSER_AUTH: >
+          {
+            "http-basic": {
+              "repo.packagist.com": {
+                  "username": "token",
+                  "password": "${{ secrets.COMPOSER_TOKEN }}"
+              }
+            }
+          }
+
+    strategy:
+      fail-fast: false
+      matrix:
+        testsuite: [ 'Unit', 'Integration', 'Functional' ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache composer vendor
+        uses: actions/cache@v4
+        with:
+          path: vendor
+          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
+
+      - name: 'Run ${{ matrix.testsuite }} tests'
+        run: |
+          case "${{ matrix.testsuite }}" in
+            "Unit")
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite unit --coverage-php coverage/unit.cov --coverage-html coverage/unit --fail-on-risky
+              ;;
+            "Integration")
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite integration --coverage-php coverage/integration.cov --coverage-html coverage/integration --fail-on-risky --exclude-group=db || true
+              ;;
+            "Functional")
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite functional --coverage-php coverage/functional.cov --coverage-html coverage/functional --fail-on-risky || true
+              ;;
+            *)
+              echo "Unknown testsuite"
+              exit 1
+              ;;
+          esac
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.testsuite }}
+          path: coverage
