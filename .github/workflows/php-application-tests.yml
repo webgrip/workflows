@@ -12,7 +12,7 @@ jobs:
     runs-on: arc-runner-set
 
     container:
-      image: webgrip/php-ci-runner:latest
+      image: ghcr.io/webgrip/php-ci-runner:latest
       env:
         COMPOSER_AUTH: >
           {
