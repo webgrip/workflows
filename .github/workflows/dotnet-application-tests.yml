@@ -39,6 +39,9 @@ on:
         default: 'TestResults'
         type: string
 
+permissions:
+  contents: read
+
 env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 1
   DOTNET_NOLOGO: true
@@ -47,9 +50,8 @@ jobs:
   tests-run:
     name: 'dotnet test'
     runs-on: arc-runner-set
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Cache NuGet packages
         uses: actions/cache@v4
@@ -112,35 +114,9 @@ jobs:
           echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Upload test results
-        id: upload-results
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: dotnet-test-results
           path: ${{ inputs.working-directory }}/${{ inputs.results-directory }}
           if-no-files-found: ignore
-
-      - name: Render summary
-        if: ${{ always() }}
-        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@main
-        with:
-          title: '.NET Tests'
-          subtitle: 'Build and test execution for .NET solutions and projects'
-          metadata: |
-            [
-              {"label":"Runner","value":"arc-runner-set"},
-              {"label":"Working directory","value":"${{ inputs.working-directory }}"},
-              {"label":"Target","value":"${{ steps.detect-target.outputs.target }}"},
-              {"label":"Results directory","value":"${{ inputs.results-directory }}"}
-            ]
-          checks: |
-            [
-              {"name":"Restore","status":"${{ steps.restore.outcome }}","duration":"${{ steps.restore.outputs.seconds }}s","details":"${{ inputs.restore-arguments != '' && inputs.restore-arguments || 'default restore' }}"},
-              {"name":"Build","status":"${{ steps.build.outcome }}","duration":"${{ steps.build.outputs.seconds }}s","details":"configuration ${{ inputs.build-configuration }}"},
-              {"name":"Test execution","status":"${{ steps.test.outcome }}","duration":"${{ steps.test.outputs.seconds }}s","details":"TRX results enabled"},
-              {"name":"Results upload","status":"${{ steps.upload-results.outcome }}","duration":"-","details":"artifact dotnet-test-results"}
-            ]
-          artifacts: |
-            ["dotnet-test-results"]
-          notes: |
-            ["Runner-provided .NET SDK is used on arc-runner-set."]

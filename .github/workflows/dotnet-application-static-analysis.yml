@@ -44,6 +44,9 @@ on:
         default: true
         type: boolean
 
+permissions:
+  contents: read
+
 env:
   DOTNET_CLI_TELEMETRY_OPTOUT: 1
   DOTNET_NOLOGO: true
@@ -52,12 +55,11 @@ jobs:
   static-analysis-run:
     name: 'Static Analysis (.NET Format, Build, Vulnerabilities, Outdated)'
     runs-on: arc-runner-set
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.nuget/packages
@@ -130,32 +132,3 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: dotnet list "$DOTNET_TARGET" package --outdated --include-transitive
         continue-on-error: true
-
-      - name: Render summary
-        if: ${{ always() }}
-        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@main
-        with:
-          title: '.NET Static Analysis'
-          subtitle: 'Quality gate for .NET solutions and projects'
-          metadata: |
-            [
-              {"label":"Runner","value":"arc-runner-set"},
-              {"label":"Working directory","value":"${{ inputs.working-directory }}"},
-              {"label":"Target","value":"${{ steps.detect-target.outputs.target }}"},
-              {"label":"Build configuration","value":"${{ inputs.build-configuration }}"}
-            ]
-          checks: |
-            [
-              {"name":"Restore","status":"${{ steps.restore.outcome }}","duration":"${{ steps.restore.outputs.seconds }}s","details":"${{ inputs.restore-arguments != '' && inputs.restore-arguments || 'default restore' }}"},
-              {"name":"Format","status":"${{ inputs.run-format-check && steps.format.outcome || 'skipped' }}","duration":"${{ steps.format.outputs.seconds != '' && format('{0}s', steps.format.outputs.seconds) || '-' }}","details":"dotnet format --verify-no-changes"},
-              {"name":"Build","status":"${{ steps.build.outcome }}","duration":"${{ steps.build.outputs.seconds }}s","details":"warnings treated as errors"},
-              {"name":"Vulnerability scan","status":"${{ inputs.run-vulnerability-scan && steps.vuln-scan.outcome || 'skipped' }}","duration":"-","details":"transitive packages included"},
-              {"name":"Outdated packages","status":"${{ inputs.run-outdated-check && steps.outdated.outcome || 'skipped' }}","duration":"-","details":"advisory only"}
-            ]
-          artifacts: |
-            []
-          notes: |
-            [
-              "Runner-provided .NET SDK is used on arc-runner-set.",
-              "Outdated package reporting is advisory and does not fail the workflow."
-            ]

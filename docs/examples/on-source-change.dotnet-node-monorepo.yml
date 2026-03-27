@@ -1,0 +1,230 @@
+name: "[Workflow] On Source Change"
+
+concurrency:
+  group: push-${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+    paths:
+      - "src/**"
+      - "ops/**"
+      - ".releaserc.json"
+      - ".releaserc.js"
+      - ".github/workflows/cache-warm.yml"
+      - ".github/workflows/on_source_change.yml"
+      - ".github/workflows/on_release_published.yml"
+      - "docker-bake.hcl"
+      - "docker-compose.yml"
+      - "NuGet.Config"
+
+permissions:
+  contents: read
+
+jobs:
+  backend-static-analysis:
+    name: "Backend Static Analysis"
+    uses: webgrip/workflows/.github/workflows/dotnet-application-static-analysis.yml@main
+    with:
+      working-directory: src/backend/Poc.Platform
+      target-path: Poc.Platform.sln
+      restore-arguments: --locked-mode
+      build-configuration: Release
+      run-format-check: false
+      run-vulnerability-scan: false
+      run-outdated-check: false
+
+  frontend-static-analysis:
+    name: "Frontend Static Analysis"
+    uses: webgrip/workflows/.github/workflows/node-application-static-analysis.yml@main
+    with:
+      node-version: "22"
+      working-directory: src/frontend
+      package-manager: npm
+      run-format-check: false
+      run-lint: false
+      run-typecheck: true
+      run-audit: false
+      run-knip: false
+      run-outdated: false
+
+  backend-tests:
+    name: "Backend Tests"
+    needs:
+      - backend-static-analysis
+    uses: webgrip/workflows/.github/workflows/dotnet-application-tests.yml@main
+    with:
+      working-directory: src/backend/Poc.Platform
+      target-path: Poc.Platform.sln
+      restore-arguments: --locked-mode
+      build-configuration: Release
+
+  frontend-build:
+    name: "Frontend Build"
+    needs:
+      - frontend-static-analysis
+    uses: webgrip/workflows/.github/workflows/node-application-tests.yml@main
+    with:
+      node-version: "22"
+      working-directory: src/frontend
+      package-manager: npm
+      test-command: npm run build
+
+  integration-tests:
+    name: "Integration Tests"
+    needs:
+      - backend-tests
+      - frontend-build
+    runs-on: arc-runner-set
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute build metadata
+        id: meta
+        shell: bash
+        env:
+          CAN_WRITE_PACKAGES: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          set -euo pipefail
+          OWNER_REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          REF_NAME=$(echo "${GITHUB_REF_NAME}" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9._-]#-#g')
+          REF_NAME=$(echo "$REF_NAME" | sed 's/-\{2,\}/-/g' | sed 's/^-//' | sed 's/-$//')
+          if [ -z "$REF_NAME" ]; then
+            REF_NAME="detached"
+          fi
+          CACHE_REF=""
+          FALLBACK_CACHE_REF=""
+          if [ "$CAN_WRITE_PACKAGES" = "true" ]; then
+            CACHE_REF="ghcr.io/${OWNER_REPO}/poc-cache:buildcache-${REF_NAME}"
+            if [ "$REF_NAME" != "main" ]; then
+              FALLBACK_CACHE_REF="ghcr.io/${OWNER_REPO}/poc-cache:buildcache-main"
+            fi
+          fi
+          echo "cache_ref=${CACHE_REF}" >> "$GITHUB_OUTPUT"
+          echo "fallback_cache_ref=${FALLBACK_CACHE_REF}" >> "$GITHUB_OUTPUT"
+          echo "cache_scope=poc-ci-${REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=ci-${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Docker build (bake)
+        env:
+          DOCKER_BUILDKIT: "1"
+        run: |
+          set -euo pipefail
+          echo "::group::bake"
+          echo "## buildx cache before" >> "$GITHUB_STEP_SUMMARY"
+          docker buildx du --verbose | sed -e 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+          start=$(date +%s)
+          CACHE_REF="${{ steps.meta.outputs.cache_ref }}" \
+          FALLBACK_CACHE_REF="${{ steps.meta.outputs.fallback_cache_ref }}" \
+          CACHE_SCOPE="${{ steps.meta.outputs.cache_scope }}" \
+          IMAGE_PREFIX="opg/poc" \
+          IMAGE_TAG="${{ steps.meta.outputs.image_tag }}" \
+          docker buildx bake \
+            --file docker-bake.hcl \
+            --progress=plain \
+            --set "*.output=type=docker" \
+            default
+          end=$(date +%s)
+          secs=$((end-start))
+          echo "BAKE_TIME_SECONDS=${secs}" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "## buildx cache after" >> "$GITHUB_STEP_SUMMARY"
+          docker buildx du --verbose | sed -e 's/^/    /' >> "$GITHUB_STEP_SUMMARY" || true
+          echo "::endgroup::"
+
+      - name: Compose up (infra + services)
+        env:
+          MSSQL_SA_PASSWORD: StrongPassword123!
+          POC_MIGRATOR_IMAGE: opg/poc-migrator:${{ steps.meta.outputs.image_tag }}
+          POC_API_CATALOG_IMAGE: opg/poc-api-catalog:${{ steps.meta.outputs.image_tag }}
+          POC_API_ORDERS_IMAGE: opg/poc-api-orders:${{ steps.meta.outputs.image_tag }}
+          POC_API_ADMIN_IMAGE: opg/poc-api-admin:${{ steps.meta.outputs.image_tag }}
+          POC_GATEWAY_IMAGE: opg/poc-gateway:${{ steps.meta.outputs.image_tag }}
+          POC_FRONTEND_IMAGE: opg/poc-frontend:${{ steps.meta.outputs.image_tag }}
+        run: |
+          docker compose -f docker-compose.yml up -d --no-build
+
+      - name: Run migrations
+        env:
+          MSSQL_SA_PASSWORD: StrongPassword123!
+          POC_MIGRATOR_IMAGE: opg/poc-migrator:${{ steps.meta.outputs.image_tag }}
+          POC_API_CATALOG_IMAGE: opg/poc-api-catalog:${{ steps.meta.outputs.image_tag }}
+          POC_API_ORDERS_IMAGE: opg/poc-api-orders:${{ steps.meta.outputs.image_tag }}
+          POC_API_ADMIN_IMAGE: opg/poc-api-admin:${{ steps.meta.outputs.image_tag }}
+          POC_GATEWAY_IMAGE: opg/poc-gateway:${{ steps.meta.outputs.image_tag }}
+          POC_FRONTEND_IMAGE: opg/poc-frontend:${{ steps.meta.outputs.image_tag }}
+        run: |
+          docker compose -f docker-compose.yml run --rm migrator
+
+      - name: Smoke HTTP
+        env:
+          POC_MIGRATOR_IMAGE: opg/poc-migrator:${{ steps.meta.outputs.image_tag }}
+          POC_API_CATALOG_IMAGE: opg/poc-api-catalog:${{ steps.meta.outputs.image_tag }}
+          POC_API_ORDERS_IMAGE: opg/poc-api-orders:${{ steps.meta.outputs.image_tag }}
+          POC_API_ADMIN_IMAGE: opg/poc-api-admin:${{ steps.meta.outputs.image_tag }}
+          POC_GATEWAY_IMAGE: opg/poc-gateway:${{ steps.meta.outputs.image_tag }}
+          POC_FRONTEND_IMAGE: opg/poc-frontend:${{ steps.meta.outputs.image_tag }}
+        run: |
+          start=$(date +%s)
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/health >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8080/api/catalog/health
+          curl -fsS http://localhost:8080/api/orders/health
+          curl -fsS http://localhost:8080/api/admin/health
+          end=$(date +%s)
+          echo "SMOKE_HTTP_SECONDS=$((end-start))" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compose logs on failure
+        if: failure()
+        env:
+          POC_MIGRATOR_IMAGE: opg/poc-migrator:${{ steps.meta.outputs.image_tag }}
+          POC_API_CATALOG_IMAGE: opg/poc-api-catalog:${{ steps.meta.outputs.image_tag }}
+          POC_API_ORDERS_IMAGE: opg/poc-api-orders:${{ steps.meta.outputs.image_tag }}
+          POC_API_ADMIN_IMAGE: opg/poc-api-admin:${{ steps.meta.outputs.image_tag }}
+          POC_GATEWAY_IMAGE: opg/poc-gateway:${{ steps.meta.outputs.image_tag }}
+          POC_FRONTEND_IMAGE: opg/poc-frontend:${{ steps.meta.outputs.image_tag }}
+        run: docker compose -f docker-compose.yml logs --no-color
+
+      - name: Compose down
+        if: always()
+        env:
+          POC_MIGRATOR_IMAGE: opg/poc-migrator:${{ steps.meta.outputs.image_tag }}
+          POC_API_CATALOG_IMAGE: opg/poc-api-catalog:${{ steps.meta.outputs.image_tag }}
+          POC_API_ORDERS_IMAGE: opg/poc-api-orders:${{ steps.meta.outputs.image_tag }}
+          POC_API_ADMIN_IMAGE: opg/poc-api-admin:${{ steps.meta.outputs.image_tag }}
+          POC_GATEWAY_IMAGE: opg/poc-gateway:${{ steps.meta.outputs.image_tag }}
+          POC_FRONTEND_IMAGE: opg/poc-frontend:${{ steps.meta.outputs.image_tag }}
+        run: docker compose -f docker-compose.yml down -v
+
+  release:
+    name: "Semantic Release"
+    needs:
+      - backend-static-analysis
+      - frontend-static-analysis
+      - backend-tests
+      - frontend-build
+      - integration-tests
+    if: github.ref == 'refs/heads/main'
+    uses: webgrip/workflows/.github/workflows/semantic-release.yml@main
+    with:
+      use-bot-to-commit: true
+    secrets:
+      WEBGRIP_CI_APP_ID: ${{ secrets.WEBGRIP_CI_APP_ID }}
+      WEBGRIP_CI_APP_PRIVATE_KEY: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}

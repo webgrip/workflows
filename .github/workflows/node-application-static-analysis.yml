@@ -49,13 +49,15 @@ on:
         default: true
         type: boolean
 
+permissions:
+  contents: read
+
 jobs:
   static-analysis-run:
     name: 'Static Analysis (Prettier, ESLint, Typecheck, Audit, Knip, Outdated)'
     runs-on: arc-runner-set
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Detect package manager
         id: detect-package-manager
@@ -88,7 +90,7 @@ jobs:
           echo 'PACKAGE_MANAGER=npm' >> "$GITHUB_ENV"
           echo 'package_manager=npm' >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
 
@@ -134,7 +136,6 @@ jobs:
           echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Run formatting checks
-        id: format
         if: ${{ inputs.run-format-check }}
         shell: bash
         working-directory: ${{ inputs.working-directory }}
@@ -160,7 +161,6 @@ jobs:
           echo 'Prettier is not configured; skipping.'
 
       - name: Run linting
-        id: lint
         if: ${{ inputs.run-lint }}
         shell: bash
         working-directory: ${{ inputs.working-directory }}
@@ -186,12 +186,10 @@ jobs:
           echo 'ESLint is not configured; skipping.'
 
       - name: Run type checks
-        id: typecheck
         if: ${{ inputs.run-typecheck }}
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         run: |
-          start=$(date +%s)
           if [ ! -f tsconfig.json ]; then
             echo 'No tsconfig.json found; skipping type checks.'
             exit 0
@@ -210,11 +208,8 @@ jobs:
               yarn) yarn tsc --noEmit ;;
             esac
           fi
-          end=$(date +%s)
-          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Audit dependencies
-        id: audit
         if: ${{ inputs.run-audit }}
         shell: bash
         working-directory: ${{ inputs.working-directory }}
@@ -232,7 +227,6 @@ jobs:
           esac
 
       - name: Run dead dependency checks
-        id: knip
         if: ${{ inputs.run-knip }}
         shell: bash
         working-directory: ${{ inputs.working-directory }}
@@ -258,7 +252,6 @@ jobs:
           echo 'Knip is not configured; skipping.'
 
       - name: Report outdated dependencies
-        id: outdated
         if: ${{ inputs.run-outdated }}
         shell: bash
         working-directory: ${{ inputs.working-directory }}
@@ -275,31 +268,3 @@ jobs:
               ;;
           esac
         continue-on-error: true
-
-      - name: Render summary
-        if: ${{ always() }}
-        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@main
-        with:
-          title: 'Node.js Static Analysis'
-          subtitle: 'Frontend quality gate for JavaScript and TypeScript projects'
-          metadata: |
-            [
-              {"label":"Runner","value":"arc-runner-set"},
-              {"label":"Working directory","value":"${{ inputs.working-directory }}"},
-              {"label":"Package manager","value":"${{ steps.detect-package-manager.outputs.package_manager }}"},
-              {"label":"Node version","value":"${{ inputs.node-version }}"}
-            ]
-          checks: |
-            [
-              {"name":"Install","status":"${{ steps.install.outcome }}","duration":"${{ steps.install.outputs.seconds }}s","details":"dependencies restored"},
-              {"name":"Format","status":"${{ inputs.run-format-check && steps.format.outcome || 'skipped' }}","duration":"-","details":"prettier or format:check when configured"},
-              {"name":"Lint","status":"${{ inputs.run-lint && steps.lint.outcome || 'skipped' }}","duration":"-","details":"eslint or lint script when configured"},
-              {"name":"Typecheck","status":"${{ inputs.run-typecheck && steps.typecheck.outcome || 'skipped' }}","duration":"${{ steps.typecheck.outputs.seconds != '' && format('{0}s', steps.typecheck.outputs.seconds) || '-' }}","details":"tsconfig-aware"},
-              {"name":"Audit","status":"${{ inputs.run-audit && steps.audit.outcome || 'skipped' }}","duration":"-","details":"dependency audit"},
-              {"name":"Dead dependency checks","status":"${{ inputs.run-knip && steps.knip.outcome || 'skipped' }}","duration":"-","details":"knip when configured"},
-              {"name":"Outdated packages","status":"${{ inputs.run-outdated && steps.outdated.outcome || 'skipped' }}","duration":"-","details":"advisory only"}
-            ]
-          artifacts: |
-            []
-          notes: |
-            ["Outdated package reporting is advisory and does not fail the workflow."]

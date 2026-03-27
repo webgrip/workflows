@@ -1,0 +1,22 @@
+name: "[Workflow] On Release Published"
+
+on:
+  workflow_dispatch:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-image:
+    name: "Publish Docker Image"
+    uses: webgrip/workflows/.github/workflows/docker-build-and-push-ghcr.yml@main
+    with:
+      docker-context: .
+      docker-file: ./ops/docker/application/Dockerfile
+      docker-tags: |
+        ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest
+        ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ github.event.release.tag_name }}

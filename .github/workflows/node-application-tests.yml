@@ -29,13 +29,15 @@ on:
         default: 'coverage'
         type: string
 
+permissions:
+  contents: read
+
 jobs:
   tests-run:
     name: 'Node.js test suite'
     runs-on: arc-runner-set
-
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Detect package manager
         id: detect-package-manager
@@ -68,7 +70,7 @@ jobs:
           echo 'PACKAGE_MANAGER=npm' >> "$GITHUB_ENV"
           echo 'package_manager=npm' >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: ${{ inputs.node-version }}
 
@@ -148,34 +150,9 @@ jobs:
           echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Upload coverage artifact
-        id: upload-coverage
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: node-coverage
           path: ${{ inputs.working-directory }}/${{ inputs.coverage-directory }}
           if-no-files-found: ignore
-
-      - name: Render summary
-        if: ${{ always() }}
-        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@main
-        with:
-          title: 'Node.js Tests'
-          subtitle: 'Build or test execution for JavaScript and TypeScript projects'
-          metadata: |
-            [
-              {"label":"Runner","value":"arc-runner-set"},
-              {"label":"Working directory","value":"${{ inputs.working-directory }}"},
-              {"label":"Package manager","value":"${{ steps.detect-package-manager.outputs.package_manager }}"},
-              {"label":"Test command","value":"${{ inputs.test-command != '' && inputs.test-command || 'package-manager default test command' }}"}
-            ]
-          checks: |
-            [
-              {"name":"Install","status":"${{ steps.install.outcome }}","duration":"${{ steps.install.outputs.seconds }}s","details":"dependencies restored"},
-              {"name":"Test execution","status":"${{ steps.test.outcome }}","duration":"${{ steps.test.outputs.seconds }}s","details":"${{ inputs.test-command != '' && inputs.test-command || 'npm/pnpm/yarn test' }}"},
-              {"name":"Coverage upload","status":"${{ steps.upload-coverage.outcome }}","duration":"-","details":"artifact node-coverage"}
-            ]
-          artifacts: |
-            ["node-coverage"]
-          notes: |
-            []
