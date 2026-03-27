@@ -1,0 +1,51 @@
+name: 'Go Tests'
+
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        description: 'Go version to install'
+        required: false
+        default: '1.24'
+        type: string
+
+jobs:
+  tests-run:
+    name: 'Go test suite'
+    runs-on: arc-runner-set
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+          cache: true
+
+      - name: Ensure Go module exists
+        shell: bash
+        run: |
+          if [ ! -f go.mod ]; then
+            echo 'go.mod was not found.'
+            exit 1
+          fi
+
+      - name: Download dependencies
+        shell: bash
+        run: go mod download
+
+      - name: Run tests
+        shell: bash
+        run: |
+          mkdir -p test-results
+          go test ./... -coverprofile=coverage.out | tee test-results/go-test-output.txt
+
+      - name: Upload test results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-test-results
+          path: |
+            coverage.out
+            test-results
+          if-no-files-found: ignore

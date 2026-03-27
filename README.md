@@ -3,14 +3,15 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![GitHub Actions](https://img.shields.io/badge/GitHub-Actions-2088FF.svg)](https://github.com/features/actions)
 
-A comprehensive collection of reusable GitHub Actions workflows and composite actions for modern CI/CD pipelines. This repository provides battle-tested automation for PHP, Rust, JavaScript projects, Docker containerization, Helm deployments, and repository management.
+A comprehensive collection of reusable GitHub Actions workflows and composite actions for modern CI/CD pipelines. This repository provides battle-tested automation for PHP, Rust, .NET, Java, JavaScript, Python, and Go projects, along with Docker containerization, Helm deployments, and repository management.
 
 ## 🚀 Features
 
-- **26+ Reusable Workflows** - Production-ready CI/CD pipelines
-- **Multi-Language Support** - PHP 8.2, Rust, JavaScript/Node.js
+- **30+ Reusable Workflows** - Production-ready CI/CD pipelines
+- **Multi-Language Support** - PHP, Rust, .NET, Java, JavaScript/Node.js, Python, Go
 - **Container & Cloud Native** - Docker build/push, Helm chart management
 - **Quality Assurance** - Static analysis, testing, code coverage
+- **Standardized CI Shape** - Common setup, caching, analysis, security, hygiene, and test phases across languages
 - **Documentation** - TechDocs generation and deployment
 - **Repository Management** - Template synchronization, bootstrapping
 - **Semantic Versioning** - Automated releases with conventional commits
@@ -23,8 +24,12 @@ A comprehensive collection of reusable GitHub Actions workflows and composite ac
   - [Testing & Quality Assurance](#testing--quality-assurance)
   - [Docker & Containerization](#docker--containerization)
   - [Helm & Kubernetes](#helm--kubernetes)
+  - [.NET Development](#net-development)
+  - [Java Development](#java-development)
   - [Rust Development](#rust-development)
   - [JavaScript Development](#javascript-development)
+  - [Python Development](#python-development)
+  - [Go Development](#go-development)
   - [Documentation](#documentation)
   - [Repository Management](#repository-management)
   - [Release Management](#release-management)
@@ -101,6 +106,36 @@ Comprehensive PHP static analysis using multiple tools.
 - PHPMD - Mess detection
 - PHPCS - Code style checking
 - Rector - Code modernization
+
+#### `dotnet-application-static-analysis.yml`
+Runs standardized .NET static analysis with `dotnet format`, build analyzers, vulnerable package scanning, and outdated package reporting.
+
+#### `dotnet-application-tests.yml`
+Runs `.NET` test suites with TRX output upload.
+
+#### `java-application-static-analysis.yml`
+Runs Java static analysis with build-tool detection, Spotless, configured verification plugins, OWASP dependency checks, and outdated dependency reporting.
+
+#### `java-application-tests.yml`
+Runs Maven or Gradle test suites and uploads common test report directories.
+
+#### `node-application-static-analysis.yml`
+Runs Node.js static analysis with package-manager detection, formatting, linting, type checks, dependency audit, dead dependency checks, and outdated reporting.
+
+#### `node-application-tests.yml`
+Runs Node.js test suites and uploads coverage artifacts when present.
+
+#### `python-application-static-analysis.yml`
+Runs Python static analysis with Ruff, optional MyPy, Bandit, `pip-audit`, and Deptry.
+
+#### `python-application-tests.yml`
+Runs Python tests using `pytest` when available and falls back to `unittest` discovery.
+
+#### `go-application-static-analysis.yml`
+Runs Go static analysis with `gofmt`, `go vet`, `golangci-lint`, `govulncheck`, and tidy verification.
+
+#### `go-application-tests.yml`
+Runs Go test suites and uploads coverage and test output artifacts.
 
 ### Docker & Containerization
 
@@ -184,6 +219,22 @@ Performs static analysis on Rust code using clippy and other tools.
 #### `rust-semantic-release.yml`
 Automated semantic releases for Rust projects.
 
+### .NET Development
+
+#### `dotnet-application-static-analysis.yml`
+Standardized .NET static analysis for formatting, compiler analyzers, dependency vulnerabilities, and dependency drift.
+
+#### `dotnet-application-tests.yml`
+Reusable .NET test workflow with cached restore/build and uploaded TRX results.
+
+### Java Development
+
+#### `java-application-static-analysis.yml`
+Reusable Java static analysis for Maven and Gradle projects with standardized quality and dependency checks.
+
+#### `java-application-tests.yml`
+Reusable Java test workflow for Maven and Gradle projects.
+
 ### JavaScript Development
 
 #### `gha-javascript-lint.yml`
@@ -191,6 +242,28 @@ Lints JavaScript/TypeScript code using ESLint and other tools.
 
 #### `gha-javascript-test.yml`
 Runs JavaScript/TypeScript test suites.
+
+#### `node-application-static-analysis.yml`
+Reusable Node.js static analysis workflow with package-manager detection and standardized quality checks.
+
+#### `node-application-tests.yml`
+Reusable Node.js test workflow with cached dependency installation.
+
+### Python Development
+
+#### `python-application-static-analysis.yml`
+Reusable Python static analysis workflow with formatting, linting, security, and dependency hygiene checks.
+
+#### `python-application-tests.yml`
+Reusable Python test workflow with `pytest` and `unittest` support.
+
+### Go Development
+
+#### `go-application-static-analysis.yml`
+Reusable Go static analysis workflow with formatting, linting, vulnerability scanning, and module hygiene checks.
+
+#### `go-application-tests.yml`
+Reusable Go test workflow with coverage artifact upload.
 
 ### Documentation
 

@@ -1,0 +1,80 @@
+name: 'Go Static Analysis'
+
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        description: 'Go version to install'
+        required: false
+        default: '1.24'
+        type: string
+
+jobs:
+  static-analysis-run:
+    name: 'Static Analysis (fmt, build, vet, golangci-lint, govulncheck, tidy)'
+    runs-on: arc-runner-set
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+          cache: true
+
+      - name: Ensure Go module exists
+        shell: bash
+        run: |
+          if [ ! -f go.mod ]; then
+            echo 'go.mod was not found.'
+            exit 1
+          fi
+
+      - name: Download dependencies
+        shell: bash
+        run: go mod download
+
+      - name: Verify formatting
+        shell: bash
+        run: |
+          mapfile -t go_files < <(find . -type f -name '*.go' -not -path './vendor/*')
+
+          if [ "${#go_files[@]}" -eq 0 ]; then
+            echo 'No Go files were found.'
+            exit 1
+          fi
+
+          unformatted="$(gofmt -l "${go_files[@]}")"
+          if [ -n "$unformatted" ]; then
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Build packages
+        shell: bash
+        run: go build ./...
+
+      - name: Run go vet
+        shell: bash
+        run: go vet ./...
+
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: Run vulnerability scan
+        shell: bash
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Verify go.mod and go.sum are tidy
+        shell: bash
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Report outdated modules
+        shell: bash
+        run: go list -u -m all
+        continue-on-error: true

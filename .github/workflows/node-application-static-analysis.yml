@@ -1,0 +1,201 @@
+name: 'Node.js Static Analysis'
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to install'
+        required: false
+        default: '22'
+        type: string
+
+jobs:
+  static-analysis-run:
+    name: 'Static Analysis (Prettier, ESLint, Typecheck, Audit, Knip, Outdated)'
+    runs-on: arc-runner-set
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect package manager
+        shell: bash
+        run: |
+          if [ ! -f package.json ]; then
+            echo 'package.json was not found.'
+            exit 1
+          fi
+
+          if [ -f pnpm-lock.yaml ]; then
+            echo 'PACKAGE_MANAGER=pnpm' >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          if [ -f yarn.lock ]; then
+            echo 'PACKAGE_MANAGER=yarn' >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          echo 'PACKAGE_MANAGER=npm' >> "$GITHUB_ENV"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Cache package-manager data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ~/.pnpm-store
+            .yarn/cache
+            .yarn/unplugged
+            .yarn/install-state.gz
+          key: "node-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock') }}"
+          restore-keys: |
+            node-${{ runner.os }}-${{ inputs.node-version }}-
+
+      - name: Enable Corepack
+        shell: bash
+        run: corepack enable
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          case "$PACKAGE_MANAGER" in
+            npm)
+              if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+                npm ci
+              else
+                npm install
+              fi
+              ;;
+            pnpm)
+              pnpm install --frozen-lockfile
+              ;;
+            yarn)
+              yarn install --immutable || yarn install --frozen-lockfile
+              ;;
+          esac
+
+      - name: Run formatting checks
+        shell: bash
+        run: |
+          if node -e "const pkg=require('./package.json'); process.exit(pkg.scripts && pkg.scripts['format:check'] ? 0 : 1)"; then
+            case "$PACKAGE_MANAGER" in
+              npm) npm run format:check ;;
+              pnpm) pnpm format:check ;;
+              yarn) yarn format:check ;;
+            esac
+            exit 0
+          fi
+
+          if find . -maxdepth 2 \( -name '.prettierrc' -o -name '.prettierrc.json' -o -name '.prettierrc.js' -o -name '.prettierrc.cjs' -o -name '.prettierrc.mjs' -o -name 'prettier.config.js' -o -name 'prettier.config.cjs' -o -name 'prettier.config.mjs' \) | grep -q .; then
+            case "$PACKAGE_MANAGER" in
+              npm) npx --no-install prettier . --check ;;
+              pnpm) pnpm exec prettier . --check ;;
+              yarn) yarn prettier . --check ;;
+            esac
+            exit 0
+          fi
+
+          echo 'Prettier is not configured; skipping.'
+
+      - name: Run linting
+        shell: bash
+        run: |
+          if node -e "const pkg=require('./package.json'); process.exit(pkg.scripts && pkg.scripts.lint ? 0 : 1)"; then
+            case "$PACKAGE_MANAGER" in
+              npm) npm run lint ;;
+              pnpm) pnpm lint ;;
+              yarn) yarn lint ;;
+            esac
+            exit 0
+          fi
+
+          if find . -maxdepth 2 \( -name 'eslint.config.js' -o -name 'eslint.config.cjs' -o -name 'eslint.config.mjs' -o -name '.eslintrc' -o -name '.eslintrc.js' -o -name '.eslintrc.cjs' -o -name '.eslintrc.json' -o -name '.eslintrc.yaml' -o -name '.eslintrc.yml' \) | grep -q .; then
+            case "$PACKAGE_MANAGER" in
+              npm) npx --no-install eslint . ;;
+              pnpm) pnpm exec eslint . ;;
+              yarn) yarn eslint . ;;
+            esac
+            exit 0
+          fi
+
+          echo 'ESLint is not configured; skipping.'
+
+      - name: Run type checks
+        shell: bash
+        run: |
+          if [ ! -f tsconfig.json ]; then
+            echo 'No tsconfig.json found; skipping type checks.'
+            exit 0
+          fi
+
+          if node -e "const pkg=require('./package.json'); process.exit(pkg.scripts && pkg.scripts.typecheck ? 0 : 1)"; then
+            case "$PACKAGE_MANAGER" in
+              npm) npm run typecheck ;;
+              pnpm) pnpm typecheck ;;
+              yarn) yarn typecheck ;;
+            esac
+            exit 0
+          fi
+
+          case "$PACKAGE_MANAGER" in
+            npm) npx --no-install tsc --noEmit ;;
+            pnpm) pnpm exec tsc --noEmit ;;
+            yarn) yarn tsc --noEmit ;;
+          esac
+
+      - name: Audit dependencies
+        shell: bash
+        run: |
+          case "$PACKAGE_MANAGER" in
+            npm)
+              npm audit --audit-level=high
+              ;;
+            pnpm)
+              pnpm audit --audit-level high
+              ;;
+            yarn)
+              yarn npm audit --severity high || yarn audit --level high
+              ;;
+          esac
+
+      - name: Run dead dependency checks
+        shell: bash
+        run: |
+          if node -e "const pkg=require('./package.json'); process.exit(pkg.scripts && pkg.scripts.knip ? 0 : 1)"; then
+            case "$PACKAGE_MANAGER" in
+              npm) npm run knip ;;
+              pnpm) pnpm knip ;;
+              yarn) yarn knip ;;
+            esac
+            exit 0
+          fi
+
+          if find . -maxdepth 2 \( -name 'knip.json' -o -name 'knip.jsonc' -o -name 'knip.config.js' -o -name 'knip.config.ts' \) | grep -q .; then
+            case "$PACKAGE_MANAGER" in
+              npm) npx --no-install knip ;;
+              pnpm) pnpm exec knip ;;
+              yarn) yarn knip ;;
+            esac
+            exit 0
+          fi
+
+          echo 'Knip is not configured; skipping.'
+
+      - name: Report outdated dependencies
+        shell: bash
+        run: |
+          case "$PACKAGE_MANAGER" in
+            npm)
+              npm outdated
+              ;;
+            pnpm)
+              pnpm outdated
+              ;;
+            yarn)
+              yarn outdated
+              ;;
+          esac
+        continue-on-error: true
