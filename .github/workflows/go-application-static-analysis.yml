@@ -23,6 +23,7 @@ jobs:
           cache: true
 
       - name: Ensure Go module exists
+        id: ensure-module
         shell: bash
         run: |
           if [ ! -f go.mod ]; then
@@ -31,10 +32,16 @@ jobs:
           fi
 
       - name: Download dependencies
+        id: download-dependencies
         shell: bash
-        run: go mod download
+        run: |
+          start=$(date +%s)
+          go mod download
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Verify formatting
+        id: format
         shell: bash
         run: |
           mapfile -t go_files < <(find . -type f -name '*.go' -not -path './vendor/*')
@@ -51,30 +58,66 @@ jobs:
           fi
 
       - name: Build packages
+        id: build
         shell: bash
-        run: go build ./...
+        run: |
+          start=$(date +%s)
+          go build ./...
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Run go vet
+        id: vet
         shell: bash
         run: go vet ./...
 
-      - uses: golangci/golangci-lint-action@v6
+      - id: golangci-lint
+        uses: golangci/golangci-lint-action@v6
         with:
           version: latest
 
       - name: Run vulnerability scan
+        id: vulnerability-scan
         shell: bash
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
 
       - name: Verify go.mod and go.sum are tidy
+        id: tidy
         shell: bash
         run: |
           go mod tidy
           git diff --exit-code go.mod go.sum
 
       - name: Report outdated modules
+        id: outdated
         shell: bash
         run: go list -u -m all
         continue-on-error: true
+
+      - name: Render summary
+        if: ${{ always() }}
+        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@main
+        with:
+          title: 'Go Static Analysis'
+          subtitle: 'Quality gate for Go modules'
+          metadata: |
+            [
+              {"label":"Runner","value":"arc-runner-set"},
+              {"label":"Go version","value":"${{ inputs.go-version }}"}
+            ]
+          checks: |
+            [
+              {"name":"Module presence","status":"${{ steps.ensure-module.outcome }}","duration":"-","details":"go.mod required"},
+              {"name":"Download dependencies","status":"${{ steps.download-dependencies.outcome }}","duration":"${{ steps.download-dependencies.outputs.seconds }}s","details":"go mod download"},
+              {"name":"Format","status":"${{ steps.format.outcome }}","duration":"-","details":"gofmt -l"},
+              {"name":"Build","status":"${{ steps.build.outcome }}","duration":"${{ steps.build.outputs.seconds }}s","details":"go build ./..."},
+              {"name":"go vet","status":"${{ steps.vet.outcome }}","duration":"-","details":"static checks"},
+              {"name":"golangci-lint","status":"${{ steps.golangci-lint.outcome }}","duration":"-","details":"aggregated linter suite"},
+              {"name":"Vulnerability scan","status":"${{ steps.vulnerability-scan.outcome }}","duration":"-","details":"govulncheck"},
+              {"name":"Module tidy","status":"${{ steps.tidy.outcome }}","duration":"-","details":"go.mod and go.sum drift check"},
+              {"name":"Outdated modules","status":"${{ steps.outdated.outcome }}","duration":"-","details":"advisory only"}
+            ]
+          notes: |
+            ["Outdated module reporting is advisory and does not fail the workflow."]

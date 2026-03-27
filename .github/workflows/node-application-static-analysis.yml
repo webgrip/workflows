@@ -8,6 +8,46 @@ on:
         required: false
         default: '22'
         type: string
+      working-directory:
+        description: 'Directory that contains package.json'
+        required: false
+        default: '.'
+        type: string
+      package-manager:
+        description: 'Package manager to use (auto, npm, pnpm, yarn)'
+        required: false
+        default: 'auto'
+        type: string
+      run-format-check:
+        description: 'Run formatting checks when configured'
+        required: false
+        default: true
+        type: boolean
+      run-lint:
+        description: 'Run lint checks when configured'
+        required: false
+        default: true
+        type: boolean
+      run-typecheck:
+        description: 'Run type checks when configured'
+        required: false
+        default: true
+        type: boolean
+      run-audit:
+        description: 'Run dependency audit'
+        required: false
+        default: true
+        type: boolean
+      run-knip:
+        description: 'Run dead dependency checks when configured'
+        required: false
+        default: true
+        type: boolean
+      run-outdated:
+        description: 'Report outdated dependencies'
+        required: false
+        default: true
+        type: boolean
 
 jobs:
   static-analysis-run:
@@ -18,24 +58,35 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Detect package manager
+        id: detect-package-manager
         shell: bash
+        working-directory: ${{ inputs.working-directory }}
         run: |
           if [ ! -f package.json ]; then
             echo 'package.json was not found.'
             exit 1
           fi
 
+          if [ "${{ inputs.package-manager }}" != 'auto' ]; then
+            echo "PACKAGE_MANAGER=${{ inputs.package-manager }}" >> "$GITHUB_ENV"
+            echo "package_manager=${{ inputs.package-manager }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           if [ -f pnpm-lock.yaml ]; then
             echo 'PACKAGE_MANAGER=pnpm' >> "$GITHUB_ENV"
+            echo 'package_manager=pnpm' >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           if [ -f yarn.lock ]; then
             echo 'PACKAGE_MANAGER=yarn' >> "$GITHUB_ENV"
+            echo 'package_manager=yarn' >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo 'PACKAGE_MANAGER=npm' >> "$GITHUB_ENV"
+          echo 'package_manager=npm' >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         with:
@@ -47,10 +98,10 @@ jobs:
           path: |
             ~/.npm
             ~/.pnpm-store
-            .yarn/cache
-            .yarn/unplugged
-            .yarn/install-state.gz
-          key: "node-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml', 'yarn.lock') }}"
+            ${{ inputs.working-directory }}/.yarn/cache
+            ${{ inputs.working-directory }}/.yarn/unplugged
+            ${{ inputs.working-directory }}/.yarn/install-state.gz
+          key: "node-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles(format('{0}/package-lock.json', inputs.working-directory), format('{0}/npm-shrinkwrap.json', inputs.working-directory), format('{0}/pnpm-lock.yaml', inputs.working-directory), format('{0}/yarn.lock', inputs.working-directory)) }}"
           restore-keys: |
             node-${{ runner.os }}-${{ inputs.node-version }}-
 
@@ -59,8 +110,11 @@ jobs:
         run: corepack enable
 
       - name: Install dependencies
+        id: install
         shell: bash
+        working-directory: ${{ inputs.working-directory }}
         run: |
+          start=$(date +%s)
           case "$PACKAGE_MANAGER" in
             npm)
               if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
@@ -76,9 +130,14 @@ jobs:
               yarn install --immutable || yarn install --frozen-lockfile
               ;;
           esac
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Run formatting checks
+        id: format
+        if: ${{ inputs.run-format-check }}
         shell: bash
+        working-directory: ${{ inputs.working-directory }}
         run: |
           if node -e "const pkg=require('./package.json'); process.exit(pkg.scripts && pkg.scripts['format:check'] ? 0 : 1)"; then
             case "$PACKAGE_MANAGER" in
@@ -101,7 +160,10 @@ jobs:
           echo 'Prettier is not configured; skipping.'
 
       - name: Run linting
+        id: lint
+        if: ${{ inputs.run-lint }}
         shell: bash
+        working-directory: ${{ inputs.working-directory }}
         run: |
           if node -e "const pkg=require('./package.json'); process.exit(pkg.scripts && pkg.scripts.lint ? 0 : 1)"; then
             case "$PACKAGE_MANAGER" in
@@ -124,8 +186,12 @@ jobs:
           echo 'ESLint is not configured; skipping.'
 
       - name: Run type checks
+        id: typecheck
+        if: ${{ inputs.run-typecheck }}
         shell: bash
+        working-directory: ${{ inputs.working-directory }}
         run: |
+          start=$(date +%s)
           if [ ! -f tsconfig.json ]; then
             echo 'No tsconfig.json found; skipping type checks.'
             exit 0
@@ -137,17 +203,21 @@ jobs:
               pnpm) pnpm typecheck ;;
               yarn) yarn typecheck ;;
             esac
-            exit 0
+          else
+            case "$PACKAGE_MANAGER" in
+              npm) npx --no-install tsc --noEmit ;;
+              pnpm) pnpm exec tsc --noEmit ;;
+              yarn) yarn tsc --noEmit ;;
+            esac
           fi
-
-          case "$PACKAGE_MANAGER" in
-            npm) npx --no-install tsc --noEmit ;;
-            pnpm) pnpm exec tsc --noEmit ;;
-            yarn) yarn tsc --noEmit ;;
-          esac
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Audit dependencies
+        id: audit
+        if: ${{ inputs.run-audit }}
         shell: bash
+        working-directory: ${{ inputs.working-directory }}
         run: |
           case "$PACKAGE_MANAGER" in
             npm)
@@ -162,7 +232,10 @@ jobs:
           esac
 
       - name: Run dead dependency checks
+        id: knip
+        if: ${{ inputs.run-knip }}
         shell: bash
+        working-directory: ${{ inputs.working-directory }}
         run: |
           if node -e "const pkg=require('./package.json'); process.exit(pkg.scripts && pkg.scripts.knip ? 0 : 1)"; then
             case "$PACKAGE_MANAGER" in
@@ -185,7 +258,10 @@ jobs:
           echo 'Knip is not configured; skipping.'
 
       - name: Report outdated dependencies
+        id: outdated
+        if: ${{ inputs.run-outdated }}
         shell: bash
+        working-directory: ${{ inputs.working-directory }}
         run: |
           case "$PACKAGE_MANAGER" in
             npm)
@@ -199,3 +275,31 @@ jobs:
               ;;
           esac
         continue-on-error: true
+
+      - name: Render summary
+        if: ${{ always() }}
+        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@main
+        with:
+          title: 'Node.js Static Analysis'
+          subtitle: 'Frontend quality gate for JavaScript and TypeScript projects'
+          metadata: |
+            [
+              {"label":"Runner","value":"arc-runner-set"},
+              {"label":"Working directory","value":"${{ inputs.working-directory }}"},
+              {"label":"Package manager","value":"${{ steps.detect-package-manager.outputs.package_manager }}"},
+              {"label":"Node version","value":"${{ inputs.node-version }}"}
+            ]
+          checks: |
+            [
+              {"name":"Install","status":"${{ steps.install.outcome }}","duration":"${{ steps.install.outputs.seconds }}s","details":"dependencies restored"},
+              {"name":"Format","status":"${{ inputs.run-format-check && steps.format.outcome || 'skipped' }}","duration":"-","details":"prettier or format:check when configured"},
+              {"name":"Lint","status":"${{ inputs.run-lint && steps.lint.outcome || 'skipped' }}","duration":"-","details":"eslint or lint script when configured"},
+              {"name":"Typecheck","status":"${{ inputs.run-typecheck && steps.typecheck.outcome || 'skipped' }}","duration":"${{ steps.typecheck.outputs.seconds != '' && format('{0}s', steps.typecheck.outputs.seconds) || '-' }}","details":"tsconfig-aware"},
+              {"name":"Audit","status":"${{ inputs.run-audit && steps.audit.outcome || 'skipped' }}","duration":"-","details":"dependency audit"},
+              {"name":"Dead dependency checks","status":"${{ inputs.run-knip && steps.knip.outcome || 'skipped' }}","duration":"-","details":"knip when configured"},
+              {"name":"Outdated packages","status":"${{ inputs.run-outdated && steps.outdated.outcome || 'skipped' }}","duration":"-","details":"advisory only"}
+            ]
+          artifacts: |
+            []
+          notes: |
+            ["Outdated package reporting is advisory and does not fail the workflow."]

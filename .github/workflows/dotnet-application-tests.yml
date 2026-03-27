@@ -4,9 +4,39 @@ on:
   workflow_call:
     inputs:
       dotnet-version:
-        description: '.NET SDK version to install'
+        description: 'Deprecated compatibility input. arc-runner-set uses the runner-provided .NET SDK.'
         required: false
         default: '8.0.x'
+        type: string
+      working-directory:
+        description: 'Directory that contains the .NET solution or project'
+        required: false
+        default: '.'
+        type: string
+      target-path:
+        description: 'Optional solution or project path relative to the working directory'
+        required: false
+        default: ''
+        type: string
+      restore-arguments:
+        description: 'Additional arguments passed to dotnet restore'
+        required: false
+        default: ''
+        type: string
+      build-configuration:
+        description: 'Build configuration'
+        required: false
+        default: 'Release'
+        type: string
+      test-arguments:
+        description: 'Additional arguments passed to dotnet test'
+        required: false
+        default: ''
+        type: string
+      results-directory:
+        description: 'Directory where TRX results are written, relative to the working directory'
+        required: false
+        default: 'TestResults'
         type: string
 
 env:
@@ -21,49 +51,96 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-dotnet@v4
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
         with:
-          dotnet-version: ${{ inputs.dotnet-version }}
-          cache: true
-          cache-dependency-path: |
-            **/packages.lock.json
-            **/*.csproj
-            **/*.fsproj
-            **/*.vbproj
-            **/*.props
-            **/*.targets
-            global.json
-            NuGet.Config
+          path: |
+            ~/.nuget/packages
+            ~/.local/share/NuGet/v3-cache
+          key: "nuget-${{ runner.os }}-${{ hashFiles('NuGet.Config', 'global.json', format('{0}/**/*.csproj', inputs.working-directory), format('{0}/**/*.fsproj', inputs.working-directory), format('{0}/**/*.vbproj', inputs.working-directory), format('{0}/**/*.props', inputs.working-directory), format('{0}/**/*.targets', inputs.working-directory), format('{0}/**/packages.lock.json', inputs.working-directory)) }}"
+          restore-keys: |
+            nuget-${{ runner.os }}-
 
       - name: Detect .NET target
+        id: detect-target
         shell: bash
+        working-directory: ${{ inputs.working-directory }}
         run: |
-          target_path="$(find . -maxdepth 5 \( -name '*.sln' -o -name '*.csproj' -o -name '*.fsproj' -o -name '*.vbproj' \) | sort | head -n 1)"
+          target_path="${{ inputs.target-path }}"
+
+          if [ -z "$target_path" ]; then
+            target_path="$(find . -maxdepth 5 \( -name '*.sln' -o -name '*.csproj' -o -name '*.fsproj' -o -name '*.vbproj' \) | sort | head -n 1)"
+          fi
+
           if [ -z "$target_path" ]; then
             echo "No .NET solution or project files were found."
             exit 1
           fi
 
           echo "DOTNET_TARGET=$target_path" >> "$GITHUB_ENV"
+          echo "target=$target_path" >> "$GITHUB_OUTPUT"
 
       - name: Restore dependencies
+        id: restore
         shell: bash
-        run: dotnet restore "$DOTNET_TARGET"
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          start=$(date +%s)
+          dotnet restore "$DOTNET_TARGET" ${{ inputs.restore-arguments }}
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Build test targets
+        id: build
         shell: bash
-        run: dotnet build "$DOTNET_TARGET" --configuration Release --no-restore
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          start=$(date +%s)
+          dotnet build "$DOTNET_TARGET" --configuration "${{ inputs.build-configuration }}" --no-restore
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Run tests
+        id: test
         shell: bash
+        working-directory: ${{ inputs.working-directory }}
         run: |
-          mkdir -p TestResults
-          dotnet test "$DOTNET_TARGET" --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --results-directory TestResults
+          mkdir -p "${{ inputs.results-directory }}"
+          start=$(date +%s)
+          dotnet test "$DOTNET_TARGET" --configuration "${{ inputs.build-configuration }}" --no-build --logger "trx;LogFileName=test-results.trx" --results-directory "${{ inputs.results-directory }}" ${{ inputs.test-arguments }}
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Upload test results
+        id: upload-results
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
           name: dotnet-test-results
-          path: TestResults
+          path: ${{ inputs.working-directory }}/${{ inputs.results-directory }}
           if-no-files-found: ignore
+
+      - name: Render summary
+        if: ${{ always() }}
+        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@main
+        with:
+          title: '.NET Tests'
+          subtitle: 'Build and test execution for .NET solutions and projects'
+          metadata: |
+            [
+              {"label":"Runner","value":"arc-runner-set"},
+              {"label":"Working directory","value":"${{ inputs.working-directory }}"},
+              {"label":"Target","value":"${{ steps.detect-target.outputs.target }}"},
+              {"label":"Results directory","value":"${{ inputs.results-directory }}"}
+            ]
+          checks: |
+            [
+              {"name":"Restore","status":"${{ steps.restore.outcome }}","duration":"${{ steps.restore.outputs.seconds }}s","details":"${{ inputs.restore-arguments != '' && inputs.restore-arguments || 'default restore' }}"},
+              {"name":"Build","status":"${{ steps.build.outcome }}","duration":"${{ steps.build.outputs.seconds }}s","details":"configuration ${{ inputs.build-configuration }}"},
+              {"name":"Test execution","status":"${{ steps.test.outcome }}","duration":"${{ steps.test.outputs.seconds }}s","details":"TRX results enabled"},
+              {"name":"Results upload","status":"${{ steps.upload-results.outcome }}","duration":"-","details":"artifact dotnet-test-results"}
+            ]
+          artifacts: |
+            ["dotnet-test-results"]
+          notes: |
+            ["Runner-provided .NET SDK is used on arc-runner-set."]

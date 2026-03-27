@@ -32,7 +32,7 @@ The repository already provided reusable workflows for PHP, Rust, JavaScript, an
 
 ### Chosen Option
 
-**Language-specific workflows with a shared CI shape**
+Language-specific workflows with a shared CI shape.
 
 ### Rationale
 
@@ -81,7 +81,7 @@ The new workflows improve security posture by adding vulnerability and dependenc
 
 * **Related Decisions**: None
 * **Supersedes / Amends**: None
-* **Follow-ups / TODOs**: Add SARIF upload and optional working-directory inputs if monorepo usage becomes common.
+* **Follow-ups / TODOs**: Add SARIF upload for ecosystems where code-scanning integration is useful.
 
 ---
 

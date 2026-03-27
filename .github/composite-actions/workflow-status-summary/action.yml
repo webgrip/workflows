@@ -1,0 +1,172 @@
+name: "[Action] Render Workflow Status Summary"
+description: "Renders a workflow summary/status page using the GitHub Actions summary API"
+
+inputs:
+  title:
+    description: "Summary title"
+    required: true
+  subtitle:
+    description: "Optional subtitle shown under the title"
+    required: false
+    default: ""
+  metadata:
+    description: "JSON array of { label, value } rows"
+    required: false
+    default: "[]"
+  checks:
+    description: "JSON array of { name, status, duration, details } rows"
+    required: false
+    default: "[]"
+  artifacts:
+    description: "JSON array of artifact names or notes"
+    required: false
+    default: "[]"
+  notes:
+    description: "JSON array of note strings"
+    required: false
+    default: "[]"
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/github-script@v8
+      env:
+        INPUT_TITLE: ${{ inputs.title }}
+        INPUT_SUBTITLE: ${{ inputs.subtitle }}
+        INPUT_METADATA: ${{ inputs.metadata }}
+        INPUT_CHECKS: ${{ inputs.checks }}
+        INPUT_ARTIFACTS: ${{ inputs.artifacts }}
+        INPUT_NOTES: ${{ inputs.notes }}
+      with:
+        script: |
+          const core = require('@actions/core');
+
+          const parseJson = (value, fallback) => {
+            try {
+              return JSON.parse(value || '');
+            } catch {
+              return fallback;
+            }
+          };
+
+          const escapeHtml = (value) => String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+
+          const normalizeStatus = (status) => {
+            const normalized = String(status || 'not-run').toLowerCase();
+            if (['success', 'failure', 'cancelled', 'skipped', 'neutral'].includes(normalized)) return normalized;
+            return 'not-run';
+          };
+
+          const statusLabel = (status) => ({
+            success: 'SUCCESS',
+            failure: 'FAILURE',
+            cancelled: 'CANCELLED',
+            skipped: 'SKIPPED',
+            neutral: 'NEUTRAL',
+            'not-run': 'NOT RUN',
+          })[status] || 'NOT RUN';
+
+          const statusStyle = (status) => ({
+            success: 'background:#dafbe1;color:#1a7f37;border:1px solid #1a7f37;',
+            failure: 'background:#ffebe9;color:#cf222e;border:1px solid #cf222e;',
+            cancelled: 'background:#fff8c5;color:#9a6700;border:1px solid #9a6700;',
+            skipped: 'background:#ddf4ff;color:#0969da;border:1px solid #0969da;',
+            neutral: 'background:#f6f8fa;color:#57606a;border:1px solid #57606a;',
+            'not-run': 'background:#f6f8fa;color:#57606a;border:1px solid #d0d7de;',
+          })[status] || 'background:#f6f8fa;color:#57606a;border:1px solid #d0d7de;';
+
+          const statusPill = (status) => `<span style="display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;letter-spacing:0.02em;${statusStyle(status)}">${statusLabel(status)}</span>`;
+
+          const summarizeOverall = (checks) => {
+            const statuses = checks.map((check) => normalizeStatus(check.status));
+            if (statuses.includes('failure')) return 'failure';
+            if (statuses.includes('cancelled')) return 'cancelled';
+            if (statuses.includes('success')) return 'success';
+            if (statuses.includes('skipped')) return 'skipped';
+            if (statuses.includes('neutral')) return 'neutral';
+            return 'not-run';
+          };
+
+          const metadata = parseJson(process.env.INPUT_METADATA, []);
+          const checks = parseJson(process.env.INPUT_CHECKS, []);
+          const artifacts = parseJson(process.env.INPUT_ARTIFACTS, []);
+          const notes = parseJson(process.env.INPUT_NOTES, []);
+          const title = process.env.INPUT_TITLE;
+          const subtitle = process.env.INPUT_SUBTITLE;
+          const overall = summarizeOverall(checks);
+
+          const metadataTable = [
+            [
+              { data: 'Context', header: true },
+              { data: 'Value', header: true },
+            ],
+            ...metadata.map((item) => [
+              escapeHtml(item.label || ''),
+              escapeHtml(item.value || ''),
+            ]),
+          ];
+
+          const checksTable = [
+            [
+              { data: 'Check', header: true },
+              { data: 'Status', header: true },
+              { data: 'Time', header: true },
+              { data: 'Notes', header: true },
+            ],
+            ...checks.map((check) => {
+              const status = normalizeStatus(check.status);
+              return [
+                escapeHtml(check.name || ''),
+                statusPill(status),
+                escapeHtml(check.duration || '-'),
+                escapeHtml(check.details || '-'),
+              ];
+            }),
+          ];
+
+          const listBlock = (items) => items.length
+            ? items.map((item) => `- ${escapeHtml(item)}`).join('\n')
+            : '- None';
+
+          core.summary
+            .addHeading(title, 2)
+            .addRaw(`${statusPill(overall)} ${subtitle ? `<strong>${escapeHtml(subtitle)}</strong>` : ''}`)
+            .addEOL()
+            .addSeparator();
+
+          if (metadata.length) {
+            core.summary
+              .addHeading('Run Context', 3)
+              .addTable(metadataTable)
+              .addEOL();
+          }
+
+          if (checks.length) {
+            core.summary
+              .addHeading('Execution Status', 3)
+              .addTable(checksTable)
+              .addEOL();
+          }
+
+          if (artifacts.length) {
+            core.summary
+              .addHeading('Artifacts', 3)
+              .addRaw(listBlock(artifacts))
+              .addEOL()
+              .addEOL();
+          }
+
+          if (notes.length) {
+            core.summary
+              .addHeading('Notes', 3)
+              .addRaw(listBlock(notes))
+              .addEOL()
+              .addEOL();
+          }
+
+          await core.summary.write();

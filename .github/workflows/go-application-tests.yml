@@ -23,6 +23,7 @@ jobs:
           cache: true
 
       - name: Ensure Go module exists
+        id: ensure-module
         shell: bash
         run: |
           if [ ! -f go.mod ]; then
@@ -31,16 +32,26 @@ jobs:
           fi
 
       - name: Download dependencies
+        id: download-dependencies
         shell: bash
-        run: go mod download
+        run: |
+          start=$(date +%s)
+          go mod download
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Run tests
+        id: test
         shell: bash
         run: |
           mkdir -p test-results
+          start=$(date +%s)
           go test ./... -coverprofile=coverage.out | tee test-results/go-test-output.txt
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Upload test results
+        id: upload-results
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
@@ -49,3 +60,24 @@ jobs:
             coverage.out
             test-results
           if-no-files-found: ignore
+
+      - name: Render summary
+        if: ${{ always() }}
+        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@main
+        with:
+          title: 'Go Tests'
+          subtitle: 'Test execution for Go modules'
+          metadata: |
+            [
+              {"label":"Runner","value":"arc-runner-set"},
+              {"label":"Go version","value":"${{ inputs.go-version }}"}
+            ]
+          checks: |
+            [
+              {"name":"Module presence","status":"${{ steps.ensure-module.outcome }}","duration":"-","details":"go.mod required"},
+              {"name":"Download dependencies","status":"${{ steps.download-dependencies.outcome }}","duration":"${{ steps.download-dependencies.outputs.seconds }}s","details":"go mod download"},
+              {"name":"Test execution","status":"${{ steps.test.outcome }}","duration":"${{ steps.test.outputs.seconds }}s","details":"go test ./... with coverage"},
+              {"name":"Results upload","status":"${{ steps.upload-results.outcome }}","duration":"-","details":"artifact go-test-results"}
+            ]
+          artifacts: |
+            ["go-test-results"]

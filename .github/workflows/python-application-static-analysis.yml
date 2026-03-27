@@ -30,8 +30,10 @@ jobs:
             python-${{ runner.os }}-${{ inputs.python-version }}-
 
       - name: Install project dependencies
+        id: install-dependencies
         shell: bash
         run: |
+          start=$(date +%s)
           python -m pip install --upgrade pip
 
           installed_requirements='false'
@@ -60,31 +62,39 @@ jobs:
             echo 'No Python dependency manifest was found.'
             exit 1
           fi
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Audit installed packages
+        id: audit
         shell: bash
         run: |
           python -m pip install pip-audit
           pip-audit
 
       - name: Report outdated packages
+        id: outdated
         shell: bash
         run: python -m pip list --outdated
         continue-on-error: true
 
       - name: Install analysis tooling
+        id: install-tooling
         shell: bash
         run: python -m pip install ruff mypy bandit deptry
 
       - name: Verify formatting
+        id: format
         shell: bash
         run: ruff format --check .
 
       - name: Run linting
+        id: lint
         shell: bash
         run: ruff check .
 
       - name: Run type checks
+        id: typecheck
         shell: bash
         run: |
           if [ -f mypy.ini ] || [ -f .mypy.ini ] || grep -q '\[tool.mypy\]' pyproject.toml 2>/dev/null; then
@@ -95,10 +105,12 @@ jobs:
           echo 'MyPy is not configured; skipping.'
 
       - name: Run security linting
+        id: security
         shell: bash
         run: bandit -r . -x ./tests,./.venv,./build,./dist
 
       - name: Run dependency hygiene checks
+        id: dependency-hygiene
         shell: bash
         run: |
           if [ -f pyproject.toml ]; then
@@ -107,3 +119,29 @@ jobs:
           fi
 
           echo 'Deptry requires pyproject.toml; skipping.'
+
+      - name: Render summary
+        if: ${{ always() }}
+        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@main
+        with:
+          title: 'Python Static Analysis'
+          subtitle: 'Quality gate for Python applications and libraries'
+          metadata: |
+            [
+              {"label":"Runner","value":"arc-runner-set"},
+              {"label":"Python version","value":"${{ inputs.python-version }}"}
+            ]
+          checks: |
+            [
+              {"name":"Install dependencies","status":"${{ steps.install-dependencies.outcome }}","duration":"${{ steps.install-dependencies.outputs.seconds }}s","details":"project dependencies resolved"},
+              {"name":"Package audit","status":"${{ steps.audit.outcome }}","duration":"-","details":"pip-audit"},
+              {"name":"Outdated packages","status":"${{ steps.outdated.outcome }}","duration":"-","details":"advisory only"},
+              {"name":"Analysis tooling install","status":"${{ steps.install-tooling.outcome }}","duration":"-","details":"ruff, mypy, bandit, deptry"},
+              {"name":"Format","status":"${{ steps.format.outcome }}","duration":"-","details":"ruff format --check"},
+              {"name":"Lint","status":"${{ steps.lint.outcome }}","duration":"-","details":"ruff check"},
+              {"name":"Typecheck","status":"${{ steps.typecheck.outcome }}","duration":"-","details":"mypy when configured"},
+              {"name":"Security linting","status":"${{ steps.security.outcome }}","duration":"-","details":"bandit recursive scan"},
+              {"name":"Dependency hygiene","status":"${{ steps.dependency-hygiene.outcome }}","duration":"-","details":"deptry when pyproject.toml exists"}
+            ]
+          notes: |
+            ["Outdated package reporting is advisory and does not fail the workflow."]

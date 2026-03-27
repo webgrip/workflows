@@ -39,10 +39,12 @@ jobs:
             java-${{ runner.os }}-${{ inputs.java-version }}-
 
       - name: Detect Java build tool
+        id: detect-build-tool
         shell: bash
         run: |
           if [ -f './mvnw' ] || [ -f './pom.xml' ]; then
             echo 'JAVA_BUILD_TOOL=maven' >> "$GITHUB_ENV"
+            echo 'build_tool=maven' >> "$GITHUB_OUTPUT"
             if [ -f './mvnw' ]; then
               echo 'JAVA_BUILD_COMMAND=./mvnw -B -ntp' >> "$GITHUB_ENV"
             else
@@ -53,6 +55,7 @@ jobs:
 
           if [ -f './gradlew' ] || [ -f './build.gradle' ] || [ -f './build.gradle.kts' ]; then
             echo 'JAVA_BUILD_TOOL=gradle' >> "$GITHUB_ENV"
+            echo 'build_tool=gradle' >> "$GITHUB_OUTPUT"
             if [ -f './gradlew' ]; then
               echo 'JAVA_BUILD_COMMAND=./gradlew --no-daemon' >> "$GITHUB_ENV"
             else
@@ -65,8 +68,10 @@ jobs:
           exit 1
 
       - name: Run tests
+        id: test
         shell: bash
         run: |
+          start=$(date +%s)
           case "$JAVA_BUILD_TOOL" in
             maven)
               eval "$JAVA_BUILD_COMMAND test"
@@ -75,8 +80,11 @@ jobs:
               eval "$JAVA_BUILD_COMMAND test"
               ;;
           esac
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
 
       - name: Upload test reports
+        id: upload-results
         if: ${{ always() }}
         uses: actions/upload-artifact@v4
         with:
@@ -87,3 +95,24 @@ jobs:
             **/build/test-results
             **/build/reports/tests
           if-no-files-found: ignore
+
+      - name: Render summary
+        if: ${{ always() }}
+        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@main
+        with:
+          title: 'Java Tests'
+          subtitle: 'Test execution for Maven and Gradle projects'
+          metadata: |
+            [
+              {"label":"Runner","value":"arc-runner-set"},
+              {"label":"Build tool","value":"${{ steps.detect-build-tool.outputs.build_tool }}"},
+              {"label":"Java version","value":"${{ inputs.java-version }}"},
+              {"label":"Distribution","value":"${{ inputs.java-distribution }}"}
+            ]
+          checks: |
+            [
+              {"name":"Test execution","status":"${{ steps.test.outcome }}","duration":"${{ steps.test.outputs.seconds }}s","details":"maven test or gradle test"},
+              {"name":"Report upload","status":"${{ steps.upload-results.outcome }}","duration":"-","details":"artifact java-test-results"}
+            ]
+          artifacts: |
+            ["java-test-results"]
