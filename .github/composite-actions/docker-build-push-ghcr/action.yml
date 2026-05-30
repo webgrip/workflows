@@ -13,8 +13,16 @@ inputs:
   docker-tags:
     description: "One tag per line: OWNER/IMAGE[:TAG] or ghcr.io/OWNER/IMAGE[:TAG] (defaults :latest, enforces ghcr.io)"
     required: true
+  platforms:
+    description: "Target platforms (comma-separated)"
+    required: false
+    default: "linux/amd64,linux/arm64"
   docker-target:
     description: "Docker target"
+    required: false
+    default: ""
+  docker-build-args:
+    description: "Docker build args (newline-separated KEY=VALUE entries)"
     required: false
     default: ""
 
@@ -104,10 +112,12 @@ runs:
       with:
         context: ${{ inputs.docker-context }}
         file: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
-        platforms: linux/amd64,linux/arm64
+        platforms: ${{ inputs.platforms }}
         push: true
         tags: |
           ${{ steps.normalized-tags.outputs.tags }}
         target: ${{ inputs.docker-target }}
+        build-args: |
+          ${{ inputs.docker-build-args }}
         cache-from: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }}
         cache-to: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }},mode=max,compression=zstd

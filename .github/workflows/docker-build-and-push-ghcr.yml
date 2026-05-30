@@ -19,9 +19,19 @@ on:
         type: string
         description: 'Docker tags'
         required: true
+      platforms:
+        type: string
+        description: 'Target platforms (comma-separated)'
+        required: false
+        default: 'linux/amd64,linux/arm64'
       docker-target:
         type: string
         description: 'Docker target'
+        required: false
+        default: ''
+      docker-build-args:
+        type: string
+        description: 'Docker build args (newline-separated KEY=VALUE entries)'
         required: false
         default: ''
 
@@ -36,12 +46,14 @@ jobs:
     name: "Docker Build and Push (GHCR)"
     runs-on: arc-runner-set
     steps:
-      - uses: webgrip/workflows/.github/composite-actions/docker-build-push-ghcr@main
+      - uses: ./.github/composite-actions/docker-build-push-ghcr
         with:
           docker-context: ${{ inputs.docker-context }}
           docker-file: ${{ inputs.docker-file }}
           docker-tags: ${{ inputs.docker-tags }}
+          platforms: ${{ inputs.platforms }}
           docker-target: ${{ inputs.docker-target }}
+          docker-build-args: ${{ inputs.docker-build-args }}
         env:
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}
