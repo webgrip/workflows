@@ -4,6 +4,12 @@ on:
       GHCR_TOKEN:
         description: 'Token with packages:write. Optional; defaults to GITHUB_TOKEN.'
         required: false
+      DOCKERHUB_USERNAME:
+        description: 'Docker Hub username for authenticated pulls (avoids rate limits).'
+        required: false
+      DOCKERHUB_TOKEN:
+        description: 'Docker Hub PAT or password for authenticated pulls.'
+        required: false
     inputs:
       docker-context:
         type: string
@@ -57,3 +63,5 @@ jobs:
         env:
           GHCR_USERNAME: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
