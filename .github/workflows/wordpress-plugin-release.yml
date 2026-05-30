@@ -1,0 +1,241 @@
+name: 'WordPress Plugin Release'
+
+on:
+  workflow_call:
+    inputs:
+      release-type:
+        description: 'The type of release (passed through to semantic-release)'
+        required: false
+        type: string
+      use-bot-to-commit:
+        description: 'Whether to use the GitHub App bot to commit changes'
+        required: false
+        default: false
+        type: boolean
+      plugin-slugs:
+        description: 'One or more WordPress.org plugin slugs (newline or comma separated)'
+        required: true
+        type: string
+      tag-prefix:
+        description: 'Tag prefix used for releases (semantic-release defaults to v). Use an empty string for tags like 1.2.3'
+        required: false
+        type: string
+        default: 'v'
+      checkout-ref:
+        description: 'Git ref to deploy (e.g., refs/tags/v1.2.3). Defaults to refs/tags/v<version>'
+        required: false
+        type: string
+        default: ''
+      assets-dir:
+        description: 'Directory containing WordPress.org assets (icons, banners, screenshots)'
+        required: false
+        type: string
+        default: '.wordpress-org'
+      build-dir:
+        description: 'Directory to deploy from instead of repo root. Use false to disable.'
+        required: false
+        type: string
+        default: 'false'
+      pre-deploy-script:
+        description: 'Optional shell script to run before deployment (e.g., npm build, composer install)'
+        required: false
+        type: string
+        default: ''
+      generate-zip:
+        description: 'Generate ZIP(s) (via 10up/action-wordpress-plugin-deploy in dry-run mode) and upload to the GitHub Release'
+        required: false
+        type: boolean
+        default: true
+      deploy-to-wporg:
+        description: 'Whether to deploy to WordPress.org SVN (requires WPORG secrets unless dry-run is true)'
+        required: false
+        type: boolean
+        default: true
+      dry-run:
+        description: 'Skip the final SVN commit step (for debugging)'
+        required: false
+        type: boolean
+        default: false
+      release-tag:
+        description: 'GitHub Release tag to upload ZIP(s) to. Defaults to <tag-prefix><version>'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      WEBGRIP_CI_APP_ID:
+        description: 'GitHub App ID (numeric)'
+        required: false
+      WEBGRIP_CI_APP_PRIVATE_KEY:
+        description: 'GitHub App private key (PEM)'
+        required: false
+      WPORG_SVN_USERNAME:
+        description: 'WordPress.org SVN username'
+        required: true
+      WPORG_SVN_PASSWORD:
+        description: 'WordPress.org SVN password (or application password)'
+        required: true
+    outputs:
+      version:
+        description: 'The released version'
+        value: ${{ jobs.release.outputs.version }}
+
+jobs:
+  prepare:
+    name: 'Prepare'
+    runs-on: arc-runner-set
+    outputs:
+      slugs: ${{ steps.slugs.outputs.json }}
+    steps:
+      - name: 'Build slug matrix'
+        id: slugs
+        shell: bash
+        env:
+          RAW_SLUGS: ${{ inputs.plugin-slugs }}
+        run: |
+          set -euo pipefail
+
+          json=$(python - <<'PY'
+          import json
+          import os
+          import re
+
+          raw = os.environ.get('RAW_SLUGS', '')
+          parts = re.split(r"[\n,]+", raw)
+          slugs = [p.strip() for p in parts if p.strip()]
+
+          if not slugs:
+              raise SystemExit('No plugin slugs provided in inputs.plugin-slugs')
+
+          print(json.dumps(slugs))
+          PY
+          )
+
+          echo "json=$json" >> "$GITHUB_OUTPUT"
+
+  release:
+    name: 'Release'
+    uses: webgrip/workflows/.github/workflows/semantic-release.yml@main
+    with:
+      release-type: ${{ inputs.release-type }}
+      use-bot-to-commit: ${{ inputs.use-bot-to-commit }}
+    secrets:
+      WEBGRIP_CI_APP_ID: ${{ secrets.WEBGRIP_CI_APP_ID }}
+      WEBGRIP_CI_APP_PRIVATE_KEY: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
+
+  distribute:
+    name: 'Distribute'
+    runs-on: arc-runner-set
+    needs: [prepare, release]
+    if: >
+      always()
+      && needs.release.result == 'success'
+      && needs.release.outputs.version != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin_slug: ${{ fromJSON(needs.prepare.outputs.slugs) }}
+    steps:
+      - name: 'Check out repository'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.checkout-ref != '' && inputs.checkout-ref || format('refs/tags/{0}{1}', inputs.tag-prefix, needs.release.outputs.version) }}
+
+      - name: 'Pre-deploy'
+        if: ${{ inputs.pre-deploy-script != '' }}
+        shell: bash
+        run: ${{ inputs.pre-deploy-script }}
+
+      - name: 'Package ZIP (dry-run)'
+        id: wporg-zip
+        if: ${{ inputs.generate-zip }}
+        uses: 10up/action-wordpress-plugin-deploy@stable
+        with:
+          dry-run: true
+          generate-zip: true
+        env:
+          SLUG: ${{ matrix.plugin_slug }}
+          ASSETS_DIR: ${{ inputs.assets-dir }}
+          BUILD_DIR: ${{ inputs.build-dir }}
+
+      - name: 'Collect ZIP'
+        id: zip
+        if: ${{ inputs.generate-zip }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          zip_path='${{ steps.wporg-zip.outputs.zip-path }}'
+          if [[ -z "$zip_path" ]]; then
+            echo 'zip-path output was empty; cannot collect ZIP.'
+            exit 1
+          fi
+          if [[ ! -f "$zip_path" ]]; then
+            echo "ZIP file does not exist at: $zip_path"
+            exit 1
+          fi
+
+          mkdir -p wporg-zips
+          dest="wporg-zips/${{ matrix.plugin_slug }}-${{ needs.release.outputs.version }}.zip"
+          mv "$zip_path" "$dest" 2>/dev/null || cp "$zip_path" "$dest"
+
+          echo "path=$dest" >> "$GITHUB_OUTPUT"
+
+      - name: 'Upload ZIP artifact'
+        if: ${{ inputs.generate-zip }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: wporg-plugin-${{ matrix.plugin_slug }}-zip
+          path: ${{ steps.zip.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: 'Validate WP.org credentials'
+        if: ${{ inputs.deploy-to-wporg && inputs.dry-run == false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${{ secrets.WPORG_SVN_USERNAME }}" || -z "${{ secrets.WPORG_SVN_PASSWORD }}" ]]; then
+            echo 'WPORG_SVN_USERNAME and WPORG_SVN_PASSWORD are required when deploy-to-wporg is true and dry-run is false.'
+            exit 1
+          fi
+
+      - name: 'Deploy to WordPress.org'
+        if: ${{ inputs.deploy-to-wporg }}
+        uses: 10up/action-wordpress-plugin-deploy@stable
+        with:
+          dry-run: ${{ inputs.dry-run }}
+          generate-zip: false
+        env:
+          SVN_USERNAME: ${{ secrets.WPORG_SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.WPORG_SVN_PASSWORD }}
+          SLUG: ${{ matrix.plugin_slug }}
+          ASSETS_DIR: ${{ inputs.assets-dir }}
+          BUILD_DIR: ${{ inputs.build-dir }}
+
+  upload:
+    name: 'Upload Release Assets'
+    runs-on: arc-runner-set
+    needs: [release, distribute]
+    if: >
+      always()
+      && needs.release.result == 'success'
+      && needs.distribute.result == 'success'
+      && inputs.generate-zip == true
+      && inputs.dry-run == false
+      && inputs.deploy-to-wporg == true
+    permissions:
+      contents: write
+    steps:
+      - name: 'Download ZIP artifacts'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wporg-plugin-*-zip
+          merge-multiple: true
+          path: wporg-zips
+
+      - name: 'Upload ZIP(s) to GitHub Release'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release-tag != '' && inputs.release-tag || format('{0}{1}', inputs.tag-prefix, needs.release.outputs.version) }}
+          files: wporg-zips/**/*.zip

@@ -311,6 +311,64 @@ Automated semantic versioning and releases using conventional commits.
 **Outputs:**
 - `version` - Generated version number
 
+**WordPress packaging (optional):**
+This workflow/composite action also supports `@semantic-release/wordpress` (https://github.com/semantic-release/wordpress) for packaging WordPress plugins/themes during `semantic-release`.
+
+Minimal example `.releaserc.json` for a WordPress plugin that uploads the generated ZIP(s) to the GitHub Release:
+
+```json
+{
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    ["@semantic-release/wordpress", {
+      "type": "plugin",
+      "slug": "my-plugin",
+      "withAssets": true,
+      "withReadme": true,
+      "withVersionFile": true
+    }],
+    ["@semantic-release/github", {
+      "assets": [
+        {"path": "/tmp/wp-release/my-plugin.zip"},
+        {"path": "/tmp/wp-release/assets.zip", "optional": true},
+        {"path": "/tmp/wp-release/readme.txt", "optional": true},
+        {"path": "/tmp/wp-release/version.txt", "optional": true}
+      ]
+    }]
+  ]
+}
+```
+
+#### `wordpress-plugin-release-distribute.yml`
+Deploys a tagged release to the WordPress.org plugin repository (SVN).
+
+**Inputs:**
+- `version` - Released version (used to checkout `refs/tags/v<version>` by default)
+- `tag-prefix` - Tag prefix (default: `v`)
+- `plugin-slugs` - One or more plugin slugs (newline or comma separated)
+- `generate-zip` - Generate ZIP artifact(s) (dry-run packaging)
+- `upload-to-github-release` - Upload ZIP(s) to the GitHub Release tag (default: false)
+- `release-tag` - Override the tag name used for uploading (defaults to `<tag-prefix><version>`)
+- `deploy-to-wporg` - Deploy to WordPress.org SVN (default: true)
+
+**Secrets:**
+- `WPORG_SVN_USERNAME` (required when deploying)
+- `WPORG_SVN_PASSWORD` (required when deploying)
+
+#### `wordpress-plugin-release.yml`
+Runs semantic-release and then deploys the release tag to the WordPress.org plugin repository (SVN). Optionally uploads generated ZIP(s) to the GitHub Release.
+
+**Inputs:**
+- `plugin-slugs` - One or more plugin slugs (newline or comma separated)
+- `tag-prefix` - Tag prefix (default: `v`)
+- `generate-zip` - Generate ZIP(s) and upload to the GitHub Release (default: true)
+- `deploy-to-wporg` - Deploy to WordPress.org SVN (default: true)
+
+**Secrets:**
+- `WPORG_SVN_USERNAME` (required when deploying)
+- `WPORG_SVN_PASSWORD` (required when deploying)
+
 ## 🔧 Composite Actions
 
 ### `docker-build-push`
