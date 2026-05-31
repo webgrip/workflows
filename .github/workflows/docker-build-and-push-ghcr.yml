@@ -50,7 +50,7 @@ permissions:
 jobs:
   build:
     name: "Docker Build and Push (GHCR)"
-    runs-on: arc-runner-set-heavy
+    runs-on: [homelab, heavy]
     steps:
       - uses: webgrip/workflows/.github/composite-actions/docker-build-push-ghcr@main
         with:
