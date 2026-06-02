@@ -67,7 +67,7 @@ runs:
           @semantic-release/commit-analyzer \
           @semantic-release/exec \
           @semantic-release/git \
-          @semantic-release/github \
+          "@semantic-release/github@^10" \
           semantic-release-helm3 \
           @semantic-release/release-notes-generator \
           semantic-release-github-actions-tags \
