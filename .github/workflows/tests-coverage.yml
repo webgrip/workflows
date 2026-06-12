@@ -8,7 +8,7 @@ jobs:
     name: '${{ matrix.testsuite }}'
     runs-on: arc-runner-set
     container:
-      image: php:8.2-cli
+      image: php:8.5-cli
     strategy:
       fail-fast: false
       matrix:
