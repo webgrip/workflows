@@ -1,0 +1,21 @@
+name: 'Publish Release'
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: "The released version"
+        value: ${{ jobs.release-publish.outputs.version }}
+    secrets:
+      FORGEJO_TOKEN:
+        description: "Forgejo CI bot token (repo/org-scoped) for semantic-release"
+        required: true
+
+jobs:
+  release-publish:
+    name: 'Publish'
+    uses: webgrip/workflows/.forgejo/workflows/semantic-release.yml@main
+    with:
+      use-bot-to-commit: true
+    secrets:
+      FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}

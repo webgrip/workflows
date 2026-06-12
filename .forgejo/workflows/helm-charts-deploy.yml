@@ -1,0 +1,67 @@
+name: "[Action] Deploy Helm Template(s)"
+
+run-name: "Deploy Helm Template(s)"
+
+on:
+  workflow_call:
+    inputs:
+      registry:
+        description: 'Target registry host for OCI chart dependencies, e.g. harbor.<domain>. Leave empty to skip registry login.'
+        required: false
+        type: string
+        default: ''
+      paths:
+        description: 'List of paths in JSON array format. e.g.: [{"path": "ops/helm/010-cloudflare-dns/cloudflare-dns-token"}, ...]'
+        required: true
+        type: string
+    secrets:
+      DIGITAL_OCEAN_API_KEY:
+        description: 'Digital Ocean API Key'
+        required: true
+      DOCKER_USERNAME:
+        description: 'Docker Username'
+        required: true
+      DOCKER_TOKEN:
+        description: 'Docker Token'
+        required: true
+      SOPS_AGE_KEY:
+        description: 'SOPS Age private key'
+        required: false
+      REGISTRY_USERNAME:
+        description: 'Registry username (e.g. Harbor robot account) for OCI chart deps.'
+        required: false
+      REGISTRY_TOKEN:
+        description: 'Registry password/token (e.g. Harbor robot token) for OCI chart deps.'
+        required: false
+
+  workflow_dispatch:
+    inputs:
+      registry:
+        description: 'Target registry host for OCI chart dependencies, e.g. harbor.<domain>. Leave empty to skip registry login.'
+        required: false
+        type: string
+        default: ''
+      paths:
+        description: 'List of paths in JSON array format. e.g.: [{"path": "ops/secrets/010-cloudflare-dns/cloudflare-dns-token"}, ...]'
+        required: true
+        type: string
+
+jobs:
+  deploy-helm:
+    name: "Deploy Helm Charts"
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(inputs.paths) }}
+    uses: webgrip/workflows/.forgejo/workflows/helm-chart-deploy.yml@main
+    with:
+      registry: ${{ inputs.registry }}
+      environment: "staging"
+      path: ${{ matrix.path }}
+    secrets:
+      DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY || '' }}
+      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME || '' }}
+      REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN || '' }}

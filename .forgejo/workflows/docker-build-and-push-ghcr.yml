@@ -1,0 +1,74 @@
+on:
+  workflow_call:
+    secrets:
+      REGISTRY_USERNAME:
+        description: 'Registry username (e.g. Harbor robot account) with push access.'
+        required: true
+      REGISTRY_TOKEN:
+        description: 'Registry password/token (e.g. Harbor robot token) with push access.'
+        required: true
+      DOCKER_USERNAME:
+        description: 'Docker Hub username for authenticated base-image pulls (avoids rate limits).'
+        required: false
+      DOCKER_TOKEN:
+        description: 'Docker Hub PAT or password for authenticated base-image pulls.'
+        required: false
+    inputs:
+      registry:
+        type: string
+        description: 'Target registry host, e.g. harbor.<domain> (Harbor) or the Forgejo registry host.'
+        required: true
+      docker-context:
+        type: string
+        description: 'Docker context'
+        required: true
+        default: '.'
+      docker-file:
+        type: string
+        description: 'Dockerfile path from the context'
+        required: true
+        default: 'Dockerfile'
+      docker-tags:
+        type: string
+        description: 'Docker tags'
+        required: true
+      platforms:
+        type: string
+        description: 'Target platforms (comma-separated)'
+        required: false
+        default: 'linux/amd64,linux/arm64'
+      docker-target:
+        type: string
+        description: 'Docker target'
+        required: false
+        default: ''
+      docker-build-args:
+        type: string
+        description: 'Docker build args (newline-separated KEY=VALUE entries)'
+        required: false
+        default: ''
+
+run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "Docker Build and Push (Registry)"
+    runs-on: [homelab, heavy]
+    steps:
+      - uses: webgrip/workflows/.forgejo/composite-actions/docker-build-push-ghcr@main
+        with:
+          registry: ${{ inputs.registry }}
+          docker-context: ${{ inputs.docker-context }}
+          docker-file: ${{ inputs.docker-file }}
+          docker-tags: ${{ inputs.docker-tags }}
+          platforms: ${{ inputs.platforms }}
+          docker-target: ${{ inputs.docker-target }}
+          docker-build-args: ${{ inputs.docker-build-args }}
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}

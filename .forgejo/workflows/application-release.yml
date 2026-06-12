@@ -1,0 +1,48 @@
+name: 'Release'
+
+on:
+  workflow_call:
+    outputs:
+      version:
+        description: "The released version"
+        value: ${{ jobs.release.outputs.version }}
+    secrets:
+      FORGEJO_TOKEN:
+        description: "Forgejo CI bot token (repo/org-scoped) for semantic-release"
+        required: true
+      DOCKER_USERNAME:
+        description: "Docker Hub username"
+        required: true
+      DOCKER_TOKEN:
+        description: "Docker Hub access token or password"
+        required: true
+
+jobs:
+  release:
+    name: 'Release'
+    uses: webgrip/workflows/.forgejo/workflows/semantic-release.yml@main
+    with:
+      use-bot-to-commit: true
+    secrets:
+      FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+
+  # Forgejo: app images are distributed via the Docker Hub variant (docker-build-and-push.yml),
+  # faithful to the GitHub setup. To push to Harbor instead, switch to docker-build-and-push-ghcr.yml
+  # and thread the `registry` input + REGISTRY_USERNAME/REGISTRY_TOKEN secrets through.
+  distribute:
+    name: 'Distribute'
+    needs: [ release ]
+    if: >
+      always()
+      && needs.release.result == 'success'
+      && needs.release.outputs.version != ''
+    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push.yml@main
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+    with:
+      docker-context: '.'
+      docker-file: './ops/docker/application/Dockerfile'
+      docker-tags: |
+        ${{github.repository_owner}}/${{ github.event.repository.name }}:latest
+        ${{github.repository_owner}}/${{ github.event.repository.name }}:${{ needs.release.outputs.version }}

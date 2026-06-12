@@ -1,0 +1,40 @@
+name: 'Tests'
+
+on:
+  workflow_call:
+
+jobs:
+  tests-run: #TODO I think we can have 3 jobs, one for each testsuite. Use action is the step, to run the tests on php 8.2-cli on docker
+    name: '${{ matrix.testsuite }}'
+    runs-on: arc-runner-set
+    container:
+      image: php:8.2-cli
+    strategy:
+      fail-fast: false
+      matrix:
+        testsuite: [ 'Unit', 'Integration', 'Functional' ]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: vendor
+          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
+
+      - name: 'Run ${{ matrix.testsuite }} tests'
+        run: |
+          case "${{ matrix.testsuite }}" in
+            "Unit")
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite unit --fail-on-risky 
+              ;;
+            "Integration")
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite integration --fail-on-risky --exclude-group=db 
+              ;;
+            "Functional")
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite functional --fail-on-risky || true
+              ;;
+            *)
+              echo "Unknown testsuite"
+              exit 1
+              ;;
+          esac

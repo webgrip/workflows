@@ -1,0 +1,41 @@
+name: '[Call] Validate Helm Chart'
+
+on:
+  workflow_call:
+    secrets:
+      REGISTRY_USERNAME:
+        description: 'Registry username (e.g. Harbor robot account) with push access.'
+        required: true
+      REGISTRY_TOKEN:
+        description: 'Registry password/token (e.g. Harbor robot token) with push access.'
+        required: true
+    inputs:
+      registry:
+        description: 'Target registry host, e.g. harbor.<domain> (Harbor) or the Forgejo registry host.'
+        type: string
+        required: true
+      paths:
+        description: 'A matrix of paths to Helm charts to validate'
+        type: string
+        required: true
+      version:
+        description: 'Version of the Helm chart'
+        type: string
+        required: true
+
+jobs:
+  helm-charts-push:
+    name: 'Push Helm Charts'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(inputs.paths) }}
+    uses: webgrip/workflows/.forgejo/workflows/helm-chart-push.yml@main
+    with:
+      registry: ${{ inputs.registry }}
+      path: ${{ matrix.path }}
+      name: ${{ matrix.basename }}
+      version: ${{ inputs.version }}
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+      REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}

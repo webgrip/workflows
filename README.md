@@ -59,6 +59,31 @@ jobs:
     uses: webgrip/workflows/.github/workflows/static-analysis.yml@main
 ```
 
+## 🌲 GitHub and Forgejo: two parallel trees
+
+This repository ships **two independent copies** of the library so the same workflows can run on both
+platforms without one breaking the other (see [ADR 002](docs/adrs/0002-forgejo-actions-parity.md)):
+
+| Platform | Consume from | Notes |
+|----------|--------------|-------|
+| **GitHub** | `webgrip/workflows/.github/workflows/<x>.yml@main` | Frozen GitHub Actions definitions. |
+| **Forgejo** | `webgrip/workflows/.forgejo/workflows/<x>.yml@main` | Forgejo-adapted copies (action pinning, Harbor registry, Forgejo auth). |
+
+The two paths never collide. A Forgejo consumer uses the **`.forgejo/`** path; everything else about the
+calling syntax is the same:
+
+```yaml
+jobs:
+  tests:
+    uses: webgrip/workflows/.forgejo/workflows/go-application-tests.yml@main
+  static-analysis:
+    uses: webgrip/workflows/.forgejo/workflows/go-application-static-analysis.yml@main
+```
+
+> **Requires Forgejo v15.0+** (cross-repository `workflow_call`). The `webgrip/workflows` repo must be
+> **public** on the Forgejo instance. The Forgejo port is being rolled out tier by tier — consult
+> `.forgejo/workflows/` for the workflows ported so far.
+
 ## 📦 Available Workflows
 
 ### Build & Dependencies

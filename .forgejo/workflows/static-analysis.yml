@@ -1,0 +1,60 @@
+name: 'Static Analysis'
+
+on:
+  workflow_call:
+
+jobs:
+  static-analysis-run:
+    name: 'Static Analysis (PHPStan, PHPMD, PHPCS, Rector)'
+    runs-on: arc-runner-set
+    container:
+        image: php:8.2-cli
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        with:
+          path: vendor
+          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
+
+      - name: Run phpcs
+        run: ./vendor/bin/phpcs -q -s --standard=./phpcs.xml ./src --report=full --exclude=Generic.Files.LineLength
+        continue-on-error: true
+
+      - name: Run phpcs (Full)
+        run: ./vendor/bin/phpcs -q -s --standard=./phpcs.xml ./src --report=full --ignore-annotations
+        if: always()
+        continue-on-error: true
+
+      - name: Run phpmd
+        run: ./vendor/bin/phpmd --strict --color ./src text ./phpmd.xml
+        if: always()
+        continue-on-error: true
+
+      - name: Run phpstan
+        run: ./vendor/bin/phpstan --configuration=./phpstan.neon analyse ./src --level 8 --error-format=table
+        if: always()
+        continue-on-error: true
+
+      - name: Run psalm
+        run: php ./psalm.phar --config=psalm.xml --output-format=compact --generate-json-map=psalm-output.json
+        if: always()
+        continue-on-error: true
+
+      - name: Run rector
+        run: ./vendor/bin/rector --config=./rector.php process ./src --dry-run
+        if: always()
+        continue-on-error: true
+
+  composer-normalize:
+    name: 'Composer Normalize'
+    runs-on: arc-runner-set
+    container:
+        image: composer:2.8.5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: vendor
+          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
+      - run: composer normalize

@@ -1,0 +1,46 @@
+name: '[Call] Push Helm Chart'
+
+on:
+  workflow_call:
+    secrets:
+      REGISTRY_USERNAME:
+        description: 'Registry username (e.g. Harbor robot account) with push access.'
+        required: true
+      REGISTRY_TOKEN:
+        description: 'Registry password/token (e.g. Harbor robot token) with push access.'
+        required: true
+    inputs:
+      registry:
+        description: 'Target registry host, e.g. harbor.<domain> (Harbor) or the Forgejo registry host.'
+        type: string
+        required: true
+      path:
+        description: 'Path to the Helm chart you wish to validate'
+        type: string
+        required: true
+      name:
+        description: 'Name of the Helm chart'
+        type: string
+        required: true
+      version:
+        description: 'Version of the Helm chart'
+        type: string
+        required: true
+
+jobs:
+  helm-chart-push:
+    name: 'Push Helm Chart'
+    runs-on: arc-runner-set
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }} # Make sure we are on the tagged versioned commit
+      - uses: azure/setup-helm@v4
+      # validate again?
+      - run: |
+          echo "${{ secrets.REGISTRY_TOKEN }}" | helm registry login ${{ inputs.registry }} --username "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+      - run: |
+          export HELM_EXPERIMENTAL_OCI=1
+      - run: |
+          helm package ${{ inputs.path }}
+          helm push ./${{inputs.name}}-${{inputs.version}}.tgz oci://${{ inputs.registry }}/${{ github.repository }}

@@ -1,0 +1,123 @@
+name: 'Go Static Analysis'
+
+on:
+  workflow_call:
+    inputs:
+      go-version:
+        description: 'Go version to install'
+        required: false
+        default: '1.24'
+        type: string
+
+jobs:
+  static-analysis-run:
+    name: 'Static Analysis (fmt, build, vet, golangci-lint, govulncheck, tidy)'
+    runs-on: arc-runner-set
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ inputs.go-version }}
+          cache: true
+
+      - name: Ensure Go module exists
+        id: ensure-module
+        shell: bash
+        run: |
+          if [ ! -f go.mod ]; then
+            echo 'go.mod was not found.'
+            exit 1
+          fi
+
+      - name: Download dependencies
+        id: download-dependencies
+        shell: bash
+        run: |
+          start=$(date +%s)
+          go mod download
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
+
+      - name: Verify formatting
+        id: format
+        shell: bash
+        run: |
+          mapfile -t go_files < <(find . -type f -name '*.go' -not -path './vendor/*')
+
+          if [ "${#go_files[@]}" -eq 0 ]; then
+            echo 'No Go files were found.'
+            exit 1
+          fi
+
+          unformatted="$(gofmt -l "${go_files[@]}")"
+          if [ -n "$unformatted" ]; then
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Build packages
+        id: build
+        shell: bash
+        run: |
+          start=$(date +%s)
+          go build ./...
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
+
+      - name: Run go vet
+        id: vet
+        shell: bash
+        run: go vet ./...
+
+      - id: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+      - name: Run vulnerability scan
+        id: vulnerability-scan
+        shell: bash
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+      - name: Verify go.mod and go.sum are tidy
+        id: tidy
+        shell: bash
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
+      - name: Report outdated modules
+        id: outdated
+        shell: bash
+        run: go list -u -m all
+        continue-on-error: true
+
+      - name: Render summary
+        if: ${{ always() }}
+        uses: webgrip/workflows/.forgejo/composite-actions/workflow-status-summary@main
+        with:
+          title: 'Go Static Analysis'
+          subtitle: 'Quality gate for Go modules'
+          metadata: |
+            [
+              {"label":"Runner","value":"arc-runner-set"},
+              {"label":"Go version","value":"${{ inputs.go-version }}"}
+            ]
+          checks: |
+            [
+              {"name":"Module presence","status":"${{ steps.ensure-module.outcome }}","duration":"-","details":"go.mod required"},
+              {"name":"Download dependencies","status":"${{ steps.download-dependencies.outcome }}","duration":"${{ steps.download-dependencies.outputs.seconds }}s","details":"go mod download"},
+              {"name":"Format","status":"${{ steps.format.outcome }}","duration":"-","details":"gofmt -l"},
+              {"name":"Build","status":"${{ steps.build.outcome }}","duration":"${{ steps.build.outputs.seconds }}s","details":"go build ./..."},
+              {"name":"go vet","status":"${{ steps.vet.outcome }}","duration":"-","details":"static checks"},
+              {"name":"golangci-lint","status":"${{ steps.golangci-lint.outcome }}","duration":"-","details":"aggregated linter suite"},
+              {"name":"Vulnerability scan","status":"${{ steps.vulnerability-scan.outcome }}","duration":"-","details":"govulncheck"},
+              {"name":"Module tidy","status":"${{ steps.tidy.outcome }}","duration":"-","details":"go.mod and go.sum drift check"},
+              {"name":"Outdated modules","status":"${{ steps.outdated.outcome }}","duration":"-","details":"advisory only"}
+            ]
+          notes: |
+            ["Outdated module reporting is advisory and does not fail the workflow."]

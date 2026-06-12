@@ -1,0 +1,372 @@
+name: "[Call] Bootstrap repository"
+
+on:
+  workflow_call:
+    inputs:
+      repo_name:
+        description: "Name of the new repository"
+        type: string
+        required: true
+      delete_files:
+        description: "Comma-separated list of files/paths to delete"
+        type: string
+        required: false
+        default: ""
+      replace_values:
+        description: "YAML mapping of find->replace (also used as oldPath->newPath for renames)"
+        type: string
+        required: false
+        default: ""
+      force_commit_files:
+        description: "Comma-separated list of files/paths to force commit"
+        type: string
+        required: false
+        default: ""
+      configure_pages:
+        description: "(Deprecated on Forgejo) GitHub Pages has no analog; this input is ignored"
+        type: boolean
+        required: false
+        default: false
+    outputs:
+      repository_url:
+        description: "URL of the newly bootstrapped repository"
+        value: ${{ jobs.bootstrap-repo.outputs.repository_url }}
+    secrets:
+      # Forgejo: replaced GitHub App (WEBGRIP_CI_CLIENT_ID / WEBGRIP_CI_APP_PRIVATE_KEY)
+      # token minting with a single scoped Forgejo CI bot token.
+      FORGEJO_TOKEN:
+        description: "Forgejo CI bot token used for checkout/push and API calls"
+        required: true
+      OPENAI_API_KEY:
+        description: "OpenAI API key"
+        required: false
+      OPENAI_ORG_ID:
+        description: "OpenAI Organization ID"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  issues: write
+
+concurrency:
+  group: bootstrap-${{ github.repository_id }}-${{ inputs.repo_name }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  bootstrap-repo:
+    name: "Bootstrap repository"
+    runs-on: arc-runner-set
+    outputs:
+      repository_url: ${{ steps.compute-urls.outputs.repository_url }}
+
+    env:
+      ORG: ${{ github.repository_owner }}
+      NEW_REPO: ${{ inputs.repo_name }}
+      # Forgejo: bot login name comes from a repo/org variable; used for the push remote and git identity.
+      APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
+      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+
+    steps:
+      # Forgejo: dropped the GitHub App installation-token minting step (no analog).
+      # All authenticated operations below use secrets.FORGEJO_TOKEN against the Gitea-compatible REST API.
+
+      - name: Check out new repo
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.ORG }}/${{ env.NEW_REPO }}
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ secrets.FORGEJO_TOKEN }}
+
+      - name: Delete files (if provided)
+        if: ${{ inputs.delete_files != '' }}
+        run: |
+          set -euo pipefail
+          input="${{ inputs.delete_files }}"
+          input="${input//$'\n'/,}"
+          IFS=',' read -ra files <<< "$input"
+          for file in "${files[@]}"; do
+            f="$(echo "$file" | xargs)"
+            [[ -z "$f" ]] && continue
+            # Block workflow deletions (guard always active)
+            if [[ "$f" == .github/workflows* || "$f" == .forgejo/workflows* ]]; then
+              echo "Skipping deletion in workflows dir (guard active): $f"
+              continue
+            fi
+            echo "Deleting: $f"
+            rm -rf -- "$f"
+          done
+
+      # Forgejo: this step uses only the filesystem (fs/path) and no GitHub REST calls,
+      # so the github-script step is kept verbatim. The github-token is removed because
+      # octokit is unused here. core.* and fs are provided by forgejo-runner's github-script.
+      - name: Replace values across repository (if provided)
+        if: ${{ inputs.replace_values != '' }}
+        uses: actions/github-script@v8
+        env:
+          REPLACE_VALUES_YAML: ${{ inputs.replace_values }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const root = process.env.GITHUB_WORKSPACE || process.cwd();
+            const yamlRaw = (process.env.REPLACE_VALUES_YAML || '').trim();
+            const allowWF = false;
+            function parseSimpleYamlMap(yaml) {
+              const map = {};
+              for (const rawLine of yaml.split(/\r?\n/)) {
+                const line = rawLine.trim();
+                if (!line || line.startsWith('#')) continue;
+                const idx = line.indexOf(':');
+                if (idx < 0) continue;
+                let key = line.slice(0, idx).trim();
+                let val = line.slice(idx + 1).trim();
+                const unquote = (s) =>
+                  (s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))
+                    ? s.slice(1, -1)
+                    : s;
+                key = unquote(key);
+                val = unquote(val);
+                map[key] = val;
+              }
+              return map;
+            }
+
+            const replacements = parseSimpleYamlMap(yamlRaw);
+            const shouldSkip = (p) => {
+              const rel = path.relative(root, p).replace(/\\/g, '/');
+              if (rel === '.git' || rel.startsWith('.git/')) return true;
+              if (!allowWF && (rel === '.github/workflows' || rel.startsWith('.github/workflows/'))) return true;
+              if (!allowWF && (rel === '.forgejo/workflows' || rel.startsWith('.forgejo/workflows/'))) return true;
+              return false;
+            };
+
+            function walk(dir) {
+              if (shouldSkip(dir)) return [];
+              let out = [];
+              let ents = [];
+              try { ents = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+              for (const e of ents) {
+                const full = path.join(dir, e.name);
+                try { if (fs.lstatSync(full).isSymbolicLink()) continue; } catch {}
+                if (shouldSkip(full)) continue;
+                if (e.isDirectory()) out = out.concat(walk(full));
+                else if (e.isFile()) out.push(full);
+              }
+              return out;
+            }
+
+            function replaceInFile(file) {
+              // tiny guard: skip large files
+              try {
+                const { size } = fs.statSync(file);
+                if (size > 5 * 1024 * 1024) return;
+              } catch {}
+              let content;
+              try { content = fs.readFileSync(file, 'utf8'); } catch { return; }
+              for (const [search, replace] of Object.entries(replacements)) {
+                if (!search) continue;
+                content = content.split(search).join(String(replace));
+              }
+              try { fs.writeFileSync(file, content, 'utf8'); } catch {}
+            }
+
+            const files = walk(root);
+            for (const file of files) replaceInFile(file);
+
+      # Forgejo: filesystem-only github-script (no GitHub REST), kept verbatim minus the github-token.
+      - name: Rename / merge paths based on replace_values keys (if provided)
+        if: ${{ inputs.replace_values != '' }}
+        uses: actions/github-script@v8
+        env:
+          REPLACE_VALUES_YAML: ${{ inputs.replace_values }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const root = process.env.GITHUB_WORKSPACE || process.cwd();
+            const yamlRaw = (process.env.REPLACE_VALUES_YAML || '').trim();
+            const allowWF = false;
+
+            function parseSimpleYamlMap(yaml) {
+              const map = {};
+              for (const rawLine of yaml.split(/\r?\n/)) {
+                const line = rawLine.trim();
+                if (!line || line.startsWith('#')) continue;
+                const idx = line.indexOf(':');
+                if (idx < 0) continue;
+                let key = line.slice(0, idx).trim();
+                let val = line.slice(idx + 1).trim();
+                const unquote = (s) =>
+                  (s.startsWith('"') && s.endsWith('"')) || (s.startsWith("'") && s.endsWith("'"))
+                    ? s.slice(1, -1)
+                    : s;
+                key = unquote(key);
+                val = unquote(val);
+                map[key] = val;
+              }
+              return map;
+            }
+
+            const replacements = parseSimpleYamlMap(yamlRaw);
+            const looksLikePath = (s) => typeof s === 'string' && (s.includes('/') || s.startsWith('.') || s.startsWith('_'));
+            const isBlocked = (rel) => {
+              if (rel === '.git' || rel.startsWith('.git/')) return true;
+              if (!allowWF && (rel === '.github/workflows' || rel.startsWith('.github/workflows/'))) return true;
+              if (!allowWF && (rel === '.forgejo/workflows' || rel.startsWith('.forgejo/workflows/'))) return true;
+              return false;
+            };
+
+            function movePath(src, dest) {
+              const relSrc = path.relative(root, src).replace(/\\/g, '/');
+              const relDst = path.relative(root, dest).replace(/\\/g, '/');
+              if (isBlocked(relSrc) || isBlocked(relDst)) return;
+              if (!fs.existsSync(src)) return;
+
+              const destDir = path.dirname(dest);
+              fs.mkdirSync(destDir, { recursive: true });
+
+              if (fs.existsSync(dest)) {
+                const statSrc = fs.statSync(src);
+                const statDst = fs.statSync(dest);
+                if (statSrc.isDirectory() && statDst.isDirectory()) {
+                  for (const entry of fs.readdirSync(src)) {
+                    movePath(path.join(src, entry), path.join(dest, entry));
+                  }
+                  fs.rmSync(src, { recursive: true, force: true });
+                  return;
+                } else {
+                  fs.rmSync(dest, { recursive: true, force: true });
+                }
+              }
+              fs.renameSync(src, dest);
+            }
+
+            for (const [search, replace] of Object.entries(replacements)) {
+              if (!looksLikePath(search) || !looksLikePath(replace)) continue;
+              const src = path.join(root, search);
+              const dst = path.join(root, replace);
+              if (src === dst) continue;
+              movePath(src, dst);
+            }
+
+      # Forgejo: replaced the github-script "GET /users/{username}" octokit lookup with a
+      # curl call to the Gitea-compatible users API to resolve the bot's id/email.
+      - name: Resolve bot noreply email
+        id: bot-email
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -euo pipefail
+          slug="${APP_BOT_SLUG:-webgrip-ci}"
+          host="${FORGEJO_INSTANCE_URL#*://}"
+          name_out="$slug"
+          email_out="${slug}@noreply.${host}"
+
+          # Forgejo API: GET ${FORGEJO_INSTANCE_URL}/api/v1/users/{username}
+          # Returns the bot user's numeric id / login / email; used to build a stable git identity.
+          if user_json="$(curl -fsSL \
+              -H "Authorization: token ${FORGEJO_TOKEN}" \
+              -H "Accept: application/json" \
+              "${FORGEJO_INSTANCE_URL}/api/v1/users/${slug}")"; then
+            uid="$(echo "$user_json" | jq -r '.id // empty')"
+            login="$(echo "$user_json" | jq -r '.login // empty')"
+            femail="$(echo "$user_json" | jq -r '.email // empty')"
+            [[ -n "$login" ]] && name_out="$login"
+            # Prefer the account email when present, else a deterministic noreply form.
+            if [[ -n "$femail" ]]; then
+              email_out="$femail"
+            elif [[ -n "$uid" ]]; then
+              email_out="${uid}+${login:-$slug}@noreply.${host}"
+            fi
+          else
+            echo "Warning: could not resolve bot user '${slug}' via Forgejo API; using fallback identity."
+          fi
+
+          echo "name=${name_out}" >> "$GITHUB_OUTPUT"
+          echo "email=${email_out}" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate git remote for push
+        env:
+          # Forgejo: bot push remote is https://<bot>:<FORGEJO_TOKEN>@<forgejo-host>/<owner>/<repo>.git
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -euo pipefail
+          host="${FORGEJO_INSTANCE_URL#*://}"
+          bot="${APP_BOT_SLUG:-webgrip-ci}"
+          git remote set-url origin "https://${bot}:${FORGEJO_TOKEN}@${host}/${ORG}/${NEW_REPO}.git"
+
+      - name: Commit and push changes to main (if any)
+        run: |
+          set -euo pipefail
+          git config user.name  "${{ steps.bot-email.outputs.name }}"
+          git config user.email "${{ steps.bot-email.outputs.email }}"
+          git add -A
+
+          # If no staged changes yet, optionally force-create or touch files listed in force_commit_files
+          if git diff --cached --quiet; then
+            fc_list="${{ inputs.force_commit_files }}"
+            if [[ -n "${fc_list// }" ]]; then
+              IFS=',' read -ra fc_files <<< "$fc_list"
+              for file in "${fc_files[@]}"; do
+                f="$(echo "$file" | xargs)"
+                [[ -z "$f" ]] && continue
+                # Respect workflow guard: do not modify workflow files
+                if [[ "$f" == .github/workflows* || "$f" == .forgejo/workflows* ]]; then
+                  echo "Skipping force touch in workflows dir (guard active): $f"
+                  continue
+                fi
+                if [[ -e "$f" ]]; then
+                  echo "# force touch $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$f" || true
+                else
+                  mkdir -p "$(dirname "$f")"
+                  echo "# bootstrap force placeholder $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$f" || true
+                fi
+              done
+              git add -A
+            fi
+          fi
+
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+          else
+            git commit -m "chore(init): personalize ${NEW_REPO}"
+            git push origin HEAD:main
+          fi
+
+      - name: Compute repository URL output
+        id: compute-urls
+        run: |
+          set -euo pipefail
+          echo "repository_url=${FORGEJO_INSTANCE_URL}/${ORG}/${NEW_REPO}" >> "$GITHUB_OUTPUT"
+
+      # Forgejo: dropped GitHub Pages configuration (gh-pages branch + /repos/.../pages API,
+      # no analog). The homepage PATCH that previously pointed at the Pages URL is replaced by
+      # a best-effort homepage PATCH against the Forgejo repo API, gated on the same opt-in input.
+      - name: Set repository homepage (best-effort, opt-in)
+        if: ${{ inputs.configure_pages }}
+        continue-on-error: true
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -euo pipefail
+          homepage="${FORGEJO_INSTANCE_URL}/${ORG}/${NEW_REPO}"
+          # Forgejo API: PATCH ${FORGEJO_INSTANCE_URL}/api/v1/repos/{owner}/{repo}
+          # Sets the repository "website"/homepage field (Gitea EditRepoOption.website).
+          curl -fsSL -X PATCH \
+            -H "Authorization: token ${FORGEJO_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            "${FORGEJO_INSTANCE_URL}/api/v1/repos/${ORG}/${NEW_REPO}" \
+            -d "$(jq -n --arg w "$homepage" '{website: $w}')" \
+            && echo "Set repository homepage to ${homepage}" \
+            || echo "Warning: failed to set repository homepage (continuing)."

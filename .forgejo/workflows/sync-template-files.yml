@@ -1,0 +1,295 @@
+name: '[Workflow] Sync Template Files to Application Repos'
+
+on:
+  workflow_call:
+    inputs:
+      topic:
+        type: string
+        description: 'Forgejo topic to filter repositories (default: application)'
+        required: false
+        default: 'application'
+      dry_run:
+        type: boolean
+        description: 'Perform a dry run without making changes'
+        required: false
+        default: false
+      paths:
+        type: string
+        description: 'Comma-separated list of file paths to sync'
+        required: false
+        default: ''
+    secrets:
+      # Forgejo: replaced secrets.GITHUB_TOKEN (used by gh CLI / gh api graphql) with a scoped Forgejo CI bot token.
+      FORGEJO_TOKEN:
+        description: 'Forgejo CI bot token used for repo enumeration, clone/push and PR creation'
+        required: true
+
+jobs:
+  sync-files:
+    name: 'Sync Template Files'
+    runs-on: arc-runner-set
+
+    env:
+      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+      APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
+
+    steps:
+      - name: Checkout template repository
+        uses: actions/checkout@v5
+        with:
+          token: ${{ secrets.FORGEJO_TOKEN }}
+          fetch-depth: 1
+
+      # Forgejo: dropped Node.js setup + GitHub CLI install. The original used gh CLI and
+      # `gh api graphql`, which target the GitHub host. We use plain curl against the Forgejo REST API
+      # (Gitea-compatible) instead, so only curl + jq (preinstalled on the runner) are needed.
+
+      # Forgejo: replaced `gh api graphql` org-repo enumeration (which loaded
+      # .github/workflows/find_repos_query.graphql) with paginated REST calls.
+      # NOTE: find_repos_query.graphql is GitHub-GraphQL-only and has no Forgejo equivalent;
+      # it is intentionally not referenced here and is not ported into .forgejo/.
+      - name: Find repositories with topic
+        id: find-repos
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          TOPIC: ${{ inputs.topic }}
+          ORG: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          echo "Finding repositories with topic: $TOPIC in org: $ORG"
+
+          # Forgejo API: GET ${FORGEJO_INSTANCE_URL}/api/v1/orgs/{org}/repos?page=N&limit=50
+          # Paginate through all org repositories. The list endpoint does not filter by topic,
+          # so we collect names here and filter per-repo via the topics endpoint below.
+          repos=()
+          page=1
+          while :; do
+            resp="$(curl -fsSL \
+              -H "Authorization: token ${FORGEJO_TOKEN}" \
+              -H "Accept: application/json" \
+              "${FORGEJO_INSTANCE_URL}/api/v1/orgs/${ORG}/repos?page=${page}&limit=50")"
+            count="$(echo "$resp" | jq 'length')"
+            [[ "$count" == "0" ]] && break
+            while IFS= read -r name; do
+              [[ -n "$name" ]] && repos+=("$name")
+            done < <(echo "$resp" | jq -r '.[].name')
+            # Stop once the last (short) page is consumed.
+            (( count < 50 )) && break
+            page=$(( page + 1 ))
+          done
+
+          matched=()
+          for repo in "${repos[@]:-}"; do
+            [[ -z "$repo" ]] && continue
+            # Forgejo API: GET ${FORGEJO_INSTANCE_URL}/api/v1/repos/{owner}/{repo}/topics
+            # Returns {"topics": [...]}. Keep only repos that carry the requested topic.
+            topics_json="$(curl -fsSL \
+              -H "Authorization: token ${FORGEJO_TOKEN}" \
+              -H "Accept: application/json" \
+              "${FORGEJO_INSTANCE_URL}/api/v1/repos/${ORG}/${repo}/topics" || echo '{"topics":[]}')"
+            if echo "$topics_json" | jq -e --arg t "$TOPIC" '.topics // [] | index($t)' >/dev/null; then
+              matched+=("$repo")
+            fi
+          done
+
+          if (( ${#matched[@]} == 0 )); then
+            echo "No repositories found with topic: $TOPIC"
+            echo "repos=[]" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found repositories:"
+            printf '%s\n' "${matched[@]}"
+            repos_json="$(printf '%s\n' "${matched[@]}" | jq -R . | jq -s -c .)"
+            echo "repos=$repos_json" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync to repositories
+        if: steps.find-repos.outputs.repos != '[]'
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          ORG: ${{ github.repository_owner }}
+          TEMPLATE_REPO: ${{ github.repository }}
+          TEMPLATE_SHA: ${{ github.sha }}
+          REPOS_JSON: ${{ steps.find-repos.outputs.repos }}
+        run: |
+          set -euo pipefail
+          REPOS="$REPOS_JSON"
+          echo "Syncing to repositories: $REPOS"
+
+          host="${FORGEJO_INSTANCE_URL#*://}"
+          bot="${APP_BOT_SLUG:-webgrip-ci}"
+
+          # Create sync script
+          cat > sync_script.sh << 'EOF'
+          #!/bin/bash
+          set -e
+
+          REPO_NAME=$1
+          DRY_RUN=$2
+
+          echo "Processing repository: $REPO_NAME"
+
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "DRY RUN: Would sync files to $ORG/$REPO_NAME"
+            exit 0
+          fi
+
+          # Clone the target repository from the Forgejo host using the bot token.
+          TEMP_DIR=$(mktemp -d)
+          cd "$TEMP_DIR"
+
+          echo "Cloning $ORG/$REPO_NAME..."
+          # Forgejo: bot clone/push remote https://<bot>:<FORGEJO_TOKEN>@<forgejo-host>/<owner>/<repo>.git
+          # (replaces `gh repo clone`, which targets the GitHub host).
+          git clone "https://${BOT}:${FORGEJO_TOKEN}@${HOST}/${ORG}/${REPO_NAME}.git" .
+
+          # Determine the default branch (fall back to main).
+          BASE_BRANCH="$(git symbolic-ref --short HEAD 2>/dev/null || echo main)"
+
+          BRANCH_NAME="feat/sync-template-files-$(date +%Y%m%d-%H%M%S)"
+          git checkout -b "$BRANCH_NAME"
+
+          CHANGES_MADE=false
+
+          # Copy files from template
+          declare -A FILES_TO_SYNC=(
+            [".editorconfig"]=".editorconfig"
+            [".gitignore"]=".gitignore"
+            [".releaserc.json"]=".releaserc.json"
+            [".vscode/settings.json"]=".vscode/settings.json"
+            [".forgejo/workflows/on_docs_change.yml"]=".forgejo/workflows/on_docs_change.yml"
+            [".forgejo/workflows/on_source_change.yml"]=".forgejo/workflows/on_source_change.yml"
+            [".forgejo/workflows/on_workflow_files_change.yml"]=".forgejo/workflows/on_workflow_files_change.yml"
+          )
+
+          for SOURCE_FILE in "${!FILES_TO_SYNC[@]}"; do
+            DEST_FILE="${FILES_TO_SYNC[$SOURCE_FILE]}"
+
+            if [ -f "$GITHUB_WORKSPACE/$SOURCE_FILE" ]; then
+              echo "Syncing $SOURCE_FILE -> $DEST_FILE"
+
+              # Create destination directory if it doesn't exist
+              DEST_DIR=$(dirname "$DEST_FILE")
+              if [ "$DEST_DIR" != "." ]; then
+                mkdir -p "$DEST_DIR"
+              fi
+
+              # Check if file exists and compare content
+              if [ -f "$DEST_FILE" ]; then
+                if ! cmp -s "$GITHUB_WORKSPACE/$SOURCE_FILE" "$DEST_FILE"; then
+                  echo "Updating $DEST_FILE (content differs)"
+                  cp "$GITHUB_WORKSPACE/$SOURCE_FILE" "$DEST_FILE"
+                  CHANGES_MADE=true
+                else
+                  echo "Skipping $DEST_FILE (no changes)"
+                fi
+              else
+                echo "Creating new file $DEST_FILE"
+                cp "$GITHUB_WORKSPACE/$SOURCE_FILE" "$DEST_FILE"
+                CHANGES_MADE=true
+              fi
+            else
+              echo "Warning: Source file $SOURCE_FILE not found in template"
+            fi
+          done
+
+          if [ "$CHANGES_MADE" = true ]; then
+            echo "Changes detected, creating pull request..."
+
+            git add .
+            git config user.name "Template Sync Bot"
+            # Forgejo: deterministic noreply identity on the Forgejo host (no GitHub host).
+            git config user.email "${BOT}@noreply.${HOST}"
+            git commit -m "feat: sync template files from $TEMPLATE_REPO@${TEMPLATE_SHA}"
+
+            git push origin "$BRANCH_NAME"
+
+            # Forgejo API: POST ${FORGEJO_INSTANCE_URL}/api/v1/repos/{owner}/{repo}/pulls
+            # Gitea-compatible PR creation (replaces `gh pr create`). Body fields: head/base/title/body.
+            PR_BODY="This automated pull request syncs template files from the application template repository.
+
+          ## Changes
+          This PR updates the following template files:
+          - Workflow files (\`.forgejo/workflows/\`)
+          - Configuration files (\`.editorconfig\`, \`.gitignore\`, \`.releaserc.json\`)
+          - VSCode settings (\`.vscode/settings.json\`)
+
+          ## Conflict Handling
+          **Important**: Template files take precedence over local modifications. If you have made customizations to any of these files, they will be overwritten by the template version.
+
+          **Before merging**:
+          1. Review each changed file carefully
+          2. Identify any repository-specific customizations that need to be preserved
+          3. Either modify this PR or make follow-up changes to restore necessary customizations
+
+          ## Review Instructions
+          Please review the changes to ensure they are compatible with your application-specific requirements.
+
+          ## Source
+          Template Repository: \`$TEMPLATE_REPO\`
+          Template Commit: \`${TEMPLATE_SHA}\`
+
+          ## Automated Sync
+          This PR was created automatically by the template sync workflow. If you don't want to receive these updates, remove the \`application\` topic from your repository."
+
+            pr_payload="$(jq -n \
+              --arg head "$BRANCH_NAME" \
+              --arg base "$BASE_BRANCH" \
+              --arg title "feat: sync template files from $TEMPLATE_REPO" \
+              --arg body "$PR_BODY" \
+              '{head: $head, base: $base, title: $title, body: $body}')"
+
+            curl -fsSL -X POST \
+              -H "Authorization: token ${FORGEJO_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              "${FORGEJO_INSTANCE_URL}/api/v1/repos/${ORG}/${REPO_NAME}/pulls" \
+              -d "$pr_payload"
+
+            echo "Pull request created successfully"
+          else
+            echo "No changes detected, skipping pull request creation"
+          fi
+
+          cd /
+          rm -rf "$TEMP_DIR"
+          EOF
+
+          chmod +x sync_script.sh
+
+          # Process each repository. Export the values the sync script needs.
+          export ORG TEMPLATE_REPO TEMPLATE_SHA FORGEJO_TOKEN FORGEJO_INSTANCE_URL
+          export HOST="$host" BOT="$bot"
+          echo "$REPOS" | jq -r '.[]' | while read -r repo; do
+            echo "Processing repository: $repo"
+            ./sync_script.sh "$repo" "$DRY_RUN" || {
+              echo "Error processing $repo, continuing with next repository..."
+              continue
+            }
+          done
+
+      - name: Summary
+        if: always()
+        env:
+          TOPIC: ${{ inputs.topic }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          REPOS_JSON: ${{ steps.find-repos.outputs.repos }}
+        run: |
+          if [ "$REPOS_JSON" = '[]' ]; then
+            echo "## Summary" >> "$GITHUB_STEP_SUMMARY"
+            echo "No repositories found with topic: $TOPIC" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "To enable template sync for a repository, add the \`application\` topic to it." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "## Summary" >> "$GITHUB_STEP_SUMMARY"
+            echo "Template sync completed for repositories with topic: $TOPIC" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Processed Repositories:" >> "$GITHUB_STEP_SUMMARY"
+            echo "$REPOS_JSON" | jq -r '.[]' | while read -r repo; do
+              echo "- $repo" >> "$GITHUB_STEP_SUMMARY"
+            done
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "_This was a dry run - no actual changes were made._" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi

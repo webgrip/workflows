@@ -1,0 +1,78 @@
+name: "[Action] Semantic Release"
+description: "Use semantic-release to automate versioning and releases"
+
+inputs:
+  release-type:
+    description: "The type of release"
+    required: false
+  token:
+    description: "Forgejo token to use for checkout/push and releases"
+    required: false
+
+outputs:
+  version:
+    description: "The new version number"
+    value: ${{ steps.semantic-release.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Check out repo
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0 # semantic-release requires all commits/tags
+        token: ${{ inputs.token || github.token }}
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci || true
+
+    - name: Build
+      shell: bash
+      run: npm run build || true
+
+    - name: Set semantic-release config file
+      id: set-config
+      shell: bash
+      run: |
+        if [[ -n "${{ inputs.release-type }}" ]]; then
+          if [[ -f ".releaserc.${{ inputs.release-type }}.js" ]]; then
+            echo "release_config=--extends=./.releaserc.${{ inputs.release-type }}.js" >> "$GITHUB_OUTPUT"
+          elif [[ -f ".releaserc.${{ inputs.release-type }}.json" ]]; then
+            echo "release_config=--extends=./.releaserc.${{ inputs.release-type }}.json" >> "$GITHUB_OUTPUT"
+          fi
+        else
+          if [[ -f ".releaserc.js" ]]; then
+            echo "release_config=--config=./.releaserc.js" >> "$GITHUB_OUTPUT"
+          elif [[ -f ".releaserc.json" ]]; then
+            echo "release_config=--config=./.releaserc.json" >> "$GITHUB_OUTPUT"
+          fi
+        fi
+
+    - name: Run semantic-release
+      shell: bash
+      id: semantic-release
+      env:
+        GITHUB_OUTPUT: $GITHUB_OUTPUT
+        # Forgejo: @saithodev/semantic-release-gitea targets the Gitea-compatible API.
+        GITEA_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+        GITEA_TOKEN: ${{ inputs.token || github.token }}
+      run: |
+        npm install --no-save \
+          semantic-release \
+          @semantic-release/changelog \
+          @semantic-release/commit-analyzer \
+          @semantic-release/exec \
+          @semantic-release/git \
+          @saithodev/semantic-release-gitea \
+          semantic-release-helm3 \
+          @semantic-release/release-notes-generator \
+          conventional-changelog-conventionalcommits
+        # Forgejo: dropped semantic-release-github-actions-tags (GitHub-Actions-specific, no analog)
+
+        npx semantic-release ${{ steps.set-config.outputs.release_config }}

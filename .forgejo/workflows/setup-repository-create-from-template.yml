@@ -1,0 +1,210 @@
+name: "[Call] Create repository from template"
+
+on:
+  workflow_call:
+    inputs:
+      template_owner:
+        description: "Owner of the template repository"
+        type: string
+        required: true
+      template_repo:
+        description: "Name of the template repository"
+        type: string
+        required: true
+      new_repo_name:
+        description: "Name of the new repository to be created"
+        type: string
+        required: true
+      visibility:
+        description: "Visibility of the new repository"
+        type: string
+        required: true
+        default: "private"
+      topics:
+        description: "Comma-separated list of topics to apply to the new repository"
+        type: string
+        required: false
+        default: ""
+    secrets:
+      # Forgejo: replaced GitHub App token minting with a single scoped Forgejo CI bot token.
+      FORGEJO_TOKEN:
+        description: "Forgejo CI bot token used for API calls"
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  create-repo-from-template:
+    name: "Create repository"
+    runs-on: arc-runner-set
+
+    env:
+      ORG: ${{ github.repository_owner }}
+      NEW_REPO: ${{ inputs.new_repo_name }}
+      VISIBILITY: ${{ inputs.visibility }}
+      TOPICS: ${{ inputs.topics }}
+      TEMPLATE_OWNER: ${{ inputs.template_owner }}
+      TEMPLATE_REPO: ${{ inputs.template_repo }}
+      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+
+    steps:
+      # Forgejo: dropped the GitHub App installation-token minting step (no analog).
+      # All API calls below use secrets.FORGEJO_TOKEN against the Gitea-compatible REST API.
+
+      - name: Create repo from template + topics + merge options
+        id: gen
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ "${VISIBILITY}" == "public" ]]; then is_private=false; else is_private=true; fi
+
+          # Forgejo API: POST ${FORGEJO_INSTANCE_URL}/api/v1/repos/{template_owner}/{template_repo}/generate
+          # Gitea-compatible generate-from-template. git_content=true mirrors include_all_branches:false
+          # (default branch only). owner/name/private map directly from the GitHub generate options.
+          gen_body="$(jq -n \
+            --arg owner "$ORG" \
+            --arg name "$NEW_REPO" \
+            --argjson private "$is_private" \
+            '{owner: $owner, name: $name, private: $private, git_content: true, default_branch: "main"}')"
+
+          repo_json="$(curl -fsSL -X POST \
+            -H "Authorization: token ${FORGEJO_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            "${FORGEJO_INSTANCE_URL}/api/v1/repos/${TEMPLATE_OWNER}/${TEMPLATE_REPO}/generate" \
+            -d "$gen_body")"
+          echo "Generated repo: $(echo "$repo_json" | jq -r '.full_name // "(unknown)"')"
+
+          # Build the topics list; always ensure the trunk-based-development topic is present.
+          mapfile -t topic_arr < <(echo "$TOPICS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' || true)
+          has_forced=false
+          for t in "${topic_arr[@]:-}"; do
+            [[ "$t" == "trunk-based-development" ]] && has_forced=true
+          done
+          [[ "$has_forced" == false ]] && topic_arr+=("trunk-based-development")
+
+          topics_body="$(printf '%s\n' "${topic_arr[@]}" | jq -R . | jq -s '{topics: .}')"
+
+          # Forgejo API: PUT ${FORGEJO_INSTANCE_URL}/api/v1/repos/{owner}/{repo}/topics
+          # Gitea topics API expects {"topics": [...]} (note: key is "topics", not GitHub's "names").
+          curl -fsSL -X PUT \
+            -H "Authorization: token ${FORGEJO_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -H "Accept: application/json" \
+            "${FORGEJO_INSTANCE_URL}/api/v1/repos/${ORG}/${NEW_REPO}/topics" \
+            -d "$topics_body"
+          echo "Applied topics: $(printf '%s ' "${topic_arr[@]}")"
+
+          # Forgejo API: PATCH ${FORGEJO_INSTANCE_URL}/api/v1/repos/{owner}/{repo}
+          # Apply merge/collaboration options that have a Gitea analog. Best-effort: a failure here
+          # (e.g. an org policy) must not abort the whole bootstrap, so we do not pass -f.
+          # Mapping GitHub -> Gitea EditRepoOption:
+          #   allow_auto_merge        -> allow_manual_merge (Gitea has no direct auto-merge toggle; kept best-effort)
+          #   allow_merge_commit      -> allow_merge_commits
+          #   allow_rebase_merge      -> allow_rebase / allow_rebase_explicit
+          #   allow_squash_merge      -> allow_squash_merge
+          #   delete_branch_on_merge  -> default_delete_branch_after_merge
+          #   has_issues/has_wiki     -> has_issues / has_wiki
+          #   has_projects            -> has_projects
+          #   is_template             -> template
+          settings_body="$(jq -n '{
+            allow_merge_commits: false,
+            allow_rebase: true,
+            allow_rebase_explicit: true,
+            allow_squash_merge: true,
+            default_delete_branch_after_merge: false,
+            has_issues: true,
+            has_projects: false,
+            has_wiki: false,
+            template: false
+          }')"
+
+          if curl -fsSL -X PATCH \
+              -H "Authorization: token ${FORGEJO_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              "${FORGEJO_INSTANCE_URL}/api/v1/repos/${ORG}/${NEW_REPO}" \
+              -d "$settings_body"; then
+            echo "Applied repository merge options for ${ORG}/${NEW_REPO}."
+          else
+            echo "Warning: failed to apply some repository settings (continuing)."
+          fi
+
+          # Forgejo: dropped security_and_analysis hardening phases (GitHub Advanced Security:
+          # advanced_security / code_security / secret_scanning / push protection / AI detection) — no analog.
+
+      # Forgejo: dropped "Disable Copilot Agent Firewall" step (GitHub Actions repo-variables API for
+      # COPILOT_AGENT_FIREWALL_ENABLED / GitHub Copilot-specific settings) — no analog.
+
+      - name: Wait for initial default branch
+        id: wait-default-branch
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          timeout=180
+          sleep_s=2
+          max_sleep=10
+
+          # Forgejo API: GET ${FORGEJO_INSTANCE_URL}/api/v1/repos/{owner}/{repo}
+          # and GET .../branches/{branch} — poll until the generated repo has its default branch + a commit.
+          while (( $(date +%s) - start < timeout )); do
+            repo_json="$(curl -fsSL \
+              -H "Authorization: token ${FORGEJO_TOKEN}" \
+              -H "Accept: application/json" \
+              "${FORGEJO_INSTANCE_URL}/api/v1/repos/${ORG}/${NEW_REPO}" || true)"
+            branch="$(echo "${repo_json:-}" | jq -r '.default_branch // "main"')"
+
+            sha=""
+            if branch_json="$(curl -fsSL \
+                -H "Authorization: token ${FORGEJO_TOKEN}" \
+                -H "Accept: application/json" \
+                "${FORGEJO_INSTANCE_URL}/api/v1/repos/${ORG}/${NEW_REPO}/branches/${branch}" 2>/dev/null)"; then
+              sha="$(echo "$branch_json" | jq -r '.commit.id // empty')"
+            fi
+
+            if [[ -n "$sha" ]]; then
+              echo "initial_branch=${branch}" >> "$GITHUB_OUTPUT"
+              echo "initial_sha=${sha}" >> "$GITHUB_OUTPUT"
+              echo "Default branch ${branch} ready at ${sha}."
+              exit 0
+            fi
+
+            sleep "$sleep_s"
+            sleep_s=$(( sleep_s * 16 / 10 ))
+            (( sleep_s > max_sleep )) && sleep_s=$max_sleep
+          done
+          echo "Timed out waiting for the new repo default branch and first commit." >&2
+          exit 1
+
+      # Forgejo: this github-script step uses ONLY core.summary / core.setOutput (no GitHub REST),
+      # so it is kept. The repository URL points at the Forgejo instance.
+      - name: Return pertinent information
+        if: >
+          ${{ always() }}
+        uses: actions/github-script@v8
+        env:
+          FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+        with:
+          script: |
+            const repoUrl = `${process.env.FORGEJO_INSTANCE_URL}/${process.env.ORG}/${process.env.NEW_REPO}`;
+
+            core.summary
+              .addHeading('Repository Overview', 2)
+              .addEOL()
+              .addRaw(`Repository Name: ${process.env.NEW_REPO}`)
+              .addEOL()
+              .addRaw(`Repository Owner: ${process.env.ORG}`)
+              .addEOL()
+              .addRaw(`Repository URL: ${repoUrl}`)
+              .addSeparator();
+
+            await core.summary.write();
+
+            core.setOutput('repository_url', repoUrl);
+            core.info(`Repository URL: ${repoUrl}`);

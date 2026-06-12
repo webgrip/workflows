@@ -1,0 +1,238 @@
+on:
+  workflow_call:
+    secrets:
+      # Forgejo: replaced GitHub App (WEBGRIP_CI_CLIENT_ID / WEBGRIP_CI_APP_PRIVATE_KEY)
+      # token minting with a single scoped Forgejo CI bot token.
+      FORGEJO_TOKEN:
+        description: "Forgejo CI bot token used for checkout and issues API calls"
+        required: true
+      OPENAI_API_KEY:
+        description: "OpenAI API key (direct OpenAI inference, replacing GitHub Models)"
+        required: true
+      OPENAI_ORG_ID:
+        description: "OpenAI Organization ID"
+        required: false
+    inputs:
+      prompt-repository:
+        type: string
+        description: 'The repository in which the prompt.yml file is located'
+        required: true
+        default: 'webgrip/agentic-workflows'
+      prompt-path:
+        type: string
+        description: 'The path to the prompt.yml file in the repository (relative to root)'
+        required: true
+      issue-title:
+        type: string
+        description: 'The title of the issue to create'
+        required: true
+      target-repository:
+        type: string
+        description: 'The repository in which to create the issue'
+        required: true
+      openai-model:
+        type: string
+        default: gpt-4o-mini
+        required: false
+      max-tokens:
+        type: number
+        default: 16000
+        required: false
+
+
+jobs:
+  ai-inference:
+    name: "AI Inference (single prompt file)"
+    runs-on: arc-runner-set
+    # Forgejo: dropped models:read (GitHub Models replaced by direct OpenAI)
+    permissions:
+      contents: read
+    env:
+      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+    steps:
+      # Forgejo: dropped the GitHub App installation-token minting step (no analog).
+      # Checkout below authenticates with secrets.FORGEJO_TOKEN.
+
+      - name: Checkout prompt repository
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ inputs.prompt-repository }}
+          path: __prompt-repo
+          fetch-depth: 1
+          persist-credentials: false
+          token: ${{ secrets.FORGEJO_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      # Forgejo: replaced actions/ai-inference@v1 (GitHub Models at models.github.ai) with a
+      # direct OpenAI Chat Completions call. The prompt-file content is sent as the system/user
+      # message and the model output is written to a response file, preserving the original
+      # artifact-based flow (save -> upload -> download -> create issue).
+      - name: Run AI Inference for prompt file (direct OpenAI)
+        id: inference
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_ORG_ID: ${{ secrets.OPENAI_ORG_ID }}
+          OPENAI_MODEL: ${{ inputs.openai-model }}
+          MAX_TOKENS: ${{ inputs.max-tokens }}
+          PROMPT_FILE: ./__prompt-repo/${{ inputs.prompt-path }}
+          INPUT_APP_NAME: ${{ inputs.issue-title }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! -f "${PROMPT_FILE}" ]]; then
+            echo "Prompt file not found: ${PROMPT_FILE}" >&2
+            exit 1
+          fi
+
+          # The original action passed the raw prompt-file plus an "input" block
+          # (APP_NAME=<issue-title>). We mirror that: the prompt file is the system
+          # instruction and the input block is the user message.
+          prompt_content="$(cat "${PROMPT_FILE}")"
+          user_input="APP_NAME=${INPUT_APP_NAME}"
+
+          # OpenAI API: POST https://api.openai.com/v1/chat/completions
+          # Header: Authorization: Bearer ${OPENAI_API_KEY} (+ optional OpenAI-Organization)
+          # Body: {"model","max_tokens","messages":[{role:system,...},{role:user,...}]}
+          request_body="$(jq -n \
+            --arg model "${OPENAI_MODEL}" \
+            --argjson max_tokens "${MAX_TOKENS}" \
+            --arg system "${prompt_content}" \
+            --arg user "${user_input}" \
+            '{
+              model: $model,
+              max_tokens: $max_tokens,
+              messages: [
+                {role: "system", content: $system},
+                {role: "user", content: $user}
+              ]
+            }')"
+
+          org_header=()
+          if [[ -n "${OPENAI_ORG_ID:-}" ]]; then
+            org_header=(-H "OpenAI-Organization: ${OPENAI_ORG_ID}")
+          fi
+
+          response="$(curl -fsSL \
+            -H "Authorization: Bearer ${OPENAI_API_KEY}" \
+            -H "Content-Type: application/json" \
+            "${org_header[@]}" \
+            -X POST \
+            "https://api.openai.com/v1/chat/completions" \
+            -d "${request_body}")"
+
+          # Extract the assistant message content (the model's markdown body).
+          content="$(echo "${response}" | jq -r '.choices[0].message.content // empty')"
+          if [[ -z "${content}" ]]; then
+            echo "OpenAI response did not contain a message; full response:" >&2
+            echo "${response}" >&2
+            exit 1
+          fi
+
+          # Preserve the original contract: expose a response-file path that downstream
+          # steps copy into the artifact (was steps.inference.outputs['response-file']).
+          mkdir -p inference-out
+          response_file="inference-out/response.md"
+          printf '%s' "${content}" > "${response_file}"
+          echo "response-file=${response_file}" >> "$GITHUB_OUTPUT"
+
+      - name: Save AI response
+        id: save_response
+        run: |
+          mkdir -p out
+          fname=$(basename "${{ inputs.prompt-path }}" | sed 's/\.[^.]*$//').md
+          echo "fname=$fname" >> $GITHUB_OUTPUT
+          cp "${{ steps.inference.outputs.response-file }}" out/$fname
+
+      - name: Upload AI body artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-body-${{ steps.save_response.outputs.fname }}
+          path: out/${{ steps.save_response.outputs.fname }}
+
+  bootstrap-issue:
+    name: "Bootstrap repository issue"
+    runs-on: arc-runner-set
+    needs: ai-inference
+    env:
+      ORG: ${{ github.repository_owner }}
+      NEW_REPO: ${{ inputs.issue-title }}
+      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+    steps:
+      # Forgejo: dropped the GitHub App installation-token minting step (no analog).
+      # The issues API calls below use secrets.FORGEJO_TOKEN.
+
+      - name: Download AI body artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: ai-body-*
+          path: ai-bodies
+          merge-multiple: true
+
+      # Forgejo: replaced the actions/github-script issue create/update (octokit
+      # github.rest.issues.*) with curl against the Gitea-compatible Forgejo issues API.
+      #   GET   ${FORGEJO_INSTANCE_URL}/api/v1/repos/{owner}/{repo}/issues  (find by title)
+      #   POST  ${FORGEJO_INSTANCE_URL}/api/v1/repos/{owner}/{repo}/issues  (create)
+      #   PATCH ${FORGEJO_INSTANCE_URL}/api/v1/repos/{owner}/{repo}/issues/{index}  (update body)
+      - name: Create issue from AI body file
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          TARGET_REPOSITORY: ${{ inputs.target-repository }}
+          ISSUE_TITLE: ${{ inputs.issue-title }}
+        run: |
+          set -euo pipefail
+
+          owner="${TARGET_REPOSITORY%%/*}"
+          repo="${TARGET_REPOSITORY##*/}"
+          title="${ISSUE_TITLE}"
+
+          # Find the first .md file in ai-bodies
+          body_file="$(find ai-bodies -maxdepth 1 -name '*.md' -type f | head -n 1)"
+          if [[ -z "${body_file}" ]]; then
+            echo "No AI body file found" >&2
+            exit 1
+          fi
+          body="$(cat "${body_file}")"
+
+          api="${FORGEJO_INSTANCE_URL}/api/v1/repos/${owner}/${repo}/issues"
+
+          # Check for an existing (non-PR) issue with the same title.
+          existing="$(curl -fsSL \
+            -H "Authorization: token ${FORGEJO_TOKEN}" \
+            -H "Accept: application/json" \
+            "${api}?state=all&type=issues&limit=100")"
+
+          match="$(echo "${existing}" | jq -c \
+            --arg title "${title}" \
+            'map(select(.pull_request == null and .title == $title)) | .[0] // empty')"
+
+          if [[ -z "${match}" ]]; then
+            # Create a new issue.
+            curl -fsSL -X POST \
+              -H "Authorization: token ${FORGEJO_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              "${api}" \
+              -d "$(jq -n --arg title "${title}" --arg body "${body}" '{title: $title, body: $body}')" \
+              >/dev/null
+            echo "Created issue '${title}' in ${owner}/${repo}."
+          else
+            number="$(echo "${match}" | jq -r '.number')"
+            current_body="$(echo "${match}" | jq -r '.body // ""')"
+            # Update only if the body changed (trimmed comparison, matching original).
+            if [[ "$(printf '%s' "${current_body}" | sed -e 's/[[:space:]]*$//')" != "$(printf '%s' "${body}" | sed -e 's/[[:space:]]*$//')" ]]; then
+              curl -fsSL -X PATCH \
+                -H "Authorization: token ${FORGEJO_TOKEN}" \
+                -H "Content-Type: application/json" \
+                -H "Accept: application/json" \
+                "${api}/${number}" \
+                -d "$(jq -n --arg body "${body}" '{body: $body}')" \
+                >/dev/null
+              echo "Updated issue #${number} '${title}' in ${owner}/${repo}."
+            else
+              echo "Issue '${title}' already up to date in ${owner}/${repo}; no change."
+            fi
+          fi

@@ -1,0 +1,46 @@
+on:
+  workflow_call:
+    secrets:
+      # Forgejo: replaced GitHub App (WEBGRIP_CI_CLIENT_ID / WEBGRIP_CI_APP_PRIVATE_KEY)
+      # token minting with a single scoped Forgejo CI bot token.
+      FORGEJO_TOKEN:
+        description: "Forgejo CI bot token used for checkout and issues API calls"
+        required: true
+      OPENAI_API_KEY:
+        description: "OpenAI API key (direct OpenAI inference, replacing GitHub Models)"
+        required: true
+      OPENAI_ORG_ID:
+        description: "OpenAI Organization ID"
+        required: false
+    inputs:
+      prompt-repository:
+        type: string
+        description: 'The repository in which the prompt.yml files are located'
+        required: true
+        default: 'webgrip/agentic-workflows'
+      prompt-paths:
+        type: string
+        description: 'Comma-separated list of prompt file paths (relative to prompt-repository root)'
+        required: true
+      target-repository:
+        type: string
+        description: 'The repository in which to create the issue'
+        required: true
+
+jobs:
+  issues-from-prompts:
+    name: "Create issues from prompt files (matrix)"
+    strategy:
+      fail-fast: false
+      matrix:
+        prompt-path: ${{ fromJson(inputs.prompt-paths) }}
+    uses: webgrip/workflows/.forgejo/workflows/github-issue-create-by-prompt.yml@main
+    with:
+      prompt-repository: ${{ inputs.prompt-repository }}
+      prompt-path: ${{ matrix.prompt-path }}
+      issue-title: ${{ matrix.prompt-path }}
+      target-repository: ${{ inputs.target-repository }}
+    secrets:
+      FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_ORG_ID: ${{ secrets.OPENAI_ORG_ID }}

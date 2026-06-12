@@ -1,0 +1,158 @@
+name: 'Node.js Tests'
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to install'
+        required: false
+        default: '22'
+        type: string
+      working-directory:
+        description: 'Directory that contains package.json'
+        required: false
+        default: '.'
+        type: string
+      package-manager:
+        description: 'Package manager to use (auto, npm, pnpm, yarn)'
+        required: false
+        default: 'auto'
+        type: string
+      test-command:
+        description: 'Optional command to run instead of the default package-manager test command'
+        required: false
+        default: ''
+        type: string
+      coverage-directory:
+        description: 'Coverage directory relative to the working directory'
+        required: false
+        default: 'coverage'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  tests-run:
+    name: 'Node.js test suite'
+    runs-on: arc-runner-set
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Detect package manager
+        id: detect-package-manager
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [ ! -f package.json ]; then
+            echo 'package.json was not found.'
+            exit 1
+          fi
+
+          if [ "${{ inputs.package-manager }}" != 'auto' ]; then
+            echo "PACKAGE_MANAGER=${{ inputs.package-manager }}" >> "$GITHUB_ENV"
+            echo "package_manager=${{ inputs.package-manager }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -f pnpm-lock.yaml ]; then
+            echo 'PACKAGE_MANAGER=pnpm' >> "$GITHUB_ENV"
+            echo 'package_manager=pnpm' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -f yarn.lock ]; then
+            echo 'PACKAGE_MANAGER=yarn' >> "$GITHUB_ENV"
+            echo 'package_manager=yarn' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo 'PACKAGE_MANAGER=npm' >> "$GITHUB_ENV"
+          echo 'package_manager=npm' >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Cache package-manager data
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            ~/.pnpm-store
+            ${{ inputs.working-directory }}/.yarn/cache
+            ${{ inputs.working-directory }}/.yarn/unplugged
+            ${{ inputs.working-directory }}/.yarn/install-state.gz
+          key: "node-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles(format('{0}/package-lock.json', inputs.working-directory), format('{0}/npm-shrinkwrap.json', inputs.working-directory), format('{0}/pnpm-lock.yaml', inputs.working-directory), format('{0}/yarn.lock', inputs.working-directory)) }}"
+          restore-keys: |
+            node-${{ runner.os }}-${{ inputs.node-version }}-
+
+      - name: Enable Corepack
+        shell: bash
+        run: corepack enable
+
+      - name: Install dependencies
+        id: install
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          start=$(date +%s)
+          case "$PACKAGE_MANAGER" in
+            npm)
+              if [ -f package-lock.json ] || [ -f npm-shrinkwrap.json ]; then
+                npm ci
+              else
+                npm install
+              fi
+              ;;
+            pnpm)
+              pnpm install --frozen-lockfile
+              ;;
+            yarn)
+              yarn install --immutable || yarn install --frozen-lockfile
+              ;;
+          esac
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        id: test
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          start=$(date +%s)
+
+          if [ -n "${{ inputs.test-command }}" ]; then
+            ${{ inputs.test-command }}
+            end=$(date +%s)
+            echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! node -e "const pkg=require('./package.json'); process.exit(pkg.scripts && pkg.scripts.test ? 0 : 1)"; then
+            echo 'No test script was found in package.json.'
+            exit 1
+          fi
+
+          case "$PACKAGE_MANAGER" in
+            npm)
+              npm test
+              ;;
+            pnpm)
+              pnpm test
+              ;;
+            yarn)
+              yarn test
+              ;;
+          esac
+
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
+
+      - name: Upload coverage artifact
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-coverage
+          path: ${{ inputs.working-directory }}/${{ inputs.coverage-directory }}
+          if-no-files-found: ignore

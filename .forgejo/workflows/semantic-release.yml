@@ -1,0 +1,40 @@
+name: 'Semantic Release'
+
+on:
+  workflow_call:
+    inputs:
+      release-type:
+        description: 'The type of release'
+        required: false
+        type: string
+      use-bot-to-commit:
+        description: 'Whether to use the Forgejo CI bot to commit changes'
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      FORGEJO_TOKEN:
+        description: 'Forgejo CI bot token used for checkout/push and releases'
+        required: false
+    outputs:
+      version:
+        description: 'The new version number'
+        value: ${{ jobs.semantic-release.outputs.version }}
+
+jobs:
+  semantic-release:
+    name: 'Semantic Release'
+    runs-on: arc-runner-set
+    permissions:
+      contents: write # For pushing commits/tags
+      pull-requests: write # If referencing or updating PRs
+      issues: write # Needed to comment on issues/PRs
+      statuses: write # (Optional) If you need to set commit statuses
+    outputs:
+      version: ${{ steps.semantic-release.outputs.version }}
+    steps:
+      - id: semantic-release
+        uses: webgrip/workflows/.forgejo/composite-actions/semantic-release@main
+        with:
+          release-type: ${{ inputs.release-type }}
+          token: ${{ secrets.FORGEJO_TOKEN }}

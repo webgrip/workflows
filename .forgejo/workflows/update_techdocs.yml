@@ -1,0 +1,89 @@
+# Forgejo: ported from .github/workflows/update_techdocs.yml.
+# Forgejo has NO native Pages hosting, so peaceiris/actions-gh-pages has no analog.
+name: "Update TechDocs"
+
+on:
+  workflow_call:
+    inputs:
+      source-dir:
+        type: string
+        description: 'The directory containing the techdocs files'
+        required: false
+        default: 'docs/techdocs'
+      cname:
+        type: string
+        description: 'The custom domain for the TechDocs site (recorded as a CNAME file in the pages branch)'
+        required: false
+        default: ''
+    secrets:
+      # Forgejo: replaced secrets.GITHUB_TOKEN (used by peaceiris/actions-gh-pages) with a scoped Forgejo CI bot token.
+      FORGEJO_TOKEN:
+        description: 'Forgejo CI bot token used to push the built site to the pages branch'
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install-deps-generate-and-deploy:
+    name: "Install dependencies, generate with mkdocs, upload artifact and publish to pages branch"
+    runs-on: arc-runner-set
+    container: webgrip/techdocs-runner:latest
+    env:
+      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+      APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - run: |
+          techdocs-cli generate --no-docker --verbose --source-dir ${{ inputs.source-dir }} --output-dir techdocs-site
+
+      - name: Put in artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: techdocs-site
+          path: techdocs-site
+          retention-days: 1
+
+      - run: |
+          apk add --no-cache git
+
+      # Forgejo: replaced peaceiris/actions-gh-pages (GitHub Pages publish) with a plain branch push.
+      # Forgejo: branch-push only; serving the pages site requires external infra (Nginx/Caddy/Forgejo Pages add-on) — out of scope
+      - name: Publish site to pages branch
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          CNAME: ${{ inputs.cname }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PUBLISH_DIR="./techdocs-site"
+          PAGES_BRANCH="pages"
+
+          host="${FORGEJO_INSTANCE_URL#*://}"
+          bot="${APP_BOT_SLUG:-webgrip-ci}"
+
+          if [[ -n "$CNAME" ]]; then
+            echo "$CNAME" > "${PUBLISH_DIR}/CNAME"
+          fi
+
+          # Build an orphan pages branch from the publish dir so each deploy is a clean snapshot.
+          work="$(mktemp -d)"
+          cp -a "${PUBLISH_DIR}/." "$work/"
+          cd "$work"
+
+          git init -q
+          git checkout -q --orphan "$PAGES_BRANCH"
+          git config user.name "$bot"
+          # Forgejo: deterministic noreply identity on the Forgejo host (no GitHub host).
+          git config user.email "${bot}@noreply.${host}"
+          git add -A
+          git commit -q -m "docs: publish techdocs site (${GITHUB_SHA})"
+
+          # Forgejo: bot push remote https://<bot>:<FORGEJO_TOKEN>@<forgejo-host>/<owner>/<repo>.git
+          git push -f "https://${bot}:${FORGEJO_TOKEN}@${host}/${OWNER}/${REPO}.git" \
+            "HEAD:refs/heads/${PAGES_BRANCH}"

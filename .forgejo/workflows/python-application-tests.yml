@@ -1,0 +1,115 @@
+name: 'Python Tests'
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: 'Python version to install'
+        required: false
+        default: '3.12'
+        type: string
+
+jobs:
+  tests-run:
+    name: 'Python test suite'
+    runs-on: arc-runner-set
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ inputs.python-version }}
+
+      - name: Cache Python package downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: "python-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml', '**/setup.cfg', '**/setup.py') }}"
+          restore-keys: |
+            python-${{ runner.os }}-${{ inputs.python-version }}-
+
+      - name: Install project dependencies
+        id: install-dependencies
+        shell: bash
+        run: |
+          start=$(date +%s)
+          python -m pip install --upgrade pip
+
+          installed_requirements='false'
+
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+            installed_requirements='true'
+          fi
+
+          if [ -f requirements-dev.txt ]; then
+            python -m pip install -r requirements-dev.txt
+            installed_requirements='true'
+          fi
+
+          if [ "$installed_requirements" = 'false' ] && [ -f pyproject.toml ]; then
+            python -m pip install -e '.[dev]' || python -m pip install -e .
+            installed_requirements='true'
+          fi
+
+          if [ "$installed_requirements" = 'false' ] && [ -f setup.py ]; then
+            python -m pip install -e .
+            installed_requirements='true'
+          fi
+
+          if [ "$installed_requirements" = 'false' ]; then
+            echo 'No Python dependency manifest was found.'
+            exit 1
+          fi
+
+          python -m pip install pytest
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
+
+      - name: Run tests
+        id: test
+        shell: bash
+        run: |
+          mkdir -p test-results
+          start=$(date +%s)
+
+          if [ -f pytest.ini ] || [ -f tox.ini ] || [ -f pyproject.toml ] || [ -d tests ]; then
+            pytest -q --junitxml=test-results/pytest.xml
+            end=$(date +%s)
+            echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          python -m unittest discover -v 2>&1 | tee test-results/unittest.txt
+          end=$(date +%s)
+          echo "seconds=$((end-start))" >> "$GITHUB_OUTPUT"
+
+      - name: Upload test results
+        id: upload-results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-test-results
+          path: test-results
+          if-no-files-found: ignore
+
+      - name: Render summary
+        if: ${{ always() }}
+        uses: webgrip/workflows/.forgejo/composite-actions/workflow-status-summary@main
+        with:
+          title: 'Python Tests'
+          subtitle: 'Test execution for Python applications and libraries'
+          metadata: |
+            [
+              {"label":"Runner","value":"arc-runner-set"},
+              {"label":"Python version","value":"${{ inputs.python-version }}"}
+            ]
+          checks: |
+            [
+              {"name":"Install dependencies","status":"${{ steps.install-dependencies.outcome }}","duration":"${{ steps.install-dependencies.outputs.seconds }}s","details":"pytest installed as test runner fallback"},
+              {"name":"Test execution","status":"${{ steps.test.outcome }}","duration":"${{ steps.test.outputs.seconds }}s","details":"pytest when available, otherwise unittest discovery"},
+              {"name":"Results upload","status":"${{ steps.upload-results.outcome }}","duration":"-","details":"artifact python-test-results"}
+            ]
+          artifacts: |
+            ["python-test-results"]

@@ -1,0 +1,633 @@
+name: Helm Deploy with Detailed Job Summary
+
+on:
+  workflow_call:
+    secrets:
+      DOCKER_USERNAME:
+        description: 'Docker Username'
+        required: true
+      DOCKER_TOKEN:
+        description: 'Docker Token'
+        required: true
+      DIGITAL_OCEAN_API_KEY:
+        description: 'DigitalOcean API Key'
+        required: true
+      SOPS_AGE_KEY:
+        description: 'SOPS Age private key'
+        required: false
+      REGISTRY_USERNAME:
+        description: 'Registry username (e.g. Harbor robot account) for OCI chart deps.'
+        required: false
+      REGISTRY_TOKEN:
+        description: 'Registry password/token (e.g. Harbor robot token) for OCI chart deps.'
+        required: false
+    inputs:
+      registry:
+        description: 'Target registry host for OCI chart dependencies, e.g. harbor.<domain>. Leave empty to skip registry login.'
+        type: string
+        required: false
+        default: ''
+      environment:
+        description: 'Target deployment environment (e.g. staging, production)'
+        type: string
+        required: true
+      path:
+        description: 'Path to the Helm chart to deploy'
+        type: string
+        required: true
+      image_tag:
+        description: 'Docker image tag to deploy (overrides image.tag in values)'
+        type: string
+        required: false
+      image_tag_path:
+        description: 'Key path in values.yaml for the image tag (e.g. application.controllers.main.containers.app.image.tag)'
+        type: string
+        required: false
+        default: 'application.controllers.main.containers.app.image.tag'
+      image_repository:
+        description: 'Docker image repository to deploy (overrides image.repository in values)'
+        type: string
+        required: false
+      image_repository_path:
+        description: 'Key path in values.yaml for the image repository (e.g. application.controllers.main.containers.app.image.repository)'
+        type: string
+        required: false
+        default: 'application.controllers.main.containers.app.image.repository'
+      namespace:
+        description: 'Kubernetes namespace to deploy to (overrides values.yaml)'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: deploy-${{ inputs.environment }}-${{ inputs.path }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-helm:
+    name: ${{ inputs.path }}
+    environment: ${{ inputs.environment }}
+    runs-on: arc-runner-set
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: webgrip/helm-deploy:latest
+      credentials:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_TOKEN }}
+    env:
+      DO_CLUSTER_NAME: webgrip-${{ inputs.environment }}-cluster
+      DO_KUBECONFIG_FILE: './doks-kubeconfig'
+      SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY || '' }}
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Validate inputs (non-fatal warnings)
+        run: |
+          set -euo pipefail
+          if [ -n "${{ inputs.image_tag }}" ] && [ -z "${{ inputs.image_tag_path }}" ]; then
+            echo "::notice::'image_tag' provided with no 'image_tag_path'. Will use default path: application.controllers.main.containers.app.image.tag" >&2
+          fi
+          if [ -z "${{ inputs.image_tag }}" ] && [ -n "${{ inputs.image_tag_path }}" ]; then
+            echo "::notice::'image_tag_path' provided but no 'image_tag' value. No tag injection will occur." >&2
+          fi
+          if [ -n "${{ inputs.image_repository }}" ] && [ -z "${{ inputs.image_repository_path }}" ]; then
+            echo "::notice::'image_repository' provided with no 'image_repository_path'. Will use default path: application.controllers.main.containers.app.image.repository" >&2
+          fi
+          if [ -z "${{ inputs.image_repository }}" ] && [ -n "${{ inputs.image_repository_path }}" ]; then
+            echo "::notice::'image_repository_path' provided but no 'image_repository' value. No repository injection will occur." >&2
+          fi
+
+      - name: Init deployment stats placeholder
+        run: |
+          set -euo pipefail
+          echo 'Chart,Namespace,Time,Status,Error' > deployment-stats.csv
+          echo 'No deployment attempted yet.' > overall-stats.txt
+
+      - name: Authenticate doctl
+        env:
+          DIGITAL_OCEAN_API_KEY: ${{ secrets.DIGITAL_OCEAN_API_KEY }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${DIGITAL_OCEAN_API_KEY}"
+          doctl auth init --access-token "${DIGITAL_OCEAN_API_KEY}"
+
+      - name: Helm registry login (for OCI deps)
+        if: ${{ inputs.registry != '' }}
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${REGISTRY_TOKEN}"
+          helm version
+          echo "${REGISTRY_TOKEN}" | helm registry login ${{ inputs.registry }} --username "${REGISTRY_USERNAME}" --password-stdin || true
+
+      - name: Fetch DOKS kubeconfig
+        run: |
+          set -euo pipefail
+          echo "::add-mask::${DO_CLUSTER_NAME}"
+          tmp_err="$(mktemp)"
+          if ! KUBECONFIG="$DO_KUBECONFIG_FILE" doctl kubernetes cluster kubeconfig save "$DO_CLUSTER_NAME" 2>"$tmp_err"; then
+            echo "::error::Failed retrieving kubeconfig for cluster (masked)." >&2
+            sed -e 's/'"$DO_CLUSTER_NAME"'/[REDACTED]/g' "$tmp_err" >&2 || true
+            exit 1
+          fi
+          grep -Ev 'Config not found|Adding cluster credentials|Setting current-context' "$tmp_err" | sed -e 's/'"$DO_CLUSTER_NAME"'/[REDACTED]/g' || true
+          rm -f "$tmp_err"
+          chmod 600 "$DO_KUBECONFIG_FILE" || true
+          echo "KUBECONFIG=$DO_KUBECONFIG_FILE" >> "$GITHUB_ENV"
+
+      - name: Cluster preflight (non-fatal)
+        continue-on-error: true
+        run: |
+          set +e
+          echo "Cluster preflight (redacted): checking reachability only..."
+          if kubectl get namespace kube-system >/dev/null 2>&1; then
+            echo "Cluster reachable ✅"
+          else
+            echo "::warning::Cluster not reachable (kube-system ns query failed)"
+          fi
+
+      - name: Mask SOPS key (if provided)
+        if: ${{ env.SOPS_AGE_KEY != '' }}
+        run: echo "::add-mask::${SOPS_AGE_KEY}"
+
+      - name: Decrypt SOPS file (secure temp, auto-clean)
+        if: ${{ env.SOPS_AGE_KEY != '' }}
+        id: decrypt_sops
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          chartDir="${{ inputs.path }}"
+          export SOPS_AGE_KEY=${{ secrets.SOPS_AGE_KEY }}
+          if [ -f "$chartDir/values.sops.yaml" ]; then
+            umask 077
+            : "${RUNNER_TEMP:=/tmp}"
+            _tmp_file="$(mktemp "${RUNNER_TEMP}/values.dec.XXXXXX")"
+            TMP_VALUES="${_tmp_file}.yaml"
+            mv "$_tmp_file" "$TMP_VALUES"
+            sops --decrypt "$chartDir/values.sops.yaml" > "$TMP_VALUES"
+            echo "sops_used=true" >> "$GITHUB_OUTPUT"
+            echo "VALUES_FILE=$TMP_VALUES" >> "$GITHUB_ENV"
+            echo "TMP_VALUES=$TMP_VALUES" >> "$GITHUB_ENV"
+              # Diagnostic: show first lines of decrypted file, redacting secrets
+              if [ -s "$TMP_VALUES" ]; then
+                echo "--- Decrypted values.sops.yaml (redacted preview) ---" >&2
+                head -20 "$TMP_VALUES" | grep -Ei -v '(secret|password|key|token|private)' >&2 || true
+              else
+                echo "::warning::Decrypted values file is empty!" >&2
+              fi
+          else
+            echo "sops_used=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve target namespace
+        id: resolve_namespace
+        run: |
+          set -euo pipefail
+          chartDir="${{ inputs.path }}"
+          chosen=""
+          if [ -n "${{ inputs.namespace || '' }}" ]; then
+            chosen='${{ inputs.namespace }}'
+            echo "Namespace chosen from workflow input: $chosen"
+          elif [ -n "${VALUES_FILE:-}" ]; then
+            chosen=$(yq e '.namespace' "$VALUES_FILE" 2>/dev/null || true)
+            if [ -n "$chosen" ] && [ "$chosen" != "null" ]; then
+              echo "Namespace derived from decrypted values: $chosen"
+            fi
+          elif [ -f "$chartDir/values.yaml" ]; then
+            chosen=$(yq e '.namespace' "$chartDir/values.yaml" 2>/dev/null || true)
+            if [ -n "$chosen" ] && [ "$chosen" != "null" ]; then
+              echo "Namespace derived from chart values.yaml: $chosen"
+            fi
+          fi
+          if [ -z "$chosen" ] || [ "$chosen" = "null" ]; then
+            chosen="default"
+            echo "Namespace fallback to default: $chosen"
+          fi
+            echo "namespace=$chosen" >> "$GITHUB_OUTPUT"
+          echo "RESOLVED_NAMESPACE=$chosen" >> "$GITHUB_ENV"
+
+      - name: Helm lint & template (tolerant)
+        id: lint
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          chartDir="${{ inputs.path }}"
+          echo "Resolving Helm chart dependencies..."
+          if [ -f "$chartDir/Chart.yaml" ]; then
+            repos=$(yq e -r '.dependencies[]?.repository' "$chartDir/Chart.yaml" 2>/dev/null | sort -u || true)
+            for repoUrl in $repos; do
+              case "$repoUrl" in
+                http://*|https://*)
+                  repoName=$(echo "$repoUrl" | sed 's#https\?://##; s#[^A-Za-z0-9]#-#g')
+                  if ! helm repo list 2>/dev/null | awk 'NR>1 {print $1}' | grep -q "^${repoName}$"; then
+                    echo "Adding helm repo $repoName -> $repoUrl"
+                    helm repo add "$repoName" "$repoUrl" >/dev/null 2>&1 || true
+                  fi
+                  ;;
+                oci://*) : ;;
+              esac
+            done
+            helm repo update >/dev/null 2>&1 || true
+          fi
+          if [ -f "$chartDir/Chart.lock" ]; then
+            echo "Chart.lock found. Running 'helm dependency build' for reproducible deps."
+            if ! helm dependency build "$chartDir" 2>dep_err.log; then
+              echo "helm dependency build failed; showing dep_err.log:" >&2
+              cat dep_err.log >&2 || true
+              echo "Falling back to 'helm dependency update' (may refresh versions)." >&2
+              helm dependency update "$chartDir"
+            fi
+          else
+            echo "No Chart.lock present. Running 'helm dependency update'."
+            helm dependency update "$chartDir"
+          fi
+          echo "Dependency charts directory contents:" && ls -1 "$chartDir/charts" 2>/dev/null || echo "(charts/ directory empty or missing)"
+          echo "Listing dependencies declared in Chart.yaml:" && yq e '.dependencies[] | .name + " " + (.version // "") + " " + (.repository // "")' "$chartDir/Chart.yaml" 2>/dev/null || echo "(no dependencies section)"
+          lint_status=0
+          # Set image path variables with fallback to default if not provided
+          image_tag_path="${{ inputs.image_tag_path }}"
+          [ -z "$image_tag_path" ] && image_tag_path="application.controllers.main.containers.app.image.tag"
+          image_repository_path="${{ inputs.image_repository_path }}"
+          [ -z "$image_repository_path" ] && image_repository_path="application.controllers.main.containers.app.image.repository"
+          # Build override args (values file + image repo/tag overrides) so lint reflects intended deployment
+          override_args=()
+          if [ -n "${VALUES_FILE:-}" ]; then
+            override_args+=( -f "$VALUES_FILE" )
+          elif [ -f "$chartDir/values.yaml" ]; then
+            override_args+=( -f "$chartDir/values.yaml" )
+          fi
+          if [ -n "${{ inputs.image_repository }}" ]; then
+            override_args+=( --set-string "$image_repository_path=${{ inputs.image_repository }}" )
+          fi
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            override_args+=( --set-string "$image_tag_path=${{ inputs.image_tag }}" )
+          fi
+          echo "Lint command: helm lint --debug $chartDir ${override_args[*]}"
+          helm lint --debug "$chartDir" "${override_args[@]}" > helm-lint-debug.txt 2>&1 || lint_status=$?
+          if [ "${lint_status:-0}" -ne 0 ]; then
+            echo "::error::Helm lint failed (exit $lint_status). Skipping diff/deploy." >&2
+            echo "--- Helm lint debug output ---" >&2
+            cat helm-lint-debug.txt >&2 || true
+          fi
+          ns='${{ steps.resolve_namespace.outputs.namespace }}'
+          echo "Namespace (resolved step) for lint/template: $ns"
+          if [ $lint_status -eq 0 ]; then
+            echo "Template (pre-diff) command: helm template --debug $chartDir --namespace $ns ${override_args[*]}"
+            helm template --debug "$chartDir" --namespace "$ns" "${override_args[@]}" > helm-template-debug.txt 2>&1 || true
+          fi
+          echo "lint_exit_code=$lint_status" >> "$GITHUB_OUTPUT"
+
+      - name: Record lint failure in stats
+        if: steps.lint.outputs.lint_exit_code != '0'
+        run: |
+          set -euo pipefail
+          chartDir="${{ inputs.path }}"
+          chartName=$(basename "$chartDir")
+          namespace="${{ steps.lint.outputs.namespace || 'default' }}"
+          if ! grep -q ",${chartName}," deployment-stats.csv 2>/dev/null; then
+            echo "$chartName,$namespace,00:00:00,Skipped (lint failed),lint failed" >> deployment-stats.csv
+            echo "Overall, deployment skipped due to lint failure." > overall-stats.txt
+          fi
+
+      - name: Fail if Helm lint failed
+        if: steps.lint.outputs.lint_exit_code != '0'
+        run: |
+          echo "Helm lint failed. Marking job as failed."
+          exit 1
+
+      - name: Helm diff (captured, non-blocking)
+        id: diff
+        if: steps.lint.outputs.lint_exit_code == '0'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          chartDir="${{ inputs.path }}"
+          release=$(basename "$chartDir")
+          ns="${{ steps.resolve_namespace.outputs.namespace || 'default' }}"
+          echo "Using namespace for diff: $ns (lint output)."
+          args=()
+          [ -n "${VALUES_FILE:-}" ] && args+=(-f "$VALUES_FILE")
+          [ -z "${VALUES_FILE:-}" ] && [ -f "$chartDir/values.yaml" ] && args+=(-f "$chartDir/values.yaml")
+          # Inject shared image repository/tag by default
+          if [ -n "${{ inputs.image_repository }}" ]; then
+            image_repository_path="${{ inputs.image_repository_path }}"
+            [ -z "$image_repository_path" ] && image_repository_path="_shared_config.image.repository"
+            args+=(--set-string "$image_repository_path=${{ inputs.image_repository }}")
+          fi
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            image_tag_path="${{ inputs.image_tag_path }}"
+            [ -z "$image_tag_path" ] && image_tag_path="_shared_config.image.tag"
+            args+=(--set-string "$image_tag_path=${{ inputs.image_tag }}")
+          fi
+          helm plugin list | grep -q 'diff' || helm plugin install https://github.com/databus23/helm-diff
+          echo "Diff command: helm diff upgrade --debug $release $chartDir --namespace $ns --allow-unreleased --suppress-secrets --no-color ${args[*]}" >&2
+          helm diff upgrade --debug "$release" "$chartDir" --namespace "$ns" --allow-unreleased --suppress-secrets --no-color "${args[@]}" > helm-diff.txt 2>&1 || true
+          {
+            echo "diff<<DIFF_EOF"
+            sed -e 's/[[:cntrl:]]//g' helm-diff.txt || true
+            echo "DIFF_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Deploy the specified Helm chart
+        id: deploy
+        if: steps.lint.outputs.lint_exit_code == '0'
+        continue-on-error: true
+        env:
+          NS: ${{ steps.resolve_namespace.outputs.namespace }}
+        shell: bash
+        run: |
+          set +e
+
+          echo "Chart,Namespace,Time,Status,Error" > deployment-stats.csv
+          chartDir="${{ inputs.path }}"
+          chartName=$(basename "$chartDir")
+          namespace="${NS:-default}"
+          echo "Using namespace for deploy: $namespace (from lint output)."
+
+          if [ -n "${VALUES_FILE:-}" ]; then
+            valuesFile="$VALUES_FILE"
+          elif [ -f "$chartDir/values.yaml" ]; then
+            valuesFile="$chartDir/values.yaml"
+          else
+            valuesFile=""
+          fi
+
+          echo "Deploying chart '$chartName' to namespace '$namespace'..."
+          start=$(date +%s)
+
+          helmCmd="helm upgrade --install \"$chartName\" \"$chartDir\" \
+            --namespace \"$namespace\" \
+            --create-namespace \
+            --wait --timeout 10m \
+            --history-max 10 \
+            --atomic --cleanup-on-fail"
+
+          if [ -n "$valuesFile" ]; then
+            helmCmd="$helmCmd --values \"$valuesFile\""
+          fi
+
+          # Shared image overrides (default to shared _shared_config.* keys)
+          if [ -n "${{ inputs.image_repository }}" ]; then
+            image_repository_path="${{ inputs.image_repository_path }}"
+            [ -z "$image_repository_path" ] && image_repository_path="_shared_config.image.repository"
+            helmCmd="$helmCmd --set-string $image_repository_path='${{ inputs.image_repository }}'"
+          fi
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            image_tag_path="${{ inputs.image_tag_path }}"
+            [ -z "$image_tag_path" ] && image_tag_path="_shared_config.image.tag"
+            helmCmd="$helmCmd --set-string $image_tag_path='${{ inputs.image_tag }}'"
+          fi
+
+          echo "Deploy command: $helmCmd"
+          helmOutput=$(eval "$helmCmd" 2>&1)
+          helmExitCode=$?
+
+          if [ $helmExitCode -eq 0 ]; then
+            status="Success ✅"
+            error=""
+            exit_code=0
+          else
+            status="Failed ❌"
+            error="Deployment failed"
+            exit_code=1
+          fi
+
+          end=$(date +%s)
+          duration=$((end - start))
+          duration_formatted=$(printf "%02d:%02d:%02d" $((duration/3600)) $(((duration%3600)/60)) $((duration%60)))
+
+          echo "$chartName,$namespace,$duration_formatted,$status,$error" >> deployment-stats.csv
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+
+          {
+            echo "helm_output<<HELM_OUT_EOF"
+            printf "%s\n" "$helmOutput"
+            echo "HELM_OUT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ $exit_code -eq 0 ]; then
+            echo "Overall, 1 chart deployed in $duration_formatted ⏱️" > overall-stats.txt
+          else
+            echo "Overall, 1 chart deployment failed after $duration_formatted ⏱️" > overall-stats.txt
+          fi
+
+      - name: Collect Deployment Stats
+        id: collect-stats
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -f deployment-stats.csv ]; then
+            stats=$(cat deployment-stats.csv)
+          else
+            stats='Chart,Namespace,Time,Status,Error'
+          fi
+          if [ -f overall-stats.txt ]; then
+            overall=$(cat overall-stats.txt)
+          else
+            overall='No overall deployment stats available.'
+          fi
+          {
+            echo "stats<<STATS_EOF"
+            printf '%s\n' "$stats"
+            echo "STATS_EOF"
+            echo "overall<<OVERALL_EOF"
+            printf '%s\n' "$overall"
+            echo "OVERALL_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Render Helm templates for summary
+        if: always()
+        shell: bash -eo pipefail {0}
+        run: |
+          set -Eeuo pipefail
+          chartDir="${{ inputs.path }}"
+          chartName=$(basename "$chartDir")
+          rendered="rendered-manifests.yaml"
+          ns="${{ steps.resolve_namespace.outputs.namespace || 'default' }}"
+          echo "Using namespace for render: $ns (from lint output)."
+
+          valuesFile=""
+          if [ -n "${VALUES_FILE:-}" ]; then
+            valuesFile="$VALUES_FILE"
+          elif [ -f "$chartDir/values.yaml" ]; then
+            valuesFile="$chartDir/values.yaml"
+          fi
+
+          helmCmd=(helm template "$chartName" "$chartDir" --namespace "$ns")
+          [ -n "$valuesFile" ] && helmCmd+=(--values "$valuesFile")
+          # Inject shared image overrides for rendering too
+          if [ -n "${{ inputs.image_repository }}" ]; then
+            image_repository_path="${{ inputs.image_repository_path }}"
+            [ -z "$image_repository_path" ] && image_repository_path="_shared_config.image.repository"
+            helmCmd+=(--set-string "$image_repository_path=${{ inputs.image_repository }}")
+          fi
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            image_tag_path="${{ inputs.image_tag_path }}"
+            [ -z "$image_tag_path" ] && image_tag_path="_shared_config.image.tag"
+            helmCmd+=(--set-string "$image_tag_path=${{ inputs.image_tag }}")
+          fi
+
+          echo "Render command: ${helmCmd[*]}"
+          echo "Rendering helm templates to $rendered"
+          "${helmCmd[@]}" > "$rendered" 2>&1 || true
+
+          if [ -d "$chartDir/templates" ]; then
+            find "$chartDir/templates" -maxdepth 1 -type f -print > template-files.txt || true
+          else
+            : > template-files.txt
+          fi
+
+          cp -f "$chartDir/Chart.yaml" chart-Chart.yaml 2>/dev/null || true
+          if [ "${{ steps.decrypt_sops.outputs.sops_used }}" = "true" ]; then
+            [ -n "$valuesFile" ] && cp -f "$valuesFile" chart-values.yaml 2>/dev/null || true
+          fi
+
+      - name: Generate Job Summary with Deployment Stats
+        if: always()
+        uses: actions/github-script@v8
+        env:
+          DEPLOYMENT_STATS: ${{ steps.collect-stats.outputs.stats }}
+          OVERALL_STATS: ${{ steps.collect-stats.outputs.overall }}
+          HELM_OUTPUT: ${{ steps.deploy.outputs.helm_output }}
+          HELM_DIFF: ${{ steps.diff.outputs.diff }}
+          SOPS_USED: ${{ steps.decrypt_sops.outputs.sops_used }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const statsCSV = process.env.DEPLOYMENT_STATS || '';
+            const overallStats = process.env.OVERALL_STATS || '';
+            const helmOutput = process.env.HELM_OUTPUT || '';
+            const helmDiff = process.env.HELM_DIFF || '';
+            const renderedPath = path.join(process.cwd(), 'rendered-manifests.yaml');
+            const templateListPath = path.join(process.cwd(), 'template-files.txt');
+            const chartYamlPath = path.join(process.cwd(), 'chart-Chart.yaml');
+            const chartValuesPath = path.join(process.cwd(), 'chart-values.yaml');
+            const sopsUsed = (process.env.SOPS_USED || '').toLowerCase() === 'true';
+
+            function detailsBlock(title, bodyMarkdown) {
+              return `\n<details><summary><strong>${title}</strong></summary>\n\n${bodyMarkdown}\n</details>\n`;
+            }
+            function fenced(lang, content) {
+              return '```' + lang + '\n' + content.replace(/```/g,'`\u200b``') + '\n```';
+            }
+
+            core.summary
+              .addHeading('Deployment Overview', 2)
+              .addRaw(overallStats).addEOL().addSeparator();
+
+            if (statsCSV) {
+              const lines = statsCSV.trim().split('\n');
+              const header = lines.shift().split(',');
+              const dataRows = lines.map(l => l.split(','));
+              core.summary.addHeading('Per-Chart Deployment Details', 3).addTable([header, ...dataRows]);
+            } else {
+              core.summary.addRaw('No deployment statistics available.').addEOL();
+            }
+
+            if (helmDiff) {
+              core.summary.addRaw(detailsBlock('Helm Diff (proposed vs current)', fenced('diff', helmDiff)));
+            }
+            if (helmOutput) {
+              core.summary.addRaw(detailsBlock('Helm Command Output', fenced('bash', helmOutput)));
+            }
+            if (fs.existsSync(chartYamlPath)) {
+              const chartYaml = fs.readFileSync(chartYamlPath, 'utf8');
+              core.summary.addRaw(detailsBlock('Chart.yaml', fenced('yaml', chartYaml)));
+            }
+            if (fs.existsSync(chartValuesPath)) {
+              if (sopsUsed) {
+                core.summary.addRaw(detailsBlock('Values used for render', 'Suppressed (SOPS secrets in use)'));
+              } else {
+                core.summary.addRaw(detailsBlock('Values used for render', fenced('yaml', fs.readFileSync(chartValuesPath, 'utf8'))));
+              }
+            }
+            if (fs.existsSync(templateListPath)) {
+              const files = fs.readFileSync(templateListPath, 'utf8').trim().split('\n').filter(Boolean);
+              if (files.length) {
+                let tmplBody = '';
+                for (const f of files) {
+                  try {
+                    const name = path.basename(f);
+                    const content = fs.readFileSync(f, 'utf8');
+                    tmplBody += `\n### ${name}\n\n` + fenced('yaml', content) + '\n';
+                  } catch {}
+                }
+                if (tmplBody) core.summary.addRaw(detailsBlock('Chart template files', tmplBody));
+              }
+            }
+            if (fs.existsSync(renderedPath)) {
+              const rendered = fs.readFileSync(renderedPath, 'utf8');
+              const containsSecret = /\bkind:\s+Secret\b/i.test(rendered);
+              if (sopsUsed || containsSecret) {
+                core.summary.addRaw(detailsBlock('Rendered Kubernetes Manifests', 'Suppressed due to presence of secrets (SOPS or Secret kind detected).'));
+              } else {
+                core.summary.addRaw(detailsBlock('Rendered Kubernetes Manifests', fenced('yaml', rendered)));
+              }
+            }
+
+            await core.summary.write();
+
+      - name: Upload artifacts (no secrets)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-artifacts-${{ github.run_attempt }}-${{ github.job }}-${{ github.run_id }}
+          if-no-files-found: ignore
+          path: |
+            rendered-manifests.yaml
+            template-files.txt
+            chart-Chart.yaml
+            helm-diff.txt
+          retention-days: 1
+          overwrite: true
+
+      - name: Secure cleanup (remove decrypted temp)
+        if: always()
+        run: |
+          set -euo pipefail
+          [ -n "${TMP_VALUES:-}" ] && (shred -u "$TMP_VALUES" 2>/dev/null || rm -f "$TMP_VALUES") || true
+
+      - name: Fail if Helm Failed
+        if: steps.deploy.outputs.exit_code == '1'
+        run: |
+          echo "Deployment was not successful. Marking job as failed."
+          exit 1
+
+      - name: Post-deploy image verification (debug)
+        if: steps.deploy.outputs.exit_code == '0'
+        run: |
+          set -euo pipefail
+          chartDir="${{ inputs.path }}"
+            release=$(basename "$chartDir")
+          ns="${{ steps.resolve_namespace.outputs.namespace || 'default' }}"
+          echo "Using namespace for post-deploy verification: $ns (from lint output)."
+          echo "Fetching final release values (sanitized)..."
+          helm get values "$release" -n "$ns" || true
+          echo "Listing images in deployed workloads (grep image:)."
+          helm get manifest "$release" -n "$ns" | grep -E "^[[:space:]]*image:" || echo "No image lines found."
+          echo "If expected tag not present, verify that key path '${{ inputs.image_tag_path }}' exists in chart values and is referenced by templates."
+
+          expected_tag='${{ inputs.image_tag }}'
+          if [ -n "$expected_tag" ]; then
+            echo "Expected tag: $expected_tag"
+            images=$(helm get manifest "$release" -n "$ns" 2>/dev/null | grep -E "^[[:space:]]*image:" | awk -F'image:' '{print $2}' | xargs || true)
+            echo "Observed images: $images"
+            if ! printf '%s' "$images" | grep -q ":$expected_tag\b"; then
+              echo "::warning::Expected tag '$expected_tag' not found among deployed images." >&2
+            else
+              echo "Tag verification passed: $expected_tag present." >&2
+            fi
+          fi

@@ -1,0 +1,73 @@
+name: 'Build'
+
+on:
+  workflow_call:
+    secrets:
+      COMPOSER_TOKEN:
+        description: 'Composer packagist token. Required to authenticate with for example private packagist. (packagist.com)'
+        required: false
+
+jobs:
+  composer-install-on-container:
+    name: 'Composer install on container'
+    runs-on: arc-runner-set
+    container:
+      image: composer:2.8.5
+      env:
+        COMPOSER_AUTH: >
+          {
+            "http-basic": {
+              "repo.packagist.com": {
+                  "username": "token",
+                  "password": "${{ secrets.COMPOSER_TOKEN }}"
+              }
+            }
+          }
+    steps:
+      - run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: vendor
+          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
+      - name: 'Install dependencies'
+        run: composer install --prefer-dist --no-interaction --ignore-platform-reqs
+      - run: | 
+          ls -la
+          ls -la vendor || true
+
+#  composer-install-with-action:
+#    name: 'Composer install'
+#    runs-on: arc-runner-set
+#    steps:
+#      - run: |
+#          pwd
+#
+#      - run: |
+#          ls -la
+#
+#      - uses: actions/checkout@v4
+#
+#      - run: |
+#          ls -la
+#
+#      - uses: actions/cache@v4
+#        with:
+#          path: vendor
+#          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
+#
+#      - run: |
+#          ls -la
+#          ls -la vendor || true
+#
+#      - uses: webgrip/workflows/.forgejo/php/8.2/actions/composer-install@main
+#        with:
+#          composer_auth: >
+#            {
+#              "http-basic": {
+#                "repo.packagist.com": {
+#                  "username": "token",
+#                  "password": "${{ secrets.COMPOSER_TOKEN }}"
+#                }
+#              }
+#            }

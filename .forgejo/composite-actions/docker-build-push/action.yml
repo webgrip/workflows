@@ -1,0 +1,121 @@
+name: "[Action] Build and Push Docker Image"
+description: "Builds and Pushes a docker image"
+
+inputs:
+  docker-context:
+    description: "Docker context"
+    required: true
+    default: "."
+  docker-file:
+    description: "Dockerfile path from the context"
+    required: true
+    default: "Dockerfile"
+  docker-tags:
+    description: "Docker tags"
+    required: true
+  docker-target:
+    description: "Docker target"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v4
+    - uses: docker/setup-qemu-action@v3
+    - uses: docker/setup-buildx-action@v3
+    - uses: docker/login-action@v3
+      with:
+        username: ${{ env.DOCKER_USERNAME }}
+        password: ${{ env.DOCKER_TOKEN }}
+    - name: Get cache tag
+      id: cache-tag
+      shell: bash
+      run: |
+        # Split the docker-tags input by newline, ignore empty lines, and select the first tag.
+        primary=$(echo "${{ inputs.docker-tags }}" | grep -v '^\s*$' | head -n 1)
+        # Use :cache to avoid conflicts with the image's actual release tags.
+        cache="${primary%:*}:cache"
+        echo "cache_tag=$cache" >> "$GITHUB_OUTPUT"
+    - name: Build and push image
+      id: build
+      uses: docker/build-push-action@v6
+      env:
+        DOCKER_BUILD_SUMMARY: "false"
+      with:
+        context: ${{ inputs.docker-context }}
+        file: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
+        platforms: linux/amd64,linux/arm64
+        push: true
+        tags: |
+          ${{ inputs.docker-tags }}
+        target: ${{ inputs.docker-target }}
+        cache-from: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }}
+        cache-to: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }},mode=max,compression=zstd
+
+    - name: Render build summary
+      if: always()
+      uses: actions/github-script@v8
+      env:
+        BUILD_DIGEST: ${{ steps.build.outputs.digest }}
+        BUILD_METADATA: ${{ steps.build.outputs.metadata }}
+        BUILD_TAGS: ${{ inputs.docker-tags }}
+        BUILD_CONTEXT: ${{ inputs.docker-context }}
+        BUILD_FILE: ${{ inputs.docker-file }}
+        BUILD_TARGET: ${{ inputs.docker-target }}
+        BUILD_CACHE_TAG: ${{ steps.cache-tag.outputs.cache_tag }}
+      with:
+        script: |
+          const digest = (process.env.BUILD_DIGEST || '').trim();
+          const metadataRaw = process.env.BUILD_METADATA || '';
+          const tagsRaw = process.env.BUILD_TAGS || '';
+          const contextPath = process.env.BUILD_CONTEXT || '.';
+          const dockerfilePath = process.env.BUILD_FILE || 'Dockerfile';
+          const target = process.env.BUILD_TARGET || '';
+          const cacheTag = process.env.BUILD_CACHE_TAG || '';
+
+          const tags = tagsRaw
+            .split('\n')
+            .map((value) => value.trim())
+            .filter(Boolean);
+
+          const detailsBlock = (title, bodyMarkdown) =>
+            `\n<details><summary><strong>${title}</strong></summary>\n\n${bodyMarkdown}\n</details>\n`;
+
+          const fenced = (lang, content) =>
+            '```' + lang + '\n' + String(content).replace(/```/g, '`\u200b``') + '\n```';
+
+          core.summary
+            .addHeading('Docker Build and Push', 2)
+            .addTable([
+              [
+                { data: 'Field', header: true },
+                { data: 'Value', header: true },
+              ],
+              ['Context', contextPath],
+              ['Dockerfile', `${contextPath}/${dockerfilePath}`],
+              ['Platforms', 'linux/amd64,linux/arm64'],
+              ['Target', target || '-'],
+              ['Cache tag', cacheTag || '-'],
+              ['Digest', digest || '-'],
+            ])
+            .addEOL();
+
+          if (tags.length > 0) {
+            core.summary
+              .addHeading('Published Tags', 3)
+              .addRaw(tags.map((tag) => `- ${tag}`).join('\n'))
+              .addEOL()
+              .addEOL();
+          }
+
+          if (metadataRaw.trim()) {
+            try {
+              const metadata = JSON.parse(metadataRaw);
+              core.summary.addRaw(detailsBlock('Build metadata', fenced('json', JSON.stringify(metadata, null, 2))));
+            } catch {
+              core.summary.addRaw(detailsBlock('Build metadata (raw)', fenced('json', metadataRaw)));
+            }
+          }
+
+          await core.summary.write();

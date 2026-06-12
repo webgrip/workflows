@@ -1,0 +1,268 @@
+# Forgejo: ported from .github/workflows/wordpress-plugin-release-distribute.yml.
+name: 'Distribute WordPress Plugin Release'
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'The released version (used to checkout refs/tags/v<version> when checkout-ref is not set)'
+        required: true
+        type: string
+      tag-prefix:
+        description: 'Tag prefix used for releases (semantic-release defaults to v). Use an empty string for tags like 1.2.3'
+        required: false
+        type: string
+        default: 'v'
+      plugin-slugs:
+        description: 'One or more WordPress.org plugin slugs (newline or comma separated)'
+        required: true
+        type: string
+      checkout-ref:
+        description: 'Git ref to deploy (e.g., refs/tags/v1.2.3). Defaults to refs/tags/v<version>'
+        required: false
+        type: string
+        default: ''
+      assets-dir:
+        description: 'Directory containing WordPress.org assets (icons, banners, screenshots)'
+        required: false
+        type: string
+        default: '.wordpress-org'
+      build-dir:
+        description: 'Directory to deploy from instead of repo root. Use false to disable.'
+        required: false
+        type: string
+        default: 'false'
+      pre-deploy-script:
+        description: 'Optional shell script to run before deployment (e.g., npm build, composer install)'
+        required: false
+        type: string
+        default: ''
+      generate-zip:
+        description: 'Generate a ZIP (via 10up/action-wordpress-plugin-deploy in dry-run mode)'
+        required: false
+        type: boolean
+        default: false
+      upload-to-github-release:
+        description: 'Upload generated ZIP(s) to the Forgejo Release tag'
+        required: false
+        type: boolean
+        default: false
+      deploy-to-wporg:
+        description: 'Whether to deploy to WordPress.org SVN (requires WPORG secrets unless dry-run is true)'
+        required: false
+        type: boolean
+        default: true
+      dry-run:
+        description: 'Skip the final SVN commit step (for debugging)'
+        required: false
+        type: boolean
+        default: false
+      release-tag:
+        description: 'Forgejo Release tag to upload ZIP(s) to. Defaults to <tag-prefix><version>'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      # Forgejo: added a scoped Forgejo CI bot token, required by the Forgejo Releases API upload step.
+      FORGEJO_TOKEN:
+        description: 'Forgejo CI bot token used for the Forgejo Releases API'
+        required: false
+      WPORG_SVN_USERNAME:
+        description: 'WordPress.org SVN username'
+        required: false
+      WPORG_SVN_PASSWORD:
+        description: 'WordPress.org SVN password (or application password)'
+        required: false
+
+jobs:
+  prepare:
+    name: 'Prepare'
+    runs-on: arc-runner-set
+    outputs:
+      slugs: ${{ steps.slugs.outputs.json }}
+    steps:
+      - name: 'Build slug matrix'
+        id: slugs
+        shell: bash
+        env:
+          RAW_SLUGS: ${{ inputs.plugin-slugs }}
+        run: |
+          set -euo pipefail
+
+          json=$(python - <<'PY'
+          import json
+          import os
+          import re
+
+          raw = os.environ.get('RAW_SLUGS', '')
+          parts = re.split(r"[\n,]+", raw)
+          slugs = [p.strip() for p in parts if p.strip()]
+
+          if not slugs:
+              raise SystemExit('No plugin slugs provided in inputs.plugin-slugs')
+
+          print(json.dumps(slugs))
+          PY
+          )
+
+          echo "json=$json" >> "$GITHUB_OUTPUT"
+
+  distribute:
+    name: 'Distribute'
+    runs-on: arc-runner-set
+    needs: [prepare]
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        plugin_slug: ${{ fromJSON(needs.prepare.outputs.slugs) }}
+    steps:
+      - name: 'Check out repository'
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.checkout-ref != '' && inputs.checkout-ref || format('refs/tags/{0}{1}', inputs.tag-prefix, inputs.version) }}
+
+      - name: 'Pre-deploy'
+        if: ${{ inputs.pre-deploy-script != '' }}
+        shell: bash
+        run: ${{ inputs.pre-deploy-script }}
+
+      - name: 'Package ZIP (dry-run)'
+        id: wporg-zip
+        if: ${{ inputs.generate-zip }}
+        uses: 10up/action-wordpress-plugin-deploy@stable
+        with:
+          dry-run: true
+          generate-zip: true
+        env:
+          SLUG: ${{ matrix.plugin_slug }}
+          ASSETS_DIR: ${{ inputs.assets-dir }}
+          BUILD_DIR: ${{ inputs.build-dir }}
+
+      - name: 'Collect ZIP'
+        id: zip
+        if: ${{ inputs.generate-zip }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          zip_path='${{ steps.wporg-zip.outputs.zip-path }}'
+          if [[ -z "$zip_path" ]]; then
+            echo 'zip-path output was empty; cannot collect ZIP.'
+            exit 1
+          fi
+          if [[ ! -f "$zip_path" ]]; then
+            echo "ZIP file does not exist at: $zip_path"
+            exit 1
+          fi
+
+          mkdir -p wporg-zips
+          dest="wporg-zips/${{ matrix.plugin_slug }}-${{ inputs.version }}.zip"
+          mv "$zip_path" "$dest" 2>/dev/null || cp "$zip_path" "$dest"
+
+          echo "path=$dest" >> "$GITHUB_OUTPUT"
+
+      - name: 'Upload ZIP artifact'
+        if: ${{ inputs.generate-zip }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: wporg-plugin-${{ matrix.plugin_slug }}-zip
+          path: ${{ steps.zip.outputs.path }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: 'Validate WP.org credentials'
+        if: ${{ inputs.deploy-to-wporg && inputs.dry-run == false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${{ secrets.WPORG_SVN_USERNAME }}" || -z "${{ secrets.WPORG_SVN_PASSWORD }}" ]]; then
+            echo 'WPORG_SVN_USERNAME and WPORG_SVN_PASSWORD are required when deploy-to-wporg is true and dry-run is false.'
+            exit 1
+          fi
+
+      - name: 'Deploy to WordPress.org'
+        if: ${{ inputs.deploy-to-wporg }}
+        uses: 10up/action-wordpress-plugin-deploy@stable
+        with:
+          dry-run: ${{ inputs.dry-run }}
+          generate-zip: false
+        env:
+          SVN_USERNAME: ${{ secrets.WPORG_SVN_USERNAME }}
+          SVN_PASSWORD: ${{ secrets.WPORG_SVN_PASSWORD }}
+          SLUG: ${{ matrix.plugin_slug }}
+          ASSETS_DIR: ${{ inputs.assets-dir }}
+          BUILD_DIR: ${{ inputs.build-dir }}
+
+  upload:
+    name: 'Upload Release Assets'
+    runs-on: arc-runner-set
+    needs: [distribute]
+    if: >
+      always()
+      && needs.distribute.result == 'success'
+      && inputs.generate-zip == true
+      && inputs.upload-to-github-release == true
+      && inputs.dry-run == false
+    permissions:
+      contents: write
+    env:
+      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+    steps:
+      - name: 'Download ZIP artifacts'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: wporg-plugin-*-zip
+          merge-multiple: true
+          path: wporg-zips
+
+      # Forgejo: replaced softprops/action-gh-release (GitHub Releases) with the Gitea-compatible Forgejo Releases API.
+      # Creates (or reuses) the release for the tag, then uploads each ZIP as a release asset.
+      - name: 'Upload ZIP(s) to Forgejo Release'
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+          TAG: ${{ inputs.release-tag != '' && inputs.release-tag || format('{0}{1}', inputs.tag-prefix, inputs.version) }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          api="${FORGEJO_INSTANCE_URL}/api/v1/repos/${OWNER}/${REPO}"
+
+          # Forgejo API: GET /repos/{owner}/{repo}/releases/tags/{tag} — reuse an existing release if present.
+          release_id="$(curl -fsSL \
+            -H "Authorization: token ${FORGEJO_TOKEN}" \
+            -H "Accept: application/json" \
+            "${api}/releases/tags/${TAG}" 2>/dev/null | jq -r '.id // empty' || true)"
+
+          if [[ -z "$release_id" ]]; then
+            # Forgejo API: POST /repos/{owner}/{repo}/releases — create the release for the tag.
+            payload="$(jq -n --arg tag "$TAG" --arg name "$TAG" \
+              '{tag_name: $tag, name: $name, draft: false, prerelease: false}')"
+            release_id="$(curl -fsSL -X POST \
+              -H "Authorization: token ${FORGEJO_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/json" \
+              "${api}/releases" \
+              -d "$payload" | jq -r '.id')"
+          fi
+
+          if [[ -z "$release_id" || "$release_id" == "null" ]]; then
+            echo "Failed to create or resolve a Forgejo release for tag ${TAG}."
+            exit 1
+          fi
+
+          shopt -s nullglob
+          for f in wporg-zips/*.zip; do
+            name="$(basename "$f")"
+            echo "Uploading asset ${name} to release ${release_id}..."
+            # Forgejo API: POST /repos/{owner}/{repo}/releases/{id}/assets?name=<file> (multipart attachment upload).
+            curl -fsSL -X POST \
+              -H "Authorization: token ${FORGEJO_TOKEN}" \
+              -H "Accept: application/json" \
+              "${api}/releases/${release_id}/assets?name=${name}" \
+              -F "attachment=@${f};type=application/zip"
+          done

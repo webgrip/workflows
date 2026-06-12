@@ -1,0 +1,126 @@
+name: "[Action] Semantic Release"
+description: "Automate versioning & changelog for Rust crates and/or JS packages via semantic‑release"
+
+inputs:
+  release-type:
+    description: "Explicit release level override (major | minor | patch)"
+    required: false
+  token:
+    description: "Forgejo token to use for checkout/push and releases"
+    required: false
+
+outputs:
+  version:
+    description: "The new version number"
+    value: ${{ steps.set-version.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0         # semantic-release needs the full history
+        token: ${{ inputs.token || github.token }}
+
+    - id: detect
+      shell: bash
+      run: |
+        if [[ -f Cargo.toml ]];     then echo "is_rust=true" >>"$GITHUB_OUTPUT"; fi
+        if [[ -f package.json ]];   then echo "is_node=true" >>"$GITHUB_OUTPUT"; fi
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        # Only enable the npm cache when we actually have a lock-file
+        cache: ${{ steps.detect.outputs.is_node == 'true' && 'npm' || '' }}
+
+    - name: Install npm dependencies
+      if: steps.detect.outputs.is_node == 'true'
+      shell: bash
+      run: npm ci --ignore-scripts
+
+    - name: Build (npm)
+      if: steps.detect.outputs.is_node == 'true'
+      shell: bash
+      run: npm run build --if-present
+
+    - name: Install build essentials
+      if: steps.detect.outputs.is_rust == 'true'
+      shell: bash
+      run: |
+        if command -v apt-get &>/dev/null; then
+          sudo apt-get update -yq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev ca-certificates
+        elif command -v apk &>/dev/null; then
+          sudo apk add --no-cache build-base pkgconf openssl-dev
+        fi
+
+    - name: Set up Rust
+      if: steps.detect.outputs.is_rust == 'true'
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+        override: true
+
+    - name: Install cargo-release & git-cliff
+      if: steps.detect.outputs.is_rust == 'true'
+      uses: cargo-bins/cargo-binstall@v1.12.7
+      with:
+        binary: "cargo-release git-cliff"
+
+    - name: Set semantic-release config file
+      id: set-config
+      shell: bash
+      run: |
+        CONFIG_FLAG=""
+
+        if [[ -n "${{ inputs.release-type }}" ]]; then
+          if [[ -f ".releaserc.${{ inputs.release-type }}.js" ]]; then
+            CONFIG_FLAG="--extends=./.releaserc.${{ inputs.release-type }}.js"
+          elif [[ -f ".releaserc.${{ inputs.release-type }}.json" ]]; then
+            CONFIG_FLAG="--extends=./.releaserc.${{ inputs.release-type }}.json"
+          fi
+        else
+          if [[ -f ".releaserc.js" ]]; then
+            CONFIG_FLAG="--config=./.releaserc.js"
+          elif [[ -f ".releaserc.json" ]]; then
+            CONFIG_FLAG="--config=./.releaserc.json"
+          fi
+        fi
+
+        echo "release_config=${CONFIG_FLAG}" >> "$GITHUB_OUTPUT"
+
+    - name: Install semantic-release & plugins
+      shell: bash
+      run: |
+        npm install --no-save \
+          semantic-release \
+          @semantic-release/changelog \
+          @semantic-release/commit-analyzer \
+          @semantic-release/exec \
+          @semantic-release/git \
+          @saithodev/semantic-release-gitea \
+          @semantic-release/release-notes-generator \
+          semantic-release-cargo \
+          semantic-release-helm3
+        # Forgejo: dropped semantic-release-github-actions-tags (GitHub-Actions-specific, no analog)
+
+    - name: Run semantic-release
+      id: semantic-release
+      shell: bash
+      env:
+        GITHUB_OUTPUT: $GITHUB_OUTPUT
+        # Forgejo: @saithodev/semantic-release-gitea targets the Gitea-compatible API.
+        GITEA_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+        GITEA_TOKEN: ${{ inputs.token || github.token }}
+      run: |
+        npx semantic-release ${{ steps.set-config.outputs.release_config }}
+
+    - id: set-version
+      if: always()
+      shell: bash
+      run: echo "version=${{ steps.semantic-release.outputs.nextRelease.version }}" >> "$GITHUB_OUTPUT"

@@ -1,0 +1,237 @@
+name: "[Call] Setup Copilot files for this project"
+
+on:
+  workflow_call:
+    inputs:
+      repo_name:
+        description: "Name of the new repository"
+        type: string
+        required: true
+      copilot_repo:
+        description: "Repository that contains Copilot configs"
+        type: string
+        default: webgrip/awesome-copilot
+        required: false
+      copilot_ref:
+        description: "Ref/branch of the Copilot repo to use"
+        type: string
+        default: main
+        required: false
+      open_pr:
+        description: "(Deprecated) Previously opened a PR from a staging branch; no longer used"
+        type: boolean
+        default: false
+        required: false
+    secrets:
+      # Forgejo: replaced GitHub App token minting with a single scoped Forgejo CI bot token.
+      FORGEJO_TOKEN:
+        description: "Forgejo CI bot token used for checkout/clone/push and API calls"
+        required: true
+      OPENAI_API_KEY:
+        description: "OpenAI API key"
+        required: false
+      OPENAI_ORG_ID:
+        description: "OpenAI Organization ID"
+        required: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bootstrap-copilot-${{ github.repository_id }}-${{ inputs.repo_name }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  copilot:
+    name: "Bootstrap copilot files"
+    runs-on: arc-runner-set
+    outputs:
+      repository_url: ${{ steps.compute-urls.outputs.repository_url }}
+
+    env:
+      ORG: ${{ github.repository_owner }}
+      NEW_REPO: ${{ inputs.repo_name }}
+      # Forgejo: bot login name comes from a repo/org variable; used for the push remote and git identity.
+      APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
+      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+
+    steps:
+      # Forgejo: dropped the GitHub App installation-token minting step (no analog).
+      # All authenticated operations below use secrets.FORGEJO_TOKEN.
+
+      - name: Compute URLs / outputs
+        id: compute-urls
+        run: |
+          echo "repository_url=${FORGEJO_INSTANCE_URL}/${ORG}/${NEW_REPO}" >> "$GITHUB_OUTPUT"
+
+      # Operate directly on default branch (main).
+      - name: Check out new repo (main)
+        uses: actions/checkout@v5
+        with:
+          repository: ${{ env.ORG }}/${{ env.NEW_REPO }}
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ secrets.FORGEJO_TOKEN }}
+
+      - name: Copy Copilot dirs (copy everything recursively)
+        env:
+          COPILOT_REPO: ${{ inputs.copilot_repo }}
+          COPILOT_REF: ${{ inputs.copilot_ref }}
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -euo pipefail
+          echo "Copying ALL contents from $COPILOT_REPO@$COPILOT_REF (chatmodes|instructions|prompts at repo ROOT) into workspace .github/"
+          repo="${COPILOT_REPO}"
+          ref="${COPILOT_REF}"
+          # Forgejo: clone the Copilot source from the Forgejo host (not the GitHub host), authenticated
+          # with the bot token: https://<bot>:<FORGEJO_TOKEN>@<forgejo-host>/<owner>/<repo>.git
+          host="${FORGEJO_INSTANCE_URL#*://}"
+          bot="${APP_BOT_SLUG:-webgrip-ci}"
+          auth_url="https://${bot}:${FORGEJO_TOKEN}@${host}/${repo}.git"
+          tmpdir=$(mktemp -d)
+          cleanup() { rm -rf "$tmpdir" || true; }
+          trap cleanup EXIT
+
+          # Shallow clone at requested ref
+          git clone -b "$ref" --depth 1 "$auth_url" "$tmpdir" >/dev/null
+
+          mkdir -p .github/chatmodes .github/instructions .github/prompts
+
+          copy_all() {
+            local src_dir="$1"   # e.g., $tmpdir/chatmodes
+            local dst_dir="$2"   # e.g., .github/chatmodes
+
+            if [[ -d "$src_dir" ]]; then
+              echo "  + mirroring ${src_dir#$tmpdir/} -> $dst_dir"
+              # Optionally clear destination to avoid stale files; comment out next line if you prefer merging
+              rm -rf "${dst_dir:?}/"* "${dst_dir}/".* 2>/dev/null || true
+
+              shopt -s dotglob nullglob
+              files=( "$src_dir"/* )
+              shopt -u dotglob
+
+              if (( ${#files[@]} )); then
+                # Preserve structure, perms, timestamps
+                cp -a "$src_dir"/. "$dst_dir"/
+              else
+                echo "    (note) Source directory is empty: ${src_dir#$tmpdir/}"
+              fi
+            else
+              echo "  (skip) ${src_dir#$tmpdir/} not found"
+            fi
+          }
+
+          copy_all "$tmpdir/chatmodes"    ".github/chatmodes"
+          copy_all "$tmpdir/instructions" ".github/instructions"
+          copy_all "$tmpdir/prompts"      ".github/prompts"
+
+          echo "Done copying all Copilot assets."
+
+      # - name: Prune Copilot assets with AI (optional)
+      #   if: ${{ secrets.OPENAI_API_KEY != '' }}
+      #   uses: webgrip/copilot-action@main
+      #   env:
+      #     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      #     OPENAI_ORG_ID: ${{ secrets.OPENAI_ORG_ID }}
+      #   with:
+      #     prompt: |
+      #       Keep only the chatmodes, instructions, and prompts inside .github/ that are relevant to this project's repo (${ { env.NEW_REPO } }) based on the repository contents and typical Magento/DevOps workflows. Remove the rest.
+
+      # Forgejo: replaced the github-script "GET /users/{username}" octokit lookup with a
+      # curl call to the Gitea-compatible users API to resolve the bot's id/login/email.
+      - name: Resolve bot noreply email
+        id: bot-email
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -euo pipefail
+          slug="${APP_BOT_SLUG:-webgrip-ci}"
+          host="${FORGEJO_INSTANCE_URL#*://}"
+          name_out="$slug"
+          email_out="${slug}@noreply.${host}"
+
+          # Forgejo API: GET ${FORGEJO_INSTANCE_URL}/api/v1/users/{username}
+          if user_json="$(curl -fsSL \
+              -H "Authorization: token ${FORGEJO_TOKEN}" \
+              -H "Accept: application/json" \
+              "${FORGEJO_INSTANCE_URL}/api/v1/users/${slug}")"; then
+            uid="$(echo "$user_json" | jq -r '.id // empty')"
+            login="$(echo "$user_json" | jq -r '.login // empty')"
+            femail="$(echo "$user_json" | jq -r '.email // empty')"
+            [[ -n "$login" ]] && name_out="$login"
+            if [[ -n "$femail" ]]; then
+              email_out="$femail"
+            elif [[ -n "$uid" ]]; then
+              email_out="${uid}+${login:-$slug}@noreply.${host}"
+            fi
+          else
+            echo "Warning: could not resolve bot user '${slug}' via Forgejo API; using fallback identity."
+          fi
+
+          echo "name=${name_out}" >> "$GITHUB_OUTPUT"
+          echo "email=${email_out}" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate git remote for push
+        env:
+          # Forgejo: bot push remote is https://<bot>:<FORGEJO_TOKEN>@<forgejo-host>/<owner>/<repo>.git
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          host="${FORGEJO_INSTANCE_URL#*://}"
+          bot="${APP_BOT_SLUG:-webgrip-ci}"
+          git remote set-url origin "https://${bot}:${FORGEJO_TOKEN}@${host}/${ORG}/${NEW_REPO}.git"
+
+      - name: Commit and push changes to main (if any)
+        run: |
+          set -euo pipefail
+          git config user.name  "${{ steps.bot-email.outputs.name }}"
+          git config user.email "${{ steps.bot-email.outputs.email }}"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+          else
+            git commit -m "chore(init): personalize ${NEW_REPO}"
+            git push origin HEAD:main
+          fi
+
+      # Forgejo: this github-script step uses ONLY fs + core.summary (no GitHub REST), kept verbatim.
+      - name: Return pertinent information (summary)
+        if: ${{ always() }}
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const fs = require('fs');
+
+            // Helper: list yaml files in a dir (if it exists)
+            function listYamlFiles(dir) {
+              try {
+                if (!fs.existsSync(dir)) return [];
+                return fs.readdirSync(dir)
+                  .filter(f => f.endsWith('.yml') || f.endsWith('.yaml'))
+                  .map(f => `${dir}/${f}`);
+              } catch {
+                return [];
+              }
+            }
+
+            // Collect kept files
+            const keptFiles = [
+              ...listYamlFiles('.github/chatmodes'),
+              ...listYamlFiles('.github/instructions'),
+              ...listYamlFiles('.github/prompts'),
+            ];
+
+            await core.summary
+              .addHeading('Copilot Setup Overview', 2)
+              .addEOL()
+              .addSeparator()
+              .addHeading('Kept Files', 3)
+              .addList(keptFiles.length ? keptFiles : ['(none detected)'])
+              .write();
