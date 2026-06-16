@@ -1,0 +1,87 @@
+name: 'Docker Build and Push (Harbor)'
+
+# Forgejo-only: publishes webgrip images to the in-cluster Harbor OCI registry
+# (harbor.webgrip.dev, LAN-only). MUST run on the in-cluster Forgejo runner — only it
+# can reach Harbor via split-DNS -> envoy-internal (10.0.0.27) with a valid TLS cert.
+# Reuses the generic registry build/push engine; the existing ghcr/Docker Hub
+# workflows are left untouched so consumers can dual-publish during migration.
+
+on:
+  workflow_call:
+    secrets:
+      HARBOR_ROBOT_USER:
+        description: "Harbor robot account with push access (e.g. robot$webgrip+ci)."
+        required: true
+      HARBOR_ROBOT_TOKEN:
+        description: "Harbor robot token (OpenBao secret/harbor/robot-webgrip key CI_TOKEN)."
+        required: true
+      DOCKER_USERNAME:
+        description: "Docker Hub username for authenticated base-image pulls (avoids rate limits)."
+        required: false
+      DOCKER_TOKEN:
+        description: "Docker Hub PAT or password for authenticated base-image pulls."
+        required: false
+    inputs:
+      registry:
+        type: string
+        description: "Harbor registry host. Defaults to the in-cluster Harbor."
+        required: false
+        default: 'harbor.webgrip.dev'
+      docker-context:
+        type: string
+        description: 'Docker context'
+        required: true
+        default: '.'
+      docker-file:
+        type: string
+        description: 'Dockerfile path from the context'
+        required: true
+        default: 'Dockerfile'
+      docker-tags:
+        type: string
+        description: 'Docker tags (one per line). Bare OWNER/IMAGE[:TAG] is prefixed with the registry, e.g. webgrip/<image>:<tag> -> harbor.webgrip.dev/webgrip/<image>:<tag>.'
+        required: true
+      platforms:
+        type: string
+        description: 'Target platforms (comma-separated)'
+        required: false
+        default: 'linux/amd64,linux/arm64'
+      docker-target:
+        type: string
+        description: 'Docker target'
+        required: false
+        default: ''
+      docker-build-args:
+        type: string
+        description: 'Docker build args (newline-separated KEY=VALUE entries)'
+        required: false
+        default: ''
+
+run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }} -> ${{ inputs.registry }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "Docker Build and Push (Harbor)"
+    # In-cluster Forgejo runner (the only one that can reach LAN-only Harbor).
+    runs-on: docker
+    steps:
+      - uses: webgrip/workflows/.forgejo/composite-actions/docker-build-push-ghcr@main
+        with:
+          registry: ${{ inputs.registry }}
+          docker-context: ${{ inputs.docker-context }}
+          docker-file: ${{ inputs.docker-file }}
+          docker-tags: ${{ inputs.docker-tags }}
+          platforms: ${{ inputs.platforms }}
+          docker-target: ${{ inputs.docker-target }}
+          docker-build-args: ${{ inputs.docker-build-args }}
+        env:
+          # The generic engine logs in with docker/login-action (username is a YAML
+          # value, so the literal '$' in robot$webgrip+ci is not shell-expanded; the
+          # token is masked and never echoed).
+          REGISTRY_USERNAME: ${{ secrets.HARBOR_ROBOT_USER }}
+          REGISTRY_TOKEN: ${{ secrets.HARBOR_ROBOT_TOKEN }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}

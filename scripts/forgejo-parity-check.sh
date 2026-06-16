@@ -36,6 +36,20 @@ note() { printf '  \033[33m•\033[0m %s\n' "$1"; }
 err()  { printf '  \033[31m✗\033[0m %s\n' "$1"; fail=1; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 
+# Workflows that intentionally exist ONLY in .forgejo (no .github sibling), e.g.
+# because they target infrastructure unreachable from GitHub-hosted runners.
+FORGEJO_ONLY=(
+    docker-build-and-push-harbor.yml   # in-cluster runner -> LAN-only Harbor
+)
+
+is_forgejo_only() {
+    local needle="$1"
+    for m in "${FORGEJO_ONLY[@]}"; do
+        [ "$m" = "$needle" ] && return 0
+    done
+    return 1
+}
+
 # ---------------------------------------------------------------------------
 # Check 1: orphan .forgejo workflows
 # ---------------------------------------------------------------------------
@@ -44,6 +58,7 @@ orphans=0
 if [ -d "$forgejo_dir" ]; then
     while IFS= read -r -d '' f; do
         base="$(basename "$f")"
+        is_forgejo_only "$base" && continue
         if [ ! -f "$github_dir/$base" ]; then
             err "$forgejo_dir/$base has no counterpart in $github_dir"
             orphans=$((orphans + 1))

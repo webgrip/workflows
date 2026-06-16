@@ -84,6 +84,44 @@ jobs:
 > **public** on the Forgejo instance. The Forgejo port is being rolled out tier by tier — consult
 > `.forgejo/workflows/` for the workflows ported so far.
 
+### Publishing images to the in-cluster Harbor (Forgejo)
+
+`docker-build-and-push-harbor.yml` is a **Forgejo-only** workflow that builds and pushes to the in-cluster
+**Harbor** registry (`harbor.webgrip.dev`, LAN-only). It pins `runs-on: docker` — the in-cluster Forgejo
+runner is the only one that can reach Harbor. It is **additive**: the ghcr (`docker-build-and-push-ghcr.yml`)
+and Docker Hub (`docker-build-and-push.yml`) workflows are unchanged, so a consumer can **dual-publish** during
+the migration by running both:
+
+```yaml
+jobs:
+  publish-ghcr:        # keeps ghcr populated (existing workflow, unchanged)
+    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push-ghcr.yml@main
+    with:
+      registry: ghcr.io
+      docker-context: '.'
+      docker-file: './ops/docker/<image>/Dockerfile'
+      docker-tags: 'ghcr.io/webgrip/<image>:latest'
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.GHCR_USERNAME }}
+      REGISTRY_TOKEN: ${{ secrets.GHCR_TOKEN }}
+
+  publish-harbor:      # in-cluster runner -> Harbor (new)
+    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push-harbor.yml@main
+    with:
+      docker-context: '.'
+      docker-file: './ops/docker/<image>/Dockerfile'
+      docker-tags: |
+        webgrip/<image>:latest
+        webgrip/<image>:${{ needs.release.outputs.version }}
+    secrets:
+      HARBOR_ROBOT_USER: ${{ secrets.HARBOR_ROBOT_USER }}    # robot$webgrip+ci
+      HARBOR_ROBOT_TOKEN: ${{ secrets.HARBOR_ROBOT_TOKEN }}
+```
+
+A bare `webgrip/<image>:<tag>` tag is prefixed with the registry → `harbor.webgrip.dev/webgrip/<image>:<tag>`.
+`registry` defaults to `harbor.webgrip.dev` (override only to point at another Harbor host). The robot login,
+secret masking, and multi-arch buildx push are handled by the shared registry engine action.
+
 ## 📦 Available Workflows
 
 ### Build & Dependencies
