@@ -1,0 +1,83 @@
+# Forgejo-only: publish the built TechDocs site to Codeberg Pages (ADR-0022).
+# GitHub deploys to GitHub Pages; Forgejo has no native Pages, so this force-pushes the static
+# `techdocs-site` artifact to a Codeberg repo's `pages` branch as a clean orphan snapshot. Codeberg
+# serves it (its own Let's Encrypt) at https://<owner>.codeberg.page/<repo>, and at the custom
+# `domain` when a `.domains` file + DNS CNAME (<domain> -> <owner>.codeberg.page) are in place.
+name: "Deploy Pages (Codeberg)"
+
+on:
+  workflow_call:
+    inputs:
+      codeberg-owner:
+        type: string
+        description: 'Codeberg owner/org that holds the pages repo'
+        required: false
+        default: 'webgrip'
+      codeberg-repo:
+        type: string
+        description: 'Codeberg repo to publish to (a NON-mirror repo you can push to). Its `pages` branch is served.'
+        required: true
+      codeberg-user:
+        type: string
+        description: 'Codeberg username that owns CODEBERG_TOKEN (used for HTTPS git auth)'
+        required: false
+        default: 'webgrip'
+      domain:
+        type: string
+        description: 'Custom domain to record in the `.domains` file (e.g. docs.webgrip.dev). Empty = codeberg.page default only.'
+        required: false
+        default: ''
+    secrets:
+      CODEBERG_TOKEN:
+        description: 'Codeberg PAT (scope write:repository) used to push the built site'
+        required: true
+
+jobs:
+  deploy-codeberg:
+    name: "Publish to Codeberg pages branch"
+    runs-on: docker
+    container: webgrip/techdocs-runner:latest
+    steps:
+      - name: Get TechDocs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: techdocs-site
+          path: ./techdocs-site
+
+      - run: apk add --no-cache git
+
+      - name: Publish site to Codeberg pages branch
+        env:
+          CODEBERG_TOKEN: ${{ secrets.CODEBERG_TOKEN }}
+          OWNER: ${{ inputs.codeberg-owner }}
+          REPO: ${{ inputs.codeberg-repo }}
+          USER: ${{ inputs.codeberg-user }}
+          DOMAIN: ${{ inputs.domain }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          PUBLISH_DIR="./techdocs-site"
+          PAGES_BRANCH="pages"
+          HOST="codeberg.org"
+
+          # Codeberg Pages reads custom domains from a `.domains` file (first line = canonical).
+          if [[ -n "$DOMAIN" ]]; then
+            printf '%s\n' "$DOMAIN" > "${PUBLISH_DIR}/.domains"
+          fi
+
+          # Orphan snapshot: each deploy is a clean, history-free pages branch.
+          work="$(mktemp -d)"
+          cp -a "${PUBLISH_DIR}/." "$work/"
+          cd "$work"
+
+          git init -q
+          git checkout -q --orphan "$PAGES_BRANCH"
+          git config user.name "$USER"
+          git config user.email "${USER}@noreply.${HOST}"
+          git add -A
+          git commit -q -m "docs: publish techdocs site (${GITHUB_SHA})"
+
+          # Token auth over HTTPS; credentials are interpolated inline and never echoed.
+          git push -f "https://${USER}:${CODEBERG_TOKEN}@${HOST}/${OWNER}/${REPO}.git" \
+            "HEAD:refs/heads/${PAGES_BRANCH}"
