@@ -16,7 +16,7 @@ concurrency:
 jobs:
   generate-techdocs:
     name: "techdocs"
-    runs-on: arc-runner-set
+    runs-on: docker
     container: webgrip/techdocs-runner:latest
     steps:
       - uses: actions/checkout@v4

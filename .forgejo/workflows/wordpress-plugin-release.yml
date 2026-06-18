@@ -81,7 +81,7 @@ on:
 jobs:
   prepare:
     name: 'Prepare'
-    runs-on: arc-runner-set
+    runs-on: docker
     outputs:
       slugs: ${{ steps.slugs.outputs.json }}
     steps:
@@ -124,7 +124,7 @@ jobs:
 
   distribute:
     name: 'Distribute'
-    runs-on: arc-runner-set
+    runs-on: docker
     needs: [prepare, release]
     if: >
       always()
@@ -215,7 +215,7 @@ jobs:
 
   upload:
     name: 'Upload Release Assets'
-    runs-on: arc-runner-set
+    runs-on: docker
     needs: [release, distribute]
     if: >
       always()

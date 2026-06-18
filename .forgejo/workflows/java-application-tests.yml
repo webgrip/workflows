@@ -17,7 +17,7 @@ on:
 jobs:
   tests-run:
     name: 'Java test suite'
-    runs-on: arc-runner-set
+    runs-on: docker
 
     steps:
       - uses: actions/checkout@v4

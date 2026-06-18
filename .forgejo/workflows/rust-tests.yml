@@ -15,7 +15,7 @@ env:
 jobs:
   tests:
     name: 'Cargo Tests'
-    runs-on: arc-runner-set
+    runs-on: docker
 
     container:
       image: webgrip/rust-ci-runner:latest

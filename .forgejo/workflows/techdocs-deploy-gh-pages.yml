@@ -19,7 +19,7 @@ on:
 jobs:
   deploy-gh-pages:
     name: "Publish to pages branch"
-    runs-on: arc-runner-set
+    runs-on: docker
     container: webgrip/techdocs-runner:latest
     env:
       FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}

@@ -9,7 +9,7 @@ env:
 jobs:
   static-analysis-run:
     name: 'Static Analysis (fmt, Clippy, Audit, Deny, Udeps, Outdated)'
-    runs-on: arc-runner-set
+    runs-on: docker
 
     container:
       image: webgrip/rust-ci-runner:latest

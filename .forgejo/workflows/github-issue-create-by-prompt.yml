@@ -43,7 +43,7 @@ on:
 jobs:
   ai-inference:
     name: "AI Inference (single prompt file)"
-    runs-on: arc-runner-set
+    runs-on: docker
     # Forgejo: dropped models:read (GitHub Models replaced by direct OpenAI)
     permissions:
       contents: read
@@ -155,7 +155,7 @@ jobs:
 
   bootstrap-issue:
     name: "Bootstrap repository issue"
-    runs-on: arc-runner-set
+    runs-on: docker
     needs: ai-inference
     env:
       ORG: ${{ github.repository_owner }}

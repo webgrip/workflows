@@ -55,7 +55,7 @@ permissions:
 jobs:
   static-analysis-run:
     name: 'Static Analysis (Prettier, ESLint, Typecheck, Audit, Knip, Outdated)'
-    runs-on: arc-runner-set
+    runs-on: docker
     steps:
       - uses: actions/checkout@v5
 

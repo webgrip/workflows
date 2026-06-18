@@ -10,7 +10,7 @@ on:
 jobs:
   composer-install-on-container:
     name: 'Composer install on container'
-    runs-on: arc-runner-set
+    runs-on: docker
     container:
       image: composer:2.8.5
       env:

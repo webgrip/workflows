@@ -56,7 +56,7 @@ permissions:
 jobs:
   build:
     name: "Docker Build and Push (Registry)"
-    runs-on: [homelab, heavy]
+    runs-on: docker
     steps:
       - uses: webgrip/workflows/.forgejo/composite-actions/docker-build-push-ghcr@main
         with:

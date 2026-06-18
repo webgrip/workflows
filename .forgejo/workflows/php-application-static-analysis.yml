@@ -16,7 +16,7 @@ on:
 jobs:
   static-analysis-run:
     name: 'Static Analysis (PHPStan, PHPMD, PHPCS, Rector)'
-    runs-on: arc-runner-set
+    runs-on: docker
 
     container:
       image: ${{ inputs.runner-image }}

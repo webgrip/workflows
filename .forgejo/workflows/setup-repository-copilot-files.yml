@@ -49,7 +49,7 @@ defaults:
 jobs:
   copilot:
     name: "Bootstrap copilot files"
-    runs-on: arc-runner-set
+    runs-on: docker
     outputs:
       repository_url: ${{ steps.compute-urls.outputs.repository_url }}
 

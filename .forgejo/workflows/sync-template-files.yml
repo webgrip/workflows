@@ -27,7 +27,7 @@ on:
 jobs:
   sync-files:
     name: 'Sync Template Files'
-    runs-on: arc-runner-set
+    runs-on: docker
 
     env:
       FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}

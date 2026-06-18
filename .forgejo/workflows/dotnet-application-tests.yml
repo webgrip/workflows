@@ -49,7 +49,7 @@ env:
 jobs:
   tests-run:
     name: 'dotnet test'
-    runs-on: arc-runner-set
+    runs-on: docker
     steps:
       - uses: actions/checkout@v5
 

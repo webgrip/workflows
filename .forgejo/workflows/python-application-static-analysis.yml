@@ -12,7 +12,7 @@ on:
 jobs:
   static-analysis-run:
     name: 'Static Analysis (Ruff, MyPy, Bandit, Pip Audit, Deptry)'
-    runs-on: arc-runner-set
+    runs-on: docker
 
     steps:
       - uses: actions/checkout@v4

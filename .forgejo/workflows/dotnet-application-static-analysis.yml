@@ -54,7 +54,7 @@ env:
 jobs:
   static-analysis-run:
     name: 'Static Analysis (.NET Format, Build, Vulnerabilities, Outdated)'
-    runs-on: arc-runner-set
+    runs-on: docker
     steps:
       - uses: actions/checkout@v5
 

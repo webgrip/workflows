@@ -28,7 +28,7 @@ concurrency:
 jobs:
   install-deps-generate-and-deploy:
     name: "Install dependencies, generate with mkdocs, upload artifact and publish to pages branch"
-    runs-on: arc-runner-set
+    runs-on: docker
     container: webgrip/mkdocs-runner:latest
     env:
       FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}

@@ -33,7 +33,7 @@ run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
 jobs:
   build:
     name: "Docker Build and Push"
-    runs-on: [homelab, heavy]
+    runs-on: docker
     steps:
       - uses: webgrip/workflows/.forgejo/composite-actions/docker-build-push@main
         with:

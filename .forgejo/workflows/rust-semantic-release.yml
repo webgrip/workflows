@@ -31,7 +31,7 @@ env:
 jobs:
   semantic-release:
     name: "Semantic Release"
-    runs-on: arc-runner-set
+    runs-on: docker
     container:
       image: webgrip/rust-releaser:latest
     outputs:

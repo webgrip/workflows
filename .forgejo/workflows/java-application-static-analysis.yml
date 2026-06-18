@@ -17,7 +17,7 @@ on:
 jobs:
   static-analysis-run:
     name: 'Static Analysis (Spotless, Check, Dependency Check, Versions)'
-    runs-on: arc-runner-set
+    runs-on: docker
 
     steps:
       - uses: actions/checkout@v4

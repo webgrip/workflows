@@ -15,7 +15,7 @@ env:
 jobs:
   tests-run:
     name: '${{ matrix.testsuite }}'
-    runs-on: arc-runner-set
+    runs-on: docker
 
     container:
       image: ${{ inputs.runner-image }}
