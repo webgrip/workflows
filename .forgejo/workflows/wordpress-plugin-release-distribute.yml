@@ -119,7 +119,7 @@ jobs:
         plugin_slug: ${{ fromJSON(needs.prepare.outputs.slugs) }}
     steps:
       - name: 'Check out repository'
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ inputs.checkout-ref != '' && inputs.checkout-ref || format('refs/tags/{0}{1}', inputs.tag-prefix, inputs.version) }}

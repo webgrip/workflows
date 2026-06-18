@@ -51,7 +51,7 @@ jobs:
     name: 'dotnet test'
     runs-on: docker
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Cache NuGet packages
         uses: actions/cache@v4

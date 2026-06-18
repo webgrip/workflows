@@ -57,7 +57,7 @@ jobs:
     name: 'Static Analysis (Prettier, ESLint, Typecheck, Audit, Knip, Outdated)'
     runs-on: docker
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Detect package manager
         id: detect-package-manager

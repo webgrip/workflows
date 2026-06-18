@@ -76,7 +76,7 @@ jobs:
 
       # Operate directly on default branch (main).
       - name: Check out new repo (main)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: ${{ env.ORG }}/${{ env.NEW_REPO }}
           ref: main
