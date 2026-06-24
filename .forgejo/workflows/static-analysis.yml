@@ -50,7 +50,7 @@ jobs:
     name: 'Composer Normalize'
     runs-on: docker
     container:
-        image: composer:2.8.5
+        image: composer:2.10.1
     steps:
       - uses: actions/checkout@v4
       - uses: actions/cache@v4
