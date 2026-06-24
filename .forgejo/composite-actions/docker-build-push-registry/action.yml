@@ -1,11 +1,10 @@
-name: "[Action] Build and Push Docker Image (Harbor)"
-description: "Builds and pushes a multi-arch Docker image to the in-cluster Harbor OCI registry. Auth: REGISTRY_USERNAME/REGISTRY_TOKEN (a Harbor robot account); optional DOCKER_USERNAME/DOCKER_TOKEN for authenticated base-image pulls."
+name: "[Action] Build and Push Docker Image (Registry)"
+description: "Builds and pushes a multi-arch Docker image to a configurable OCI registry (Harbor, GHCR, …). Single source of build/login/tag-normalization/summary logic; the per-registry reusable workflows (docker-build-and-push-{harbor,ghcr}.yml) wrap this via docker-build-and-push-registry.yml. Auth: REGISTRY_USERNAME/REGISTRY_TOKEN for the target registry; optional DOCKER_USERNAME/DOCKER_TOKEN for authenticated base-image pulls."
 
 inputs:
   registry:
-    description: "Harbor registry host (defaults to the in-cluster Harbor)."
-    required: false
-    default: "harbor.webgrip.dev"
+    description: "Target registry host, e.g. harbor.webgrip.dev or ghcr.io."
+    required: true
   docker-context:
     description: "Docker context"
     required: true
@@ -180,7 +179,7 @@ runs:
             '```' + lang + '\n' + String(content).replace(/```/g, '`\u200b``') + '\n```';
 
           core.summary
-            .addHeading('Docker Build and Push (Harbor)', 2)
+            .addHeading('Docker Build and Push (Registry)', 2)
             .addTable([
               [
                 { data: 'Field', header: true },

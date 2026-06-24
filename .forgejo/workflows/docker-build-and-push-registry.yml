@@ -1,0 +1,85 @@
+name: 'Docker Build and Push (Registry)'
+
+# Single engine reusable workflow: builds + pushes a multi-arch image to ANY OCI registry via the
+# docker-build-push-registry composite action. This is the one place the build job (runs-on: docker
+# + the action call + secret wiring) is defined. The per-registry wrappers
+# (docker-build-and-push-harbor.yml, docker-build-and-push-ghcr.yml) call THIS with a fixed
+# `registry` and their named secrets mapped onto REGISTRY_USERNAME/REGISTRY_TOKEN, so registry
+# specifics stay in the thin wrappers and all build logic lives here / in the composite action.
+
+on:
+  workflow_call:
+    secrets:
+      REGISTRY_USERNAME:
+        description: 'Username with push access to the target registry.'
+        required: true
+      REGISTRY_TOKEN:
+        description: 'Password/token with push access to the target registry.'
+        required: true
+      DOCKER_USERNAME:
+        description: 'Docker Hub username for authenticated base-image pulls (avoids rate limits).'
+        required: false
+      DOCKER_TOKEN:
+        description: 'Docker Hub PAT or password for authenticated base-image pulls.'
+        required: false
+    inputs:
+      registry:
+        type: string
+        description: 'Target registry host, e.g. harbor.webgrip.dev or ghcr.io.'
+        required: true
+      docker-context:
+        type: string
+        description: 'Docker context'
+        required: true
+        default: '.'
+      docker-file:
+        type: string
+        description: 'Dockerfile path from the context'
+        required: true
+        default: 'Dockerfile'
+      docker-tags:
+        type: string
+        description: 'Docker tags (one per line). Bare OWNER/IMAGE[:TAG] is prefixed with the registry.'
+        required: true
+      platforms:
+        type: string
+        description: 'Target platforms (comma-separated)'
+        required: false
+        default: 'linux/amd64,linux/arm64'
+      docker-target:
+        type: string
+        description: 'Docker target'
+        required: false
+        default: ''
+      docker-build-args:
+        type: string
+        description: 'Docker build args (newline-separated KEY=VALUE entries)'
+        required: false
+        default: ''
+
+run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }} -> ${{ inputs.registry }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "Docker Build and Push (Registry)"
+    # The in-cluster Forgejo runner is the only pool (advertises `docker`); it is also the only one
+    # that can reach LAN-only registries such as Harbor.
+    runs-on: docker
+    steps:
+      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-registry@main
+        with:
+          registry: ${{ inputs.registry }}
+          docker-context: ${{ inputs.docker-context }}
+          docker-file: ${{ inputs.docker-file }}
+          docker-tags: ${{ inputs.docker-tags }}
+          platforms: ${{ inputs.platforms }}
+          docker-target: ${{ inputs.docker-target }}
+          docker-build-args: ${{ inputs.docker-build-args }}
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}

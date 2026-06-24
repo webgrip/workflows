@@ -1,3 +1,9 @@
+name: 'Docker Build and Push (GHCR)'
+
+# Thin wrapper around docker-build-and-push-registry.yml: this file holds ONLY the GHCR-specific
+# bits — the registry is pinned to ghcr.io. All build logic lives in the engine workflow /
+# docker-build-push-registry composite action.
+
 on:
   workflow_call:
     secrets:
@@ -52,18 +58,18 @@ permissions:
 jobs:
   build:
     name: "Docker Build and Push (GHCR)"
-    runs-on: docker
-    steps:
-      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-ghcr@main
-        with:
-          docker-context: ${{ inputs.docker-context }}
-          docker-file: ${{ inputs.docker-file }}
-          docker-tags: ${{ inputs.docker-tags }}
-          platforms: ${{ inputs.platforms }}
-          docker-target: ${{ inputs.docker-target }}
-          docker-build-args: ${{ inputs.docker-build-args }}
-        env:
-          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+    # Delegate to the generic engine workflow with the registry pinned to ghcr.io.
+    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push-registry.yml@main
+    with:
+      registry: ghcr.io
+      docker-context: ${{ inputs.docker-context }}
+      docker-file: ${{ inputs.docker-file }}
+      docker-tags: ${{ inputs.docker-tags }}
+      platforms: ${{ inputs.platforms }}
+      docker-target: ${{ inputs.docker-target }}
+      docker-build-args: ${{ inputs.docker-build-args }}
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+      REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}

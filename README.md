@@ -119,8 +119,11 @@ jobs:
 
 A bare `webgrip/<image>:<tag>` tag is prefixed with the registry → `harbor.webgrip.dev/webgrip/<image>:<tag>`.
 `registry` defaults to `harbor.webgrip.dev` (override only to point at another Harbor host). The robot login,
-secret masking, and multi-arch buildx push are handled by the per-registry composite actions:
-`docker-build-push-harbor` (Harbor), `docker-build-push-ghcr` (ghcr.io), `docker-build-push` (Docker Hub).
+secret masking, and multi-arch buildx push live in **one** engine — the `docker-build-push-registry`
+composite action, wrapped by the `docker-build-and-push-registry.yml` reusable workflow. The per-registry
+workflows are thin: `docker-build-and-push-harbor.yml` (registry → `harbor.webgrip.dev`, maps the
+`HARBOR_ROBOT_*` secrets) and `docker-build-and-push-ghcr.yml` (registry → `ghcr.io`) just `uses:` the
+engine workflow. (`docker-build-and-push.yml` → Docker Hub remains a separate engine.)
 
 ## 📦 Available Workflows
 

@@ -3,8 +3,11 @@ name: 'Docker Build and Push (Harbor)'
 # Forgejo-only: publishes webgrip images to the in-cluster Harbor OCI registry
 # (harbor.webgrip.dev, LAN-only). MUST run on the in-cluster Forgejo runner — only it
 # can reach Harbor via split-DNS -> envoy-internal (10.0.0.27) with a valid TLS cert.
-# Reuses the generic registry build/push engine; the existing ghcr/Docker Hub
-# workflows are left untouched so consumers can dual-publish during migration.
+# Thin wrapper around docker-build-and-push-registry.yml: this file holds ONLY the
+# Harbor-specific bits (registry default + mapping the HARBOR_ROBOT_* secrets onto the
+# generic REGISTRY_USERNAME/REGISTRY_TOKEN). All build logic lives in the engine workflow
+# / docker-build-push-registry composite action. Public interface is unchanged, so callers
+# (e.g. infrastructure's on_release_published.yml) need no edits.
 
 on:
   workflow_call:
@@ -65,23 +68,19 @@ permissions:
 jobs:
   build:
     name: "Docker Build and Push (Harbor)"
-    # In-cluster Forgejo runner (the only one that can reach LAN-only Harbor).
-    runs-on: docker
-    steps:
-      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-harbor@main
-        with:
-          registry: ${{ inputs.registry }}
-          docker-context: ${{ inputs.docker-context }}
-          docker-file: ${{ inputs.docker-file }}
-          docker-tags: ${{ inputs.docker-tags }}
-          platforms: ${{ inputs.platforms }}
-          docker-target: ${{ inputs.docker-target }}
-          docker-build-args: ${{ inputs.docker-build-args }}
-        env:
-          # The Harbor engine logs in with docker/login-action (username is a YAML
-          # value, so the literal '$' in robot$webgrip+ci is not shell-expanded; the
-          # token is masked and never echoed).
-          REGISTRY_USERNAME: ${{ secrets.HARBOR_ROBOT_USER }}
-          REGISTRY_TOKEN: ${{ secrets.HARBOR_ROBOT_TOKEN }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+    # Delegate to the generic engine workflow; Harbor's robot creds map onto REGISTRY_*.
+    # (The literal '$' in the robot username robot$webgrip+ci is a YAML value, not shell-expanded.)
+    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push-registry.yml@main
+    with:
+      registry: ${{ inputs.registry }}
+      docker-context: ${{ inputs.docker-context }}
+      docker-file: ${{ inputs.docker-file }}
+      docker-tags: ${{ inputs.docker-tags }}
+      platforms: ${{ inputs.platforms }}
+      docker-target: ${{ inputs.docker-target }}
+      docker-build-args: ${{ inputs.docker-build-args }}
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.HARBOR_ROBOT_USER }}
+      REGISTRY_TOKEN: ${{ secrets.HARBOR_ROBOT_TOKEN }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
