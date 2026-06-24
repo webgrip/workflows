@@ -34,7 +34,7 @@ jobs:
       version: ${{ steps.semantic-release.outputs.version }}
     steps:
       - id: semantic-release
-        uses: webgrip/workflows/.forgejo/composite-actions/semantic-release@main
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/semantic-release@main
         with:
           release-type: ${{ inputs.release-type }}
           token: ${{ secrets.FORGEJO_TOKEN }}

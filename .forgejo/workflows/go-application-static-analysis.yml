@@ -98,7 +98,7 @@ jobs:
 
       - name: Render summary
         if: ${{ always() }}
-        uses: webgrip/workflows/.forgejo/composite-actions/workflow-status-summary@main
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/workflow-status-summary@main
         with:
           title: 'Go Static Analysis'
           subtitle: 'Quality gate for Go modules'

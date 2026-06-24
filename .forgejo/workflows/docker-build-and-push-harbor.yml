@@ -68,7 +68,7 @@ jobs:
     # In-cluster Forgejo runner (the only one that can reach LAN-only Harbor).
     runs-on: docker
     steps:
-      - uses: webgrip/workflows/.forgejo/composite-actions/docker-build-push-ghcr@main
+      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-ghcr@main
         with:
           registry: ${{ inputs.registry }}
           docker-context: ${{ inputs.docker-context }}

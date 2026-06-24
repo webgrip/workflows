@@ -58,7 +58,7 @@ jobs:
     name: "Docker Build and Push (Registry)"
     runs-on: docker
     steps:
-      - uses: webgrip/workflows/.forgejo/composite-actions/docker-build-push-ghcr@main
+      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-ghcr@main
         with:
           registry: ${{ inputs.registry }}
           docker-context: ${{ inputs.docker-context }}
