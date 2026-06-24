@@ -29,7 +29,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: actions/github-script@v8
+    - uses: https://github.com/actions/github-script@v8
       env:
         INPUT_TITLE: ${{ inputs.title }}
         INPUT_SUBTITLE: ${{ inputs.subtitle }}

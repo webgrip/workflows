@@ -146,7 +146,7 @@ runs:
 
     - name: Render build summary
       if: always()
-      uses: actions/github-script@v8
+      uses: https://github.com/actions/github-script@v8
       env:
         BUILD_DIGEST: ${{ steps.build.outputs.digest }}
         BUILD_METADATA: ${{ steps.build.outputs.metadata }}
