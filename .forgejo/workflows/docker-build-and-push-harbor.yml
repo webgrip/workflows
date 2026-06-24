@@ -68,7 +68,7 @@ jobs:
     # In-cluster Forgejo runner (the only one that can reach LAN-only Harbor).
     runs-on: docker
     steps:
-      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-ghcr@main
+      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-harbor@main
         with:
           registry: ${{ inputs.registry }}
           docker-context: ${{ inputs.docker-context }}
@@ -78,7 +78,7 @@ jobs:
           docker-target: ${{ inputs.docker-target }}
           docker-build-args: ${{ inputs.docker-build-args }}
         env:
-          # The generic engine logs in with docker/login-action (username is a YAML
+          # The Harbor engine logs in with docker/login-action (username is a YAML
           # value, so the literal '$' in robot$webgrip+ci is not shell-expanded; the
           # token is masked and never echoed).
           REGISTRY_USERNAME: ${{ secrets.HARBOR_ROBOT_USER }}

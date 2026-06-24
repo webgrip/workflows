@@ -94,10 +94,9 @@ the migration by running both:
 
 ```yaml
 jobs:
-  publish-ghcr:        # keeps ghcr populated (existing workflow, unchanged)
+  publish-ghcr:        # keeps ghcr populated (pushes to ghcr.io)
     uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push-ghcr.yml@main
     with:
-      registry: ghcr.io
       docker-context: '.'
       docker-file: './ops/docker/<image>/Dockerfile'
       docker-tags: 'ghcr.io/webgrip/<image>:latest'
@@ -120,7 +119,8 @@ jobs:
 
 A bare `webgrip/<image>:<tag>` tag is prefixed with the registry → `harbor.webgrip.dev/webgrip/<image>:<tag>`.
 `registry` defaults to `harbor.webgrip.dev` (override only to point at another Harbor host). The robot login,
-secret masking, and multi-arch buildx push are handled by the shared registry engine action.
+secret masking, and multi-arch buildx push are handled by the per-registry composite actions:
+`docker-build-push-harbor` (Harbor), `docker-build-push-ghcr` (ghcr.io), `docker-build-push` (Docker Hub).
 
 ## 📦 Available Workflows
 

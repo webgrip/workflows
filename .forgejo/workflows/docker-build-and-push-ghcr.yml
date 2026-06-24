@@ -2,10 +2,10 @@ on:
   workflow_call:
     secrets:
       REGISTRY_USERNAME:
-        description: 'Registry username (e.g. Harbor robot account) with push access.'
+        description: 'GHCR username (a GitHub user/org) with write:packages.'
         required: true
       REGISTRY_TOKEN:
-        description: 'Registry password/token (e.g. Harbor robot token) with push access.'
+        description: 'GHCR token — a PAT (or GITHUB_TOKEN) with write:packages.'
         required: true
       DOCKER_USERNAME:
         description: 'Docker Hub username for authenticated base-image pulls (avoids rate limits).'
@@ -14,10 +14,6 @@ on:
         description: 'Docker Hub PAT or password for authenticated base-image pulls.'
         required: false
     inputs:
-      registry:
-        type: string
-        description: 'Target registry host, e.g. harbor.<domain> (Harbor) or the Forgejo registry host.'
-        required: true
       docker-context:
         type: string
         description: 'Docker context'
@@ -55,12 +51,11 @@ permissions:
 
 jobs:
   build:
-    name: "Docker Build and Push (Registry)"
+    name: "Docker Build and Push (GHCR)"
     runs-on: docker
     steps:
       - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-ghcr@main
         with:
-          registry: ${{ inputs.registry }}
           docker-context: ${{ inputs.docker-context }}
           docker-file: ${{ inputs.docker-file }}
           docker-tags: ${{ inputs.docker-tags }}

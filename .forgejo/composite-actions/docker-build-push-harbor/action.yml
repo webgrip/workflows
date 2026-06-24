@@ -1,7 +1,11 @@
-name: "[Action] Build and Push Docker Image (GHCR)"
-description: "Builds and pushes a multi-arch Docker image to GitHub Container Registry (ghcr.io). Auth: REGISTRY_USERNAME (GitHub user/org) + REGISTRY_TOKEN (a PAT or GITHUB_TOKEN with write:packages); optional DOCKER_USERNAME/DOCKER_TOKEN for authenticated base-image pulls."
+name: "[Action] Build and Push Docker Image (Harbor)"
+description: "Builds and pushes a multi-arch Docker image to the in-cluster Harbor OCI registry. Auth: REGISTRY_USERNAME/REGISTRY_TOKEN (a Harbor robot account); optional DOCKER_USERNAME/DOCKER_TOKEN for authenticated base-image pulls."
 
 inputs:
+  registry:
+    description: "Harbor registry host (defaults to the in-cluster Harbor)."
+    required: false
+    default: "harbor.webgrip.dev"
   docker-context:
     description: "Docker context"
     required: true
@@ -11,7 +15,7 @@ inputs:
     required: true
     default: "Dockerfile"
   docker-tags:
-    description: "One tag per line: OWNER/IMAGE[:TAG] or ghcr.io/OWNER/IMAGE[:TAG] (defaults :latest, enforces the ghcr.io registry)"
+    description: "One tag per line: OWNER/IMAGE[:TAG] or <registry>/OWNER/IMAGE[:TAG] (defaults :latest, enforces the configured registry)"
     required: true
   platforms:
     description: "Target platforms (comma-separated)"
@@ -42,7 +46,7 @@ runs:
     - uses: docker/setup-buildx-action@v3
     - uses: docker/login-action@v3
       with:
-        registry: ghcr.io
+        registry: ${{ inputs.registry }}
         username: ${{ env.REGISTRY_USERNAME }}
         password: ${{ env.REGISTRY_TOKEN }}
 
@@ -50,9 +54,14 @@ runs:
       id: normalized-tags
       shell: bash
       env:
-        REGISTRY: ghcr.io
+        REGISTRY: ${{ inputs.registry }}
       run: |
         set -euo pipefail
+
+        if [[ -z "${REGISTRY//[[:space:]]/}" ]]; then
+          echo "registry input is empty" >&2
+          exit 1
+        fi
 
         raw="${{ inputs.docker-tags }}"
         if [[ -z "${raw//[[:space:]]/}" ]]; then
@@ -171,7 +180,7 @@ runs:
             '```' + lang + '\n' + String(content).replace(/```/g, '`\u200b``') + '\n```';
 
           core.summary
-            .addHeading('Docker Build and Push (GHCR)', 2)
+            .addHeading('Docker Build and Push (Harbor)', 2)
             .addTable([
               [
                 { data: 'Field', header: true },
