@@ -8,7 +8,7 @@ jobs:
     name: 'Static Analysis (PHPStan, PHPMD, PHPCS, Rector)'
     runs-on: docker
     container:
-        image: php:8.2-cli
+        image: php:8.5-cli
     steps:
       - uses: actions/checkout@v4
 
