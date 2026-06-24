@@ -19,7 +19,7 @@ jobs:
     runs-on: arc-runner-set
     container: webgrip/techdocs-runner:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - run: |
           techdocs-cli generate --no-docker --verbose --source-dir ${{ inputs.source-dir }} --output-dir techdocs-site
