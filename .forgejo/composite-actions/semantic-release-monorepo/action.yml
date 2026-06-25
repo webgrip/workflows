@@ -23,7 +23,16 @@ runs:
     - name: Set up Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: "22"
+        node-version: "24"
+
+    # Cache the npm download cache so the (unpinned-lockfile) semantic-release install resolves
+    # from disk instead of re-fetching ~400 packages every run. Bump the key suffix when the
+    # pinned versions below change.
+    - name: Cache npm downloads
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-npm-semrel-24.2.7
 
     - name: Run semantic-release
       shell: bash
