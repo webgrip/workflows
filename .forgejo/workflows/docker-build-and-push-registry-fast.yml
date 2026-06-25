@@ -1,0 +1,85 @@
+name: 'Docker Build and Push (Registry, fast)'
+
+# Fast variant of docker-build-and-push-registry.yml (ADR-0036). Identical engine, but defaults
+# `platforms` to linux/amd64 and delegates to the docker-build-push-registry-fast composite, which
+# skips QEMU/emulation unless a non-amd64 arch is explicitly requested. Constrictor sibling: the
+# per-registry -fast wrappers (docker-build-and-push-harbor-fast.yml) call THIS; callers migrate one
+# at a time, and the non-fast chain is removed once nothing references it. The Harbor registry layer
+# cache is inherited unchanged from the composite.
+
+on:
+  workflow_call:
+    secrets:
+      REGISTRY_USERNAME:
+        description: 'Username with push access to the target registry.'
+        required: true
+      REGISTRY_TOKEN:
+        description: 'Password/token with push access to the target registry.'
+        required: true
+      DOCKER_USERNAME:
+        description: 'Docker Hub username for authenticated base-image pulls (avoids rate limits).'
+        required: false
+      DOCKER_TOKEN:
+        description: 'Docker Hub PAT or password for authenticated base-image pulls.'
+        required: false
+    inputs:
+      registry:
+        type: string
+        description: 'Target registry host, e.g. harbor.webgrip.dev or ghcr.io.'
+        required: true
+      docker-context:
+        type: string
+        description: 'Docker context'
+        required: true
+        default: '.'
+      docker-file:
+        type: string
+        description: 'Dockerfile path from the context'
+        required: true
+        default: 'Dockerfile'
+      docker-tags:
+        type: string
+        description: 'Docker tags (one per line). Bare OWNER/IMAGE[:TAG] is prefixed with the registry.'
+        required: true
+      platforms:
+        type: string
+        description: 'Target platforms (comma-separated). Defaults to linux/amd64; pass a multi-arch value to re-enable QEMU.'
+        required: false
+        default: 'linux/amd64'
+      docker-target:
+        type: string
+        description: 'Docker target'
+        required: false
+        default: ''
+      docker-build-args:
+        type: string
+        description: 'Docker build args (newline-separated KEY=VALUE entries)'
+        required: false
+        default: ''
+
+run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }} -> ${{ inputs.registry }} (fast)
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "Docker Build and Push (Registry, fast)"
+    # The in-cluster Forgejo runner is the only pool (advertises `docker`); it is also the only one
+    # that can reach LAN-only registries such as Harbor.
+    runs-on: docker
+    steps:
+      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-registry-fast@main
+        with:
+          registry: ${{ inputs.registry }}
+          docker-context: ${{ inputs.docker-context }}
+          docker-file: ${{ inputs.docker-file }}
+          docker-tags: ${{ inputs.docker-tags }}
+          platforms: ${{ inputs.platforms }}
+          docker-target: ${{ inputs.docker-target }}
+          docker-build-args: ${{ inputs.docker-build-args }}
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}

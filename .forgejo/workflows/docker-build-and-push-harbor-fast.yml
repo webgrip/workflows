@@ -1,0 +1,84 @@
+name: 'Docker Build and Push (Harbor, fast)'
+
+# Fast variant of docker-build-and-push-harbor.yml (ADR-0036). Same Harbor-specific wiring
+# (registry default + HARBOR_ROBOT_* -> REGISTRY_* mapping), but defaults `platforms` to
+# linux/amd64 and delegates to the -fast engine workflow, so amd64 builds skip QEMU/emulation.
+# Constrictor entrypoint: an app repo opts into the fast path by switching its `uses:` from
+# .../docker-build-and-push-harbor.yml@main to .../docker-build-and-push-harbor-fast.yml@main —
+# no other change. Public interface is otherwise identical to the non-fast wrapper.
+
+on:
+  workflow_call:
+    secrets:
+      HARBOR_ROBOT_USER:
+        description: "Harbor robot account with push access (e.g. robot$webgrip+ci)."
+        required: true
+      HARBOR_ROBOT_TOKEN:
+        description: "Harbor robot token (OpenBao secret/harbor/robot-webgrip key CI_TOKEN)."
+        required: true
+      DOCKER_USERNAME:
+        description: "Docker Hub username for authenticated base-image pulls (avoids rate limits)."
+        required: false
+      DOCKER_TOKEN:
+        description: "Docker Hub PAT or password for authenticated base-image pulls."
+        required: false
+    inputs:
+      registry:
+        type: string
+        description: "Harbor registry host. Defaults to the in-cluster Harbor."
+        required: false
+        default: 'harbor.webgrip.dev'
+      docker-context:
+        type: string
+        description: 'Docker context'
+        required: true
+        default: '.'
+      docker-file:
+        type: string
+        description: 'Dockerfile path from the context'
+        required: true
+        default: 'Dockerfile'
+      docker-tags:
+        type: string
+        description: 'Docker tags (one per line). Bare OWNER/IMAGE[:TAG] is prefixed with the registry, e.g. webgrip/<image>:<tag> -> harbor.webgrip.dev/webgrip/<image>:<tag>.'
+        required: true
+      platforms:
+        type: string
+        description: 'Target platforms (comma-separated). Defaults to linux/amd64; pass a multi-arch value to re-enable QEMU.'
+        required: false
+        default: 'linux/amd64'
+      docker-target:
+        type: string
+        description: 'Docker target'
+        required: false
+        default: ''
+      docker-build-args:
+        type: string
+        description: 'Docker build args (newline-separated KEY=VALUE entries)'
+        required: false
+        default: ''
+
+run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }} -> ${{ inputs.registry }} (fast)
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: "Docker Build and Push (Harbor, fast)"
+    # Delegate to the generic -fast engine workflow; Harbor's robot creds map onto REGISTRY_*.
+    # (The literal '$' in the robot username robot$webgrip+ci is a YAML value, not shell-expanded.)
+    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push-registry-fast.yml@main
+    with:
+      registry: ${{ inputs.registry }}
+      docker-context: ${{ inputs.docker-context }}
+      docker-file: ${{ inputs.docker-file }}
+      docker-tags: ${{ inputs.docker-tags }}
+      platforms: ${{ inputs.platforms }}
+      docker-target: ${{ inputs.docker-target }}
+      docker-build-args: ${{ inputs.docker-build-args }}
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.HARBOR_ROBOT_USER }}
+      REGISTRY_TOKEN: ${{ secrets.HARBOR_ROBOT_TOKEN }}
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}

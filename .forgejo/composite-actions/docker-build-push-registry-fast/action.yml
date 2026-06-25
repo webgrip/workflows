@@ -1,0 +1,226 @@
+name: "[Action] Build and Push Docker Image (Registry, fast)"
+description: >
+  Fast variant of docker-build-push-registry: identical build/login/tag-normalization/summary/cache
+  logic, but defaults to a SINGLE platform (linux/amd64) and only sets up QEMU when a non-amd64
+  arch is actually requested. The homelab is amd64-only (Talos), so emulated arm64 — the single
+  biggest build-time cost — is skipped by default. See ADR-0036. Constrictor sibling of
+  docker-build-push-registry; callers migrate onto the -fast reusable workflows one at a time and
+  the original is removed once nothing references it. buildx is KEPT (the docker-container driver is
+  required for `cache-to: type=registry` to export); the Harbor registry layer cache is unchanged.
+
+inputs:
+  registry:
+    description: "Target registry host, e.g. harbor.webgrip.dev or ghcr.io."
+    required: true
+  docker-context:
+    description: "Docker context"
+    required: true
+    default: "."
+  docker-file:
+    description: "Dockerfile path from the context"
+    required: true
+    default: "Dockerfile"
+  docker-tags:
+    description: "One tag per line: OWNER/IMAGE[:TAG] or <registry>/OWNER/IMAGE[:TAG] (defaults :latest, enforces the configured registry)"
+    required: true
+  platforms:
+    description: "Target platforms (comma-separated). Defaults to linux/amd64; pass a multi-arch value (e.g. linux/amd64,linux/arm64) to re-enable QEMU + emulation."
+    required: false
+    default: "linux/amd64"
+  docker-target:
+    description: "Docker target"
+    required: false
+    default: ""
+  docker-build-args:
+    description: "Docker build args (newline-separated KEY=VALUE entries)"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v4
+
+    - name: Log in to Docker Hub (authenticated pulls)
+      if: env.DOCKER_USERNAME != '' && env.DOCKER_TOKEN != ''
+      uses: docker/login-action@v3
+      with:
+        username: ${{ env.DOCKER_USERNAME }}
+        password: ${{ env.DOCKER_TOKEN }}
+
+    # QEMU/binfmt is only needed to build a non-host arch under emulation. Skip it for the
+    # amd64-only default (the homelab's only arch) — this is the main speedup over the base action.
+    - name: Set up QEMU (only when a non-amd64 arch is requested)
+      if: ${{ inputs.platforms != 'linux/amd64' }}
+      uses: docker/setup-qemu-action@v3
+    # buildx stays: `cache-to: type=registry` needs the docker-container driver it provides.
+    - uses: docker/setup-buildx-action@v3
+    - uses: docker/login-action@v3
+      with:
+        registry: ${{ inputs.registry }}
+        username: ${{ env.REGISTRY_USERNAME }}
+        password: ${{ env.REGISTRY_TOKEN }}
+
+    - name: Enforce registry tag format
+      id: normalized-tags
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+      run: |
+        set -euo pipefail
+
+        if [[ -z "${REGISTRY//[[:space:]]/}" ]]; then
+          echo "registry input is empty" >&2
+          exit 1
+        fi
+
+        raw="${{ inputs.docker-tags }}"
+        if [[ -z "${raw//[[:space:]]/}" ]]; then
+          echo "docker-tags input is empty" >&2
+          exit 1
+        fi
+
+        normalized=()
+        while IFS= read -r line; do
+          tag="${line//$'\r'/}"
+
+          # Trim leading/trailing whitespace (pure bash).
+          tag="${tag#"${tag%%[![:space:]]*}"}"
+          tag="${tag%"${tag##*[![:space:]]}"}"
+
+          [[ -z "$tag" ]] && continue
+
+          # Accept either:
+          #   - OWNER/IMAGE[:TAG]
+          #   - <registry>/OWNER/IMAGE[:TAG]
+          if [[ "$tag" != "$REGISTRY"/* ]]; then
+            # If the first component looks like a registry, reject unless it's the configured one.
+            # Docker treats the first component as a registry only when it contains '.' or ':' or is 'localhost'.
+            first="${tag%%/*}"
+            if [[ "$tag" == */* && ( "$first" == *.* || "$first" == *:* || "$first" == "localhost" ) ]]; then
+              echo "Only the '$REGISTRY' registry is allowed: '$tag'" >&2
+              exit 1
+            fi
+
+            if [[ "$tag" != */* ]]; then
+              echo "Tag must be 'OWNER/IMAGE[:TAG]' or '$REGISTRY/OWNER/IMAGE[:TAG]': '$tag'" >&2
+              exit 1
+            fi
+            tag="$REGISTRY/$tag"
+          fi
+
+          # Default tag to :latest.
+          if [[ "$tag" == *: ]]; then
+            tag="${tag}latest"
+          elif [[ "$tag" != *:* ]]; then
+            tag="${tag}:latest"
+          fi
+
+          normalized+=("$tag")
+        done <<< "$raw"
+
+        if (( ${#normalized[@]} == 0 )); then
+          echo "No valid tags found" >&2
+          exit 1
+        fi
+
+        {
+          echo 'tags<<EOF'
+          printf '%s\n' "${normalized[@]}"
+          echo 'EOF'
+        } >> "$GITHUB_OUTPUT"
+    - name: Get cache tag
+      id: cache-tag
+      shell: bash
+      run: |
+        # Split the normalized tags by newline, ignore empty lines, and select the first tag.
+        primary=$(echo "${{ steps.normalized-tags.outputs.tags }}" | grep -v '^\s*$' | head -n 1)
+        # Use :cache to avoid conflicts with the image's actual release tags.
+        cache="${primary%:*}:cache"
+        echo "cache_tag=$cache" >> "$GITHUB_OUTPUT"
+    - name: Build and push image
+      id: build
+      uses: docker/build-push-action@v6
+      env:
+        DOCKER_BUILD_SUMMARY: "false"
+      with:
+        context: ${{ inputs.docker-context }}
+        file: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
+        platforms: ${{ inputs.platforms }}
+        push: true
+        tags: |
+          ${{ steps.normalized-tags.outputs.tags }}
+        target: ${{ inputs.docker-target }}
+        build-args: |
+          ${{ inputs.docker-build-args }}
+        cache-from: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }}
+        cache-to: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }},mode=max,compression=zstd
+
+    - name: Render build summary
+      if: always()
+      uses: https://github.com/actions/github-script@v8
+      env:
+        BUILD_DIGEST: ${{ steps.build.outputs.digest }}
+        BUILD_METADATA: ${{ steps.build.outputs.metadata }}
+        BUILD_TAGS: ${{ steps.normalized-tags.outputs.tags }}
+        BUILD_CONTEXT: ${{ inputs.docker-context }}
+        BUILD_FILE: ${{ inputs.docker-file }}
+        BUILD_PLATFORMS: ${{ inputs.platforms }}
+        BUILD_TARGET: ${{ inputs.docker-target }}
+        BUILD_CACHE_TAG: ${{ steps.cache-tag.outputs.cache_tag }}
+      with:
+        script: |
+          const digest = (process.env.BUILD_DIGEST || '').trim();
+          const metadataRaw = process.env.BUILD_METADATA || '';
+          const tagsRaw = process.env.BUILD_TAGS || '';
+          const contextPath = process.env.BUILD_CONTEXT || '.';
+          const dockerfilePath = process.env.BUILD_FILE || 'Dockerfile';
+          const platforms = process.env.BUILD_PLATFORMS || '';
+          const target = process.env.BUILD_TARGET || '';
+          const cacheTag = process.env.BUILD_CACHE_TAG || '';
+
+          const tags = tagsRaw
+            .split('\n')
+            .map((value) => value.trim())
+            .filter(Boolean);
+
+          const detailsBlock = (title, bodyMarkdown) =>
+            `\n<details><summary><strong>${title}</strong></summary>\n\n${bodyMarkdown}\n</details>\n`;
+
+          const fenced = (lang, content) =>
+            '```' + lang + '\n' + String(content).replace(/```/g, '`\u200b``') + '\n```';
+
+          core.summary
+            .addHeading('Docker Build and Push (Registry, fast)', 2)
+            .addTable([
+              [
+                { data: 'Field', header: true },
+                { data: 'Value', header: true },
+              ],
+              ['Context', contextPath],
+              ['Dockerfile', `${contextPath}/${dockerfilePath}`],
+              ['Platforms', platforms || '-'],
+              ['Target', target || '-'],
+              ['Cache tag', cacheTag || '-'],
+              ['Digest', digest || '-'],
+            ])
+            .addEOL();
+
+          if (tags.length > 0) {
+            core.summary
+              .addHeading('Published Tags', 3)
+              .addRaw(tags.map((tag) => `- ${tag}`).join('\n'))
+              .addEOL()
+              .addEOL();
+          }
+
+          if (metadataRaw.trim()) {
+            try {
+              const metadata = JSON.parse(metadataRaw);
+              core.summary.addRaw(detailsBlock('Build metadata', fenced('json', JSON.stringify(metadata, null, 2))));
+            } catch {
+              core.summary.addRaw(detailsBlock('Build metadata (raw)', fenced('json', metadataRaw)));
+            }
+          }
+
+          await core.summary.write();
