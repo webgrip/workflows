@@ -114,8 +114,10 @@ runs:
       shell: bash
       env:
         GITHUB_OUTPUT: $GITHUB_OUTPUT
-        # Forgejo: @saithodev/semantic-release-gitea targets the Gitea-compatible API.
-        GITEA_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+        # Forgejo: @saithodev/semantic-release-gitea targets the Gitea-compatible API. Fall back to the
+        # runner's own instance URL (github.server_url = the in-cluster Forgejo) when the
+        # FORGEJO_INSTANCE_URL var is unset — it usually is, and the external host isn't pod-reachable.
+        GITEA_URL: ${{ vars.FORGEJO_INSTANCE_URL || github.server_url }}
         GITEA_TOKEN: ${{ inputs.token || github.token }}
       run: |
         npx semantic-release ${{ steps.set-config.outputs.release_config }}
