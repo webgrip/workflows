@@ -75,7 +75,7 @@ jobs:
           node-version: ${{ inputs.node-version }}
 
       - name: Cache package-manager data
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.npm

@@ -29,7 +29,7 @@ runs:
     # from disk instead of re-fetching ~400 packages every run. Bump the key suffix when the
     # pinned versions below change.
     - name: Cache npm downloads
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ~/.npm
         key: ${{ runner.os }}-npm-semrel-24.2.7
