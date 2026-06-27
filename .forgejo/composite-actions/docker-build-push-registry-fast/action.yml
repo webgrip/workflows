@@ -43,7 +43,7 @@ runs:
 
     - name: Log in to Docker Hub (authenticated pulls)
       if: env.DOCKER_USERNAME != '' && env.DOCKER_TOKEN != ''
-      uses: docker/login-action@v3
+      uses: docker/login-action@v4
       with:
         username: ${{ env.DOCKER_USERNAME }}
         password: ${{ env.DOCKER_TOKEN }}
@@ -55,7 +55,7 @@ runs:
       uses: docker/setup-qemu-action@v3
     # buildx stays: `cache-to: type=registry` needs the docker-container driver it provides.
     - uses: docker/setup-buildx-action@v3
-    - uses: docker/login-action@v3
+    - uses: docker/login-action@v4
       with:
         registry: ${{ inputs.registry }}
         username: ${{ env.REGISTRY_USERNAME }}
