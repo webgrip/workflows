@@ -52,7 +52,7 @@ runs:
     # amd64-only default (the homelab's only arch) — this is the main speedup over the base action.
     - name: Set up QEMU (only when a non-amd64 arch is requested)
       if: ${{ inputs.platforms != 'linux/amd64' }}
-      uses: docker/setup-qemu-action@v3
+      uses: docker/setup-qemu-action@v4
     # buildx stays: `cache-to: type=registry` needs the docker-container driver it provides.
     - uses: docker/setup-buildx-action@v3
     - uses: docker/login-action@v3
