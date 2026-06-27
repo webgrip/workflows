@@ -32,7 +32,7 @@ jobs:
     name: 'Push Helm Chart'
     runs-on: docker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.version }} # Make sure we are on the tagged versioned commit
       - uses: azure/setup-helm@v4

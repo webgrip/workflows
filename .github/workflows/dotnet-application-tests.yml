@@ -51,7 +51,7 @@ jobs:
     name: 'dotnet test'
     runs-on: arc-runner-set
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Cache NuGet packages
         uses: actions/cache@v4

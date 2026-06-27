@@ -34,7 +34,7 @@ jobs:
       FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
       APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - run: |
           techdocs-cli generate --no-docker --verbose --source-dir ${{ inputs.source-dir }} --output-dir techdocs-site
