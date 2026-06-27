@@ -54,7 +54,7 @@ jobs:
       # Checkout below authenticates with secrets.FORGEJO_TOKEN.
 
       - name: Checkout prompt repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.prompt-repository }}
           path: __prompt-repo
