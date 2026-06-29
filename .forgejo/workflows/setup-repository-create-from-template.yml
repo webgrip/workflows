@@ -48,7 +48,7 @@ jobs:
       TOPICS: ${{ inputs.topics }}
       TEMPLATE_OWNER: ${{ inputs.template_owner }}
       TEMPLATE_REPO: ${{ inputs.template_repo }}
-      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+      FORGEJO_INSTANCE_URL: ${{ github.server_url }}
 
     steps:
       # Forgejo: dropped the GitHub App installation-token minting step (no analog).
@@ -189,7 +189,7 @@ jobs:
           ${{ always() }}
         uses: actions/github-script@v8
         env:
-          FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+          FORGEJO_INSTANCE_URL: ${{ github.server_url }}
         with:
           script: |
             const repoUrl = `${process.env.FORGEJO_INSTANCE_URL}/${process.env.ORG}/${process.env.NEW_REPO}`;

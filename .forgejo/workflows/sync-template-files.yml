@@ -30,7 +30,7 @@ jobs:
     runs-on: docker
 
     env:
-      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+      FORGEJO_INSTANCE_URL: ${{ github.server_url }}
       APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
 
     steps:

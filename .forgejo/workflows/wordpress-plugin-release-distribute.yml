@@ -209,7 +209,7 @@ jobs:
     permissions:
       contents: write
     env:
-      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+      FORGEJO_INSTANCE_URL: ${{ github.server_url }}
     steps:
       - name: 'Download ZIP artifacts'
         uses: actions/download-artifact@v4

@@ -45,7 +45,7 @@ jobs:
       - name: Git safety + canonical remote
         run: |
           git config --global --add safe.directory "$PWD"
-          git remote set-url origin "${{ vars.FORGEJO_INSTANCE_URL }}/${GITHUB_REPOSITORY}.git"
+          git remote set-url origin "${{ github.server_url }}/${GITHUB_REPOSITORY}.git"
 
       - name: Build native release binaries
         run: |
@@ -66,7 +66,7 @@ jobs:
         id: release
         env:
           # Forgejo: @saithodev/semantic-release-gitea targets the Gitea-compatible API.
-          GITEA_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+          GITEA_URL: ${{ github.server_url }}
           GITEA_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
           FORCE_LEVEL:  ${{ inputs.release-type }}
         run: npx semantic-release

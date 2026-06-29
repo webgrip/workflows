@@ -48,7 +48,7 @@ jobs:
     permissions:
       contents: read
     env:
-      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+      FORGEJO_INSTANCE_URL: ${{ github.server_url }}
     steps:
       # Forgejo: dropped the GitHub App installation-token minting step (no analog).
       # Checkout below authenticates with secrets.FORGEJO_TOKEN.
@@ -160,7 +160,7 @@ jobs:
     env:
       ORG: ${{ github.repository_owner }}
       NEW_REPO: ${{ inputs.issue-title }}
-      FORGEJO_INSTANCE_URL: ${{ vars.FORGEJO_INSTANCE_URL }}
+      FORGEJO_INSTANCE_URL: ${{ github.server_url }}
     steps:
       # Forgejo: dropped the GitHub App installation-token minting step (no analog).
       # The issues API calls below use secrets.FORGEJO_TOKEN.
