@@ -148,7 +148,7 @@ jobs:
           cp "${{ steps.inference.outputs.response-file }}" out/$fname
 
       - name: Upload AI body artifact
-        uses: actions/upload-artifact@v4
+        uses: forgejo/upload-artifact@v4
         with:
           name: ai-body-${{ steps.save_response.outputs.fname }}
           path: out/${{ steps.save_response.outputs.fname }}
@@ -166,7 +166,7 @@ jobs:
       # The issues API calls below use secrets.FORGEJO_TOKEN.
 
       - name: Download AI body artifact
-        uses: actions/download-artifact@v4
+        uses: forgejo/download-artifact@v4
         with:
           pattern: ai-body-*
           path: ai-bodies

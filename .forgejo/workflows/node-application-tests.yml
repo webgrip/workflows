@@ -151,7 +151,7 @@ jobs:
 
       - name: Upload coverage artifact
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: forgejo/upload-artifact@v4
         with:
           name: node-coverage
           path: ${{ inputs.working-directory }}/${{ inputs.coverage-directory }}

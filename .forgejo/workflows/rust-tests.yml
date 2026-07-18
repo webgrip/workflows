@@ -46,7 +46,7 @@ jobs:
       # ---------- upload coverage artefact ----------
       - name: Upload coverage artefact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: forgejo/upload-artifact@v4
         with:
           name: code-coverage
           path: cobertura.xml

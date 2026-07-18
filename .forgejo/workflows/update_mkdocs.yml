@@ -40,7 +40,7 @@ jobs:
            techdocs-cli generate --no-docker --verbose --source-dir ${{ inputs.source-dir }} --output-dir mkdocs-site
 
       - name: Put in artifact
-        uses: actions/upload-artifact@v4
+        uses: forgejo/upload-artifact@v4
         with:
           name: mkdocs-site
           path: mkdocs-site

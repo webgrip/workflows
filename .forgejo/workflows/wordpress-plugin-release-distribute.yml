@@ -166,7 +166,7 @@ jobs:
 
       - name: 'Upload ZIP artifact'
         if: ${{ inputs.generate-zip }}
-        uses: actions/upload-artifact@v4
+        uses: forgejo/upload-artifact@v4
         with:
           name: wporg-plugin-${{ matrix.plugin_slug }}-zip
           path: ${{ steps.zip.outputs.path }}
@@ -212,7 +212,7 @@ jobs:
       FORGEJO_INSTANCE_URL: ${{ github.server_url }}
     steps:
       - name: 'Download ZIP artifacts'
-        uses: actions/download-artifact@v4
+        uses: forgejo/download-artifact@v4
         with:
           pattern: wporg-plugin-*-zip
           merge-multiple: true
