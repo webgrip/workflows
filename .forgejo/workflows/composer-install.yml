@@ -1,10 +1,20 @@
 name: 'Build'
 
+# Forgejo (2026-07-18): JS actions (actions/checkout, actions/cache) CANNOT run inside a
+# `container:` on act_runner — the image ships no Node, so the action dies before any step logic.
+# Proven by isolation diagnostic: a job whose ONLY step was actions/checkout inside
+# `container: composer:2.8.5` failed, while the identical step on the native runner passed.
+# So: check out with plain `git` (the composer image bundles git), and install per job rather than
+# sharing `vendor/` via actions/cache (which is equally unavailable in-container).
+
 on:
   workflow_call:
     secrets:
       COMPOSER_TOKEN:
         description: 'Composer packagist token. Required to authenticate with for example private packagist. (packagist.com)'
+        required: false
+      FORGEJO_TOKEN:
+        description: 'Forgejo token — only needed to clone a PRIVATE repository'
         required: false
 
 jobs:
@@ -24,12 +34,19 @@ jobs:
             }
           }
     steps:
-      - run: git config --global --add safe.directory ${GITHUB_WORKSPACE}
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: vendor
-          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
+      - name: 'Checkout (plain git — JS actions cannot run in this container)'
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -eu
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          if [ -n "${FORGEJO_TOKEN:-}" ]; then
+            url="$(printf '%s' "${GITHUB_SERVER_URL}" | sed "s#://#://token:${FORGEJO_TOKEN}@#")/${GITHUB_REPOSITORY}.git"
+          fi
+          git clone --depth 50 --branch "${GITHUB_REF_NAME}" "$url" .
+          git checkout -q "${GITHUB_SHA}" 2>/dev/null || echo "note: ${GITHUB_SHA} outside clone depth; using branch tip"
+          git log -1 --oneline
       - name: 'Install dependencies'
         run: composer install --prefer-dist --no-interaction --ignore-platform-reqs
       - run: | 

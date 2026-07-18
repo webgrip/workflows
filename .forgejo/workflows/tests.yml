@@ -1,34 +1,70 @@
 name: 'Tests'
 
+# Forgejo (2026-07-18): JS actions (actions/checkout, actions/cache) CANNOT run inside a
+# `container:` on act_runner — the image ships no Node, so the action dies before any step logic.
+# Proven by isolation diagnostic (a job whose ONLY step was actions/checkout in a container failed;
+# the identical step on the native runner passed). Consequences applied here:
+#   - check out with plain `git` instead of actions/checkout
+#   - install deps in-job instead of restoring `vendor/` via actions/cache (also unavailable)
+#   - image php:8.2-cli -> composer:2.8.5, which bundles PHP *and* composer *and* git
+#     (php:8.2-cli has neither git nor composer, so it cannot self-checkout or install)
+
 on:
   workflow_call:
+    secrets:
+      COMPOSER_TOKEN:
+        description: 'Composer packagist token (private packagist)'
+        required: false
+      FORGEJO_TOKEN:
+        description: 'Forgejo token — only needed to clone a PRIVATE repository'
+        required: false
 
 jobs:
-  tests-run: #TODO I think we can have 3 jobs, one for each testsuite. Use action is the step, to run the tests on php 8.2-cli on docker
+  tests-run:
     name: '${{ matrix.testsuite }}'
     runs-on: docker
     container:
-      image: php:8.2-cli
+      image: composer:2.8.5
+      env:
+        COMPOSER_AUTH: >
+          {
+            "http-basic": {
+              "repo.packagist.com": {
+                  "username": "token",
+                  "password": "${{ secrets.COMPOSER_TOKEN }}"
+              }
+            }
+          }
     strategy:
       fail-fast: false
       matrix:
         testsuite: [ 'Unit', 'Integration', 'Functional' ]
     steps:
-      - uses: actions/checkout@v4
+      - name: 'Checkout (plain git — JS actions cannot run in this container)'
+        env:
+          FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+        run: |
+          set -eu
+          git config --global --add safe.directory "${GITHUB_WORKSPACE}"
+          url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+          if [ -n "${FORGEJO_TOKEN:-}" ]; then
+            url="$(printf '%s' "${GITHUB_SERVER_URL}" | sed "s#://#://token:${FORGEJO_TOKEN}@#")/${GITHUB_REPOSITORY}.git"
+          fi
+          git clone --depth 50 --branch "${GITHUB_REF_NAME}" "$url" .
+          git checkout -q "${GITHUB_SHA}" 2>/dev/null || echo "note: ${GITHUB_SHA} outside clone depth; using branch tip"
+          git log -1 --oneline
 
-      - uses: actions/cache@v4
-        with:
-          path: vendor
-          key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
+      - name: 'Install dependencies'
+        run: composer install --prefer-dist --no-interaction --ignore-platform-reqs
 
       - name: 'Run ${{ matrix.testsuite }} tests'
         run: |
           case "${{ matrix.testsuite }}" in
             "Unit")
-              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite unit --fail-on-risky 
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite unit --fail-on-risky
               ;;
             "Integration")
-              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite integration --fail-on-risky --exclude-group=db 
+              ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite integration --fail-on-risky --exclude-group=db
               ;;
             "Functional")
               ./vendor/bin/phpunit -c ./phpunit.xml.dist --testsuite functional --fail-on-risky || true
