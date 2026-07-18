@@ -101,4 +101,9 @@ jobs:
           git clone --depth 50 --branch "${GITHUB_REF_NAME}" "$url" .
           git checkout -q "${GITHUB_SHA}" 2>/dev/null || echo "note: ${GITHUB_SHA} outside clone depth; using branch tip"
 
+      # `composer normalize` is provided by the ergebnis/composer-normalize dev-dependency, so the
+      # deps must be installed first — previously this job inherited `vendor/` from actions/cache.
+      - name: 'Install dependencies'
+        run: composer install --prefer-dist --no-interaction --ignore-platform-reqs
+
       - run: composer normalize
