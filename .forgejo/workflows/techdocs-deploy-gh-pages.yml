@@ -36,6 +36,11 @@ jobs:
 
       # Forgejo: replaced peaceiris/actions-gh-pages (GitHub Pages publish) with a plain branch push.
       # Forgejo: branch-push only; serving the pages site requires external infra (Nginx/Caddy/Forgejo Pages add-on) — out of scope
+      # webgrip/techdocs-runner ships NO git binary (probe-verified 2026-07-18: has-git FAILED,
+      # has-node passed — actions/checkout survives via its REST-tarball fallback, but the shell
+      # `git push` publish step dies). Alpine base -> install git in-job.
+      - name: Ensure git (image ships none)
+        run: command -v git || apk add --no-cache git
       - name: Publish site to pages branch
         env:
           FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
