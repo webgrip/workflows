@@ -24,8 +24,12 @@ jobs:
       - run: |
           techdocs-cli generate --no-docker --verbose --source-dir ${{ inputs.source-dir }} --output-dir techdocs-site
 
+      # forgejo/* fork, NOT actions/*: upload-artifact@v4 ships @actions/artifact v2, which refuses
+      # to run against anything that is not github.com — Forgejo reads as GHES, so the step dies
+      # with "GHESNotSupportedError ... not currently supported on GHES" AFTER the docs have already
+      # built successfully. Forgejo maintains a patched fork at the same major version.
       - name: Put in artifact
-        uses: actions/upload-artifact@v4
+        uses: forgejo/upload-artifact@v4
         with:
           name: techdocs-site
           path: techdocs-site

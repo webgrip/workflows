@@ -38,8 +38,11 @@ jobs:
     runs-on: docker
     container: webgrip/techdocs-runner:latest
     steps:
+      # forgejo/* fork, NOT actions/*: download-artifact@v4 ships @actions/artifact v2, which refuses
+      # to run against anything that is not github.com (Forgejo reads as GHES). Must stay in step
+      # with the upload side in techdocs-generate.yml.
       - name: Get TechDocs artifact
-        uses: actions/download-artifact@v4
+        uses: forgejo/download-artifact@v4
         with:
           name: techdocs-site
           path: ./techdocs-site
