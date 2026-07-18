@@ -33,7 +33,7 @@ jobs:
     name: "Semantic Release"
     runs-on: docker
     container:
-      image: webgrip/rust-releaser:latest
+      image: harbor.webgrip.dev/webgrip/rust-releaser:1.1.1
     outputs:
       version: ${{ steps.out.outputs.version }}
 

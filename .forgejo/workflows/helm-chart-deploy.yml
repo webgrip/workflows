@@ -76,7 +76,7 @@ jobs:
       run:
         shell: bash
     container:
-      image: webgrip/helm-deploy:latest
+      image: harbor.webgrip.dev/webgrip/helm-deploy:1.2.1
       credentials:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_TOKEN }}
