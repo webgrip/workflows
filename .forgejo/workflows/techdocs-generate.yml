@@ -17,7 +17,13 @@ jobs:
   generate-techdocs:
     name: "techdocs"
     runs-on: docker
-    container: webgrip/techdocs-runner:latest
+    # First-party build image via the in-cluster Harbor ghcr pull-through (LAN-cached, and the
+    # DinD can pull it anonymously). Was `webgrip/techdocs-runner:latest` -- an unqualified
+    # docker.io ref last pushed 2025-03-09, off our own supply chain. techdocs-runner is just
+    # `FROM techdocs-builder` + a `mkdocs serve` entrypoint; CI runs `techdocs-cli generate`, not
+    # serve, and techdocs-builder already ships @techdocs/cli + mkdocs + plantuml, so the runner
+    # is redundant here (verified: the generate command below succeeds in techdocs-builder).
+    container: harbor.webgrip.dev/ghcr/webgrip/techdocs-builder:latest
     steps:
       - uses: actions/checkout@v4
 

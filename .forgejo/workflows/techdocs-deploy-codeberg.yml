@@ -36,7 +36,10 @@ jobs:
   deploy-codeberg:
     name: "Publish to Codeberg pages branch"
     runs-on: docker
-    container: webgrip/techdocs-runner:latest
+    # Same first-party build image as techdocs-generate (Harbor ghcr pull-through, DinD-pullable).
+    # This job only needs a shell + git to push the built site; it apk-adds git below. Was the
+    # stale docker.io `webgrip/techdocs-runner:latest`.
+    container: harbor.webgrip.dev/ghcr/webgrip/techdocs-builder:latest
     steps:
       # forgejo/* fork, NOT actions/*: download-artifact@v4 ships @actions/artifact v2, which refuses
       # to run against anything that is not github.com (Forgejo reads as GHES). Must stay in step
