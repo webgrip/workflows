@@ -37,8 +37,17 @@ jobs:
           ref: ${{ inputs.version }} # Make sure we are on the tagged versioned commit
       - uses: azure/setup-helm@v4
       # validate again?
-      - run: |
-          echo "${{ secrets.REGISTRY_TOKEN }}" | helm registry login ${{ inputs.registry }} --username "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+      - name: Registry login
+        shell: bash
+        env:
+          # Pass creds via env, not `${{ }}` interpolation into the shell: Harbor robot usernames
+          # are `robot$project+name` — the `$` gets expanded by bash inside a double-quoted arg and
+          # mangles the username to 401. Env-var expansion is not recursive, so the value stays literal.
+          REGISTRY: ${{ inputs.registry }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          printf '%s' "$REGISTRY_TOKEN" | helm registry login "$REGISTRY" --username "$REGISTRY_USERNAME" --password-stdin
       - run: |
           export HELM_EXPERIMENTAL_OCI=1
       - run: |
