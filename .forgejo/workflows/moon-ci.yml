@@ -56,6 +56,17 @@ jobs:
           restore-keys: |
             npm-
 
+      - name: Cache moon
+        # moon's local cache makes unchanged targets cache hits across runs.
+        # v4.1.2 deliberately: the pool execs node20 for JS actions; cache v5/v6 declare node24.
+        uses: actions/cache@v4.1.2
+        with:
+          path: .moon/cache
+          key: moon-${{ hashFiles('**/package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            moon-${{ hashFiles('**/package-lock.json') }}-
+            moon-
+
       - name: Install dependencies
         run: ${{ inputs.install-command }}
 

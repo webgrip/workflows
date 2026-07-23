@@ -55,7 +55,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.ref || inputs.version }} # Make sure we are on the tagged versioned commit
+      # helm is baked into the ci-runner host image; setup-helm remains as fallback for
+      # runners without it.
+      - name: Check for preinstalled helm
+        id: helm-check
+        shell: bash
+        run: |
+          if command -v helm >/dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: azure/setup-helm@v4
+        if: steps.helm-check.outputs.present != 'true'
       # validate again?
       - name: Registry login
         shell: bash

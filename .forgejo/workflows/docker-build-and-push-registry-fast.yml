@@ -56,6 +56,11 @@ on:
         description: 'Docker build args (newline-separated KEY=VALUE entries)'
         required: false
         default: ''
+      compression:
+        type: string
+        description: "Layer compression for the pushed image: 'gzip' (default) or 'zstd'. zstd layers decompress ~2x faster on pull; opt-in because very old dockerd cannot pull zstd."
+        required: false
+        default: 'gzip'
       enabled:
         type: boolean
         description: 'Gate the build from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so callers pass conditions (e.g. a non-empty release version) here; the gate lives on THIS job because it is the innermost real (non-uses) job of the chain.'
@@ -84,6 +89,7 @@ jobs:
           platforms: ${{ inputs.platforms }}
           docker-target: ${{ inputs.docker-target }}
           docker-build-args: ${{ inputs.docker-build-args }}
+          compression: ${{ inputs.compression }}
         env:
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}

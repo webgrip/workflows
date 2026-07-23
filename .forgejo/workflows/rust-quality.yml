@@ -34,6 +34,23 @@ on:
         type: string
         required: false
         default: '--workspace'
+      test-command:
+        description: >-
+          Full test command run verbatim (in the working directory) instead of
+          `cargo test <test-args>` when non-empty. E.g.
+          `cargo nextest run --workspace && cargo test --doc --workspace` is faster with
+          identical coverage (nextest skips doctests, hence the second half).
+        type: string
+        required: false
+        default: ''
+      sccache:
+        description: >-
+          Wrap rustc in sccache for the lint/test/wasm steps (needs rust-ci-runner >= the
+          release that bakes sccache). The runner exports ACTIONS_CACHE_URL etc. for the
+          shared cache server.
+        type: boolean
+        required: false
+        default: false
       wasm-package:
         description: 'Cargo package to build for wasm (-p). Empty = skip the wasm build + upload.'
         type: string
@@ -90,15 +107,34 @@ jobs:
 
       - name: Lints (clippy)
         working-directory: ${{ inputs.working-directory }}
+        env:
+          # Opt-in sccache: cargo ignores an empty RUSTC_WRAPPER, so false = plain rustc.
+          RUSTC_WRAPPER: ${{ inputs.sccache && 'sccache' || '' }}
+          SCCACHE_GHA_ENABLED: ${{ inputs.sccache && 'true' || 'false' }}
         run: cargo clippy ${{ inputs.clippy-args }}
 
       - name: Tests
+        if: inputs.test-command == ''
         working-directory: ${{ inputs.working-directory }}
+        env:
+          RUSTC_WRAPPER: ${{ inputs.sccache && 'sccache' || '' }}
+          SCCACHE_GHA_ENABLED: ${{ inputs.sccache && 'true' || 'false' }}
         run: cargo test ${{ inputs.test-args }}
+
+      - name: Tests (custom command)
+        if: inputs.test-command != ''
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RUSTC_WRAPPER: ${{ inputs.sccache && 'sccache' || '' }}
+          SCCACHE_GHA_ENABLED: ${{ inputs.sccache && 'true' || 'false' }}
+        run: ${{ inputs.test-command }}
 
       - name: Build wasm artifact
         if: inputs.wasm-package != ''
         working-directory: ${{ inputs.working-directory }}
+        env:
+          RUSTC_WRAPPER: ${{ inputs.sccache && 'sccache' || '' }}
+          SCCACHE_GHA_ENABLED: ${{ inputs.sccache && 'true' || 'false' }}
         run: |
           rustup target add ${{ inputs.wasm-target }}
           cargo build --release -p ${{ inputs.wasm-package }} --target ${{ inputs.wasm-target }}
@@ -110,3 +146,8 @@ jobs:
           name: ${{ inputs.wasm-artifact-name }}
           path: ${{ inputs.wasm-artifact-path || format('{0}/target/{1}/release/*.wasm', inputs.working-directory, inputs.wasm-target) }}
           retention-days: ${{ inputs.artifact-retention-days }}
+
+      - name: sccache stats
+        if: inputs.sccache
+        working-directory: ${{ inputs.working-directory }}
+        run: sccache --show-stats

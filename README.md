@@ -123,7 +123,9 @@ secret masking, and multi-arch buildx push live in **one** engine — the `docke
 composite action, wrapped by the `docker-build-and-push-registry.yml` reusable workflow. The per-registry
 workflows are thin: `docker-build-and-push-harbor.yml` (registry → `harbor.webgrip.dev`, maps the
 `HARBOR_ROBOT_*` secrets) and `docker-build-and-push-ghcr.yml` (registry → `ghcr.io`) just `uses:` the
-engine workflow. (`docker-build-and-push.yml` → Docker Hub remains a separate engine.)
+engine workflow. (`docker-build-and-push.yml` → Docker Hub remains a separate engine.) The
+registry/harbor chains (fast and non-fast) accept `compression: zstd` — layers decompress ~2x
+faster on pull; opt-in because very old dockerd cannot pull zstd (default `gzip`).
 
 ## 📦 Available Workflows
 
@@ -216,17 +218,20 @@ consume from `.forgejo/workflows/`.
 #### `rust-quality.yml`
 `cargo fmt --check` → `clippy` → `test` for one cargo workspace, with an optional wasm build
 (`wasm-package` input) uploaded as an artifact for sibling jobs. One job on purpose: the wasm
-build reuses the tests' target dir and cargo cache.
+build reuses the tests' target dir and cargo cache. `test-command` replaces `cargo test` verbatim
+(e.g. `cargo nextest run --workspace && cargo test --doc --workspace`); `sccache: true` wraps
+rustc in sccache (needs a rust-ci-runner that bakes it).
 
 #### `laravel-quality.yml`
-Pint → PHPStan → deptrac (`--fail-on-uncovered`) → Pest (`--ci`), all fatal. Prefer this over
-the advisory PHP pair for Laravel repos. Supports an artifact restore before `composer install`
-(e.g. a wasm binding the test suite serves) and a `pre-test-command` (env setup).
+Pint → PHPStan → deptrac (`--fail-on-uncovered`) → Pest (`pest-args`, default `--ci`), all fatal.
+Prefer this over the advisory PHP pair for Laravel repos. Supports an artifact restore before
+`composer install` (e.g. a wasm binding the test suite serves) and a `pre-test-command` (env
+setup). PHPStan's result cache (`/tmp/phpstan`) is persisted so analysis is incremental.
 
 #### `moon-ci.yml`
 Runs [moon](https://moonrepo.dev) task-graph targets (`tasks: "web:test web:build"`) after an
 optional artifact restore — the generic shape for monorepos where moon owns the cross-package
-task graph.
+task graph. `.moon/cache` is persisted so unchanged targets are cache hits across runs.
 
 #### `spa-preview.yml`
 Per-branch static SPA preview: builds with `PREVIEW_SLUG`/`PREVIEW_BASE` exported, pushes the
@@ -314,11 +319,13 @@ Packages and pushes Helm charts to registries.
 **Inputs (Forgejo copy):** `registry`, `path`, `name`, `version`, plus optional `ref` (git ref to
 check out — pass the tag for prefixed tag schemes like `chart-v1.2.3`; defaults to `version`),
 `oci-path` (OCI repo under the registry; defaults to `<owner>/<repo>`) and `best-effort`
-(non-fatal push, for mirrors).
+(non-fatal push, for mirrors). The Forgejo copy skips `setup-helm` when the runner image already
+bakes helm (fallback install otherwise).
 
 #### `helm-chart-validate.yml` / `helm-charts-validate.yml`
 Validates Helm chart syntax and best practices. The Forgejo copy also renders the chart when
-`run-template: true` (with `release-name`).
+`run-template: true` (with `release-name`), and skips `setup-helm` when the runner image already
+bakes helm (fallback install otherwise).
 
 ### Rust Development
 
@@ -460,7 +467,9 @@ plugin; config is resolved by cosmiconfig from the package dir upward (a package
 `.releaserc.cjs` wins, else the repo root `.releaserc.js`). The consumer config **must** write
 `version=`/`tag=` to `$GITHUB_OUTPUT` via an `@semantic-release/exec` `successCmd` for the
 outputs to be populated. `@semantic-release/git` + `changelog` are pre-installed for configs
-that commit release artifacts back (CHANGELOG.md, Chart.yaml, …).
+that commit release artifacts back (CHANGELOG.md, Chart.yaml, …). When the runner image prebakes
+the toolchain at `/opt/semrel` (env `SEMREL_PREBAKED`), the npm install is skipped entirely
+(~4 min saved per release job).
 
 **Inputs:** `package-path` (`.` for a root-scoped train), `package-name`, `dry-run`.
 **Secrets:** `FORGEJO_TOKEN`. **Outputs:** `version` (bare semver, normalized), `tag`.
@@ -514,7 +523,9 @@ Reusable composite action for building and pushing Docker images.
 Reusable composite action for building and pushing Docker images to GHCR.
 
 ### `semantic-release`
-Composite action for semantic release automation with Node.js setup.
+Composite action for semantic release automation with Node.js setup. The Forgejo copy skips
+setup-node when node is baked into the runner image, and skips the npm install entirely when
+the image prebakes the toolchain at `/opt/semrel` (env `SEMREL_PREBAKED`).
 
 ### `rust-semantic-release`
 Specialized semantic release action for Rust projects.

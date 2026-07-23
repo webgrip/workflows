@@ -46,7 +46,20 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # node is baked into the ci-runner host image; setup-node remains as fallback for
+    # runners without it.
+    - name: Check for preinstalled node
+      id: node-check
+      shell: bash
+      run: |
+        if command -v node >/dev/null 2>&1; then
+          echo "present=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "present=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Set up Node.js
+      if: steps.node-check.outputs.present != 'true'
       uses: actions/setup-node@v4
       with:
         node-version: "24"
@@ -119,20 +132,6 @@ runs:
 
         cd "$pkg_dir"
 
-        # @semantic-release/git + changelog are installed for consumers whose configs commit
-        # release artifacts back (CHANGELOG.md, Chart.yaml, ...); semantic-release only loads
-        # plugins the resolved config references, so no-commit consumers are unaffected.
-        npm install --no-save --no-audit --no-fund \
-          semantic-release@24.2.7 \
-          semantic-release-monorepo@8.0.2 \
-          @semantic-release/commit-analyzer@13.0.0 \
-          @semantic-release/exec@7.0.3 \
-          @semantic-release/git@10.0.1 \
-          @semantic-release/changelog@6.0.3 \
-          @saithodev/semantic-release-gitea \
-          @semantic-release/release-notes-generator@14.0.0 \
-          conventional-changelog-conventionalcommits@7.0.2
-
         dry_run_flag=""
         if [[ "${{ inputs.dry-run }}" == "true" ]]; then
           dry_run_flag="--dry-run"
@@ -141,6 +140,29 @@ runs:
         # --repository-url pins the changelog compare/commit links and release URL to the public host.
         # semantic-release would otherwise derive it from the CI checkout's origin remote (internal).
         # NB: no --config flag — semantic-release has none; config resolution is cosmiconfig from cwd.
-        npx semantic-release \
-          --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
-          $dry_run_flag
+        # Fast path: the ci-runner host image prebakes the pinned toolchain at /opt/semrel
+        # (env SEMREL_PREBAKED) — saves ~4 min per release job.
+        if [[ -n "${SEMREL_PREBAKED:-}" && -d "${SEMREL_PREBAKED}" ]]; then
+          export PATH="${SEMREL_PREBAKED}/.bin:${PATH}"
+          semantic-release \
+            --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
+            $dry_run_flag
+        else
+          # @semantic-release/git + changelog are installed for consumers whose configs commit
+          # release artifacts back (CHANGELOG.md, Chart.yaml, ...); semantic-release only loads
+          # plugins the resolved config references, so no-commit consumers are unaffected.
+          npm install --no-save --no-audit --no-fund \
+            semantic-release@24.2.7 \
+            semantic-release-monorepo@8.0.2 \
+            @semantic-release/commit-analyzer@13.0.0 \
+            @semantic-release/exec@7.0.3 \
+            @semantic-release/git@10.0.1 \
+            @semantic-release/changelog@6.0.3 \
+            @saithodev/semantic-release-gitea \
+            @semantic-release/release-notes-generator@14.0.0 \
+            conventional-changelog-conventionalcommits@7.0.2
+
+          npx semantic-release \
+            --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
+            $dry_run_flag
+        fi

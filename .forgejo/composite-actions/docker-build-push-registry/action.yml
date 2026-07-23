@@ -28,6 +28,10 @@ inputs:
     description: "Docker build args (newline-separated KEY=VALUE entries)"
     required: false
     default: ""
+  compression:
+    description: "Layer compression for the pushed image: 'gzip' (default) or 'zstd'. zstd layers decompress ~2x faster on pull; opt-in because very old dockerd cannot pull zstd."
+    required: false
+    default: "gzip"
 
 runs:
   using: "composite"
@@ -126,6 +130,20 @@ runs:
         # Use :cache to avoid conflicts with the image's actual release tags.
         cache="${primary%:*}:cache"
         echo "cache_tag=$cache" >> "$GITHUB_OUTPUT"
+    - name: Compute image output spec
+      id: image-output
+      shell: bash
+      env:
+        COMPRESSION: ${{ inputs.compression }}
+      run: |
+        # zstd layers decompress ~2x faster on pull; opt-in because very old dockerd cannot
+        # pull zstd. When zstd, push is expressed via an explicit image output (replacing
+        # `push: true`); when gzip, the output stays empty and the invocation is unchanged.
+        if [[ "$COMPRESSION" == "zstd" ]]; then
+          echo "outputs=type=image,compression=zstd,compression-level=3,force-compression=true,push=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "outputs=" >> "$GITHUB_OUTPUT"
+        fi
     - name: Build and push image
       id: build
       uses: docker/build-push-action@v6
@@ -135,7 +153,9 @@ runs:
         context: ${{ inputs.docker-context }}
         file: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
         platforms: ${{ inputs.platforms }}
-        push: true
+        # zstd pushes via the image output spec instead; both at once would double-express push.
+        push: ${{ inputs.compression != 'zstd' }}
+        outputs: ${{ steps.image-output.outputs.outputs }}
         tags: |
           ${{ steps.normalized-tags.outputs.tags }}
         target: ${{ inputs.docker-target }}

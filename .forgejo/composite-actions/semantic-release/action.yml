@@ -31,7 +31,20 @@ runs:
         fetch-depth: 0 # semantic-release requires all commits/tags
         token: ${{ inputs.token || github.token }}
 
+    # node is baked into the ci-runner host image; setup-node remains as fallback for
+    # runners without it.
+    - name: Check for preinstalled node
+      id: node-check
+      shell: bash
+      run: |
+        if command -v node >/dev/null 2>&1; then
+          echo "present=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "present=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Set up Node.js
+      if: steps.node-check.outputs.present != 'true'
       uses: actions/setup-node@v4
       with:
         node-version: "22"
@@ -92,20 +105,29 @@ runs:
         cleanup() { git config --unset-all "http.${{ inputs.forge-url }}/.extraheader" || true; }
         trap cleanup EXIT
 
-        npm install --no-save \
-          semantic-release \
-          @semantic-release/changelog \
-          @semantic-release/commit-analyzer \
-          @semantic-release/exec \
-          @semantic-release/git \
-          @saithodev/semantic-release-gitea \
-          semantic-release-helm3 \
-          @semantic-release/release-notes-generator \
-          conventional-changelog-conventionalcommits
-        # Forgejo: dropped semantic-release-github-actions-tags (GitHub-Actions-specific, no analog)
-
         # --repository-url pins the changelog compare/commit links and release URL to the public host.
         # semantic-release would otherwise derive it from the CI checkout's origin remote (internal).
-        npx semantic-release \
-          --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
-          ${{ steps.set-config.outputs.release_config }}
+        # Fast path: the ci-runner host image prebakes the pinned toolchain at /opt/semrel
+        # (env SEMREL_PREBAKED) — saves ~4 min per release job.
+        if [[ -n "${SEMREL_PREBAKED:-}" && -d "${SEMREL_PREBAKED}" ]]; then
+          export PATH="${SEMREL_PREBAKED}/.bin:${PATH}"
+          semantic-release \
+            --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
+            ${{ steps.set-config.outputs.release_config }}
+        else
+          npm install --no-save \
+            semantic-release \
+            @semantic-release/changelog \
+            @semantic-release/commit-analyzer \
+            @semantic-release/exec \
+            @semantic-release/git \
+            @saithodev/semantic-release-gitea \
+            semantic-release-helm3 \
+            @semantic-release/release-notes-generator \
+            conventional-changelog-conventionalcommits
+          # Forgejo: dropped semantic-release-github-actions-tags (GitHub-Actions-specific, no analog)
+
+          npx semantic-release \
+            --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
+            ${{ steps.set-config.outputs.release_config }}
+        fi

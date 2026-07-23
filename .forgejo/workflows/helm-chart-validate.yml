@@ -24,7 +24,19 @@ jobs:
     runs-on: docker
     steps:
       - uses: actions/checkout@v4
+      # helm is baked into the ci-runner host image; setup-helm remains as fallback for
+      # runners without it.
+      - name: Check for preinstalled helm
+        id: helm-check
+        shell: bash
+        run: |
+          if command -v helm >/dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: azure/setup-helm@v4
+        if: steps.helm-check.outputs.present != 'true'
         with:
           version: v3.17.0
       - run: |

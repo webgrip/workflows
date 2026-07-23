@@ -53,6 +53,11 @@ on:
         type: string
         required: false
         default: '1G'
+      pest-args:
+        description: 'Arguments for Pest'
+        type: string
+        required: false
+        default: '--ci'
       pre-test-command:
         description: 'Command(s) run in the working directory right before Pest (e.g. cp .env.example .env && php artisan key:generate --force)'
         type: string
@@ -98,6 +103,17 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         run: ./vendor/bin/pint --test
 
+      - name: Cache PHPStan result cache
+        # PHPStan's default tmpDir lives under the system temp dir (/tmp/phpstan); persisting
+        # it across runs keeps the result cache warm so analysis becomes incremental.
+        # v4.1.2 deliberately: the pool execs node20 for JS actions; cache v5/v6 declare node24.
+        uses: actions/cache@v4.1.2
+        with:
+          path: /tmp/phpstan
+          key: phpstan-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory)) }}-${{ github.sha }}
+          restore-keys: |
+            phpstan-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory)) }}-
+
       - name: Static analysis (PHPStan)
         if: inputs.run-phpstan
         working-directory: ${{ inputs.working-directory }}
@@ -116,4 +132,4 @@ jobs:
       - name: Tests (Pest)
         if: inputs.run-pest
         working-directory: ${{ inputs.working-directory }}
-        run: ./vendor/bin/pest --ci
+        run: ./vendor/bin/pest ${{ inputs.pest-args }}
