@@ -25,7 +25,7 @@ on:
     inputs:
       registry:
         type: string
-        description: 'Target registry host, e.g. harbor.webgrip.dev or ghcr.io.'
+        description: 'Target registry host, e.g. harbor.webgrip.dev.'
         required: true
       docker-context:
         type: string

@@ -1,0 +1,119 @@
+name: '[Call] Laravel Quality Gate'
+
+# Hard-gate Laravel CI: Pint (style) → PHPStan (types) → deptrac (architecture) → Pest (tests).
+# Every step is fatal — this is the hard-fail family (ADR 0003), unlike the advisory
+# php-application-tests / php-application-static-analysis pair. A repo without one of the tools
+# opts out VISIBLY in its caller (run-<tool>: false) rather than the gate silently skipping.
+
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        description: 'CI container image (must bake node for JS actions, php + composer, and any extensions the app needs)'
+        type: string
+        required: false
+        default: 'harbor.webgrip.dev/webgrip/php-ci-runner:1.3.0'
+      working-directory:
+        description: 'Repo-relative Laravel app root (composer.json location)'
+        type: string
+        required: false
+        default: '.'
+      artifact-name:
+        description: 'Artifact from an earlier job in this run to download before installing (e.g. a wasm build). Empty = skip.'
+        type: string
+        required: false
+        default: ''
+      artifact-path:
+        description: 'Where to place the downloaded artifact (repo-relative)'
+        type: string
+        required: false
+        default: ''
+      run-pint:
+        description: 'Run Pint (style, --test)'
+        type: boolean
+        required: false
+        default: true
+      run-phpstan:
+        description: 'Run PHPStan'
+        type: boolean
+        required: false
+        default: true
+      run-deptrac:
+        description: 'Run deptrac (--fail-on-uncovered)'
+        type: boolean
+        required: false
+        default: true
+      run-pest:
+        description: 'Run Pest (--ci)'
+        type: boolean
+        required: false
+        default: true
+      phpstan-memory-limit:
+        description: 'PHPStan memory limit (max level + Larastan needs more than the 128M default)'
+        type: string
+        required: false
+        default: '1G'
+      pre-test-command:
+        description: 'Command(s) run in the working directory right before Pest (e.g. cp .env.example .env && php artisan key:generate --force)'
+        type: string
+        required: false
+        default: ''
+    secrets:
+      COMPOSER_TOKEN:
+        description: 'Token for private composer registries (exported as COMPOSER_TOKEN during install)'
+        required: false
+
+jobs:
+  laravel-quality:
+    name: 'Laravel: style, types, architecture, tests'
+    runs-on: docker
+    container: ${{ inputs.runner-image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifact
+        if: inputs.artifact-name != ''
+        uses: forgejo/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.artifact-path }}
+
+      - name: Cache composer
+        # v4.1.2 deliberately: the pool execs node20 for JS actions; cache v5/v6 declare node24.
+        uses: actions/cache@v4.1.2
+        with:
+          path: ~/.cache/composer
+          key: composer-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory)) }}
+          restore-keys: |
+            composer-
+
+      - name: Install dependencies
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          COMPOSER_TOKEN: ${{ secrets.COMPOSER_TOKEN }}
+        run: composer install --no-interaction --no-progress --prefer-dist
+
+      - name: Style (Pint)
+        if: inputs.run-pint
+        working-directory: ${{ inputs.working-directory }}
+        run: ./vendor/bin/pint --test
+
+      - name: Static analysis (PHPStan)
+        if: inputs.run-phpstan
+        working-directory: ${{ inputs.working-directory }}
+        run: ./vendor/bin/phpstan analyse --no-progress --memory-limit=${{ inputs.phpstan-memory-limit }}
+
+      - name: Architecture (deptrac)
+        if: inputs.run-deptrac
+        working-directory: ${{ inputs.working-directory }}
+        run: ./vendor/bin/deptrac analyse --no-progress --fail-on-uncovered
+
+      - name: Pre-test setup
+        if: inputs.run-pest && inputs.pre-test-command != ''
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.pre-test-command }}
+
+      - name: Tests (Pest)
+        if: inputs.run-pest
+        working-directory: ${{ inputs.working-directory }}
+        run: ./vendor/bin/pest --ci

@@ -7,6 +7,16 @@ on:
         description: 'Path to the Helm chart you wish to validate'
         type: string
         required: true
+      run-template:
+        description: 'Also render the chart (helm template) as a validation step'
+        type: boolean
+        required: false
+        default: false
+      release-name:
+        description: 'Release name used for the helm template render'
+        type: string
+        required: false
+        default: 'release'
 
 jobs:
   helm-chart-validate:
@@ -19,5 +29,8 @@ jobs:
           version: v3.17.0
       - run: |
           helm lint ${{ inputs.path }}
-#          helm template ${{ inputs.path }}
+      - name: Render chart
+        if: ${{ inputs.run-template }}
+        run: |
+          helm template ${{ inputs.release-name }} ${{ inputs.path }} >/dev/null
 #          helm template ${{ inputs.path }} | kubeval --ignore-missing-schemas

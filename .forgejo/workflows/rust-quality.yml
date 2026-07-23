@@ -1,0 +1,112 @@
+name: '[Call] Rust Quality Gate'
+
+# Hard-gate Rust CI for a cargo workspace: fmt → clippy → test, optionally followed by a wasm
+# build whose artifact is shared with sibling jobs in the same run (forgejo/upload-artifact).
+# Every step is fatal — this is the hard-fail family (ADR 0003), not the advisory rust-tests /
+# rust-static-analysis pair. One job on purpose: the wasm build reuses the same target dir and
+# cargo cache as the tests, so splitting it out would recompile the dependency graph.
+
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        description: 'CI container image (must bake node for JS actions, a stable toolchain, and rustup)'
+        type: string
+        required: false
+        default: 'harbor.webgrip.dev/webgrip/rust-ci-runner:1.3.0'
+      working-directory:
+        description: 'Repo-relative cargo workspace root'
+        type: string
+        required: false
+        default: '.'
+      cargo-home:
+        description: 'CARGO_HOME inside the runner image (rust-ci-runner uses /usr/local/cargo, not ~/.cargo)'
+        type: string
+        required: false
+        default: '/usr/local/cargo'
+      clippy-args:
+        description: 'Arguments for cargo clippy'
+        type: string
+        required: false
+        default: '--workspace -- -D warnings'
+      test-args:
+        description: 'Arguments for cargo test'
+        type: string
+        required: false
+        default: '--workspace'
+      wasm-package:
+        description: 'Cargo package to build for wasm (-p). Empty = skip the wasm build + upload.'
+        type: string
+        required: false
+        default: ''
+      wasm-target:
+        description: 'Wasm target triple'
+        type: string
+        required: false
+        default: 'wasm32-unknown-unknown'
+      wasm-artifact-name:
+        description: 'Artifact name for the uploaded wasm build'
+        type: string
+        required: false
+        default: 'wasm'
+      wasm-artifact-path:
+        description: 'Path(s) to upload. Empty = <working-directory>/target/<wasm-target>/release/*.wasm'
+        type: string
+        required: false
+        default: ''
+      artifact-retention-days:
+        description: 'Retention for the wasm artifact (it only needs to outlive the run)'
+        type: number
+        required: false
+        default: 1
+
+jobs:
+  rust-quality:
+    name: 'Rust: fmt, clippy, tests'
+    runs-on: docker
+    container: ${{ inputs.runner-image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo registry and build output
+        # restore-keys give a partial hit when Cargo.lock moves: unchanged dependencies
+        # still restore, and that is most of the compile time.
+        # v4.1.2 deliberately: the runner execs a literal `node` from PATH regardless of
+        # an action's declared runtime, and the pool exports externals/node20. v5/v6
+        # declare node24.
+        uses: actions/cache@v4.1.2
+        with:
+          path: |
+            ${{ inputs.cargo-home }}/registry
+            ${{ inputs.cargo-home }}/git
+            ${{ inputs.working-directory }}/target
+          key: cargo-${{ hashFiles(format('{0}/Cargo.lock', inputs.working-directory)) }}
+          restore-keys: |
+            cargo-
+
+      - name: Format
+        working-directory: ${{ inputs.working-directory }}
+        run: cargo fmt --check
+
+      - name: Lints (clippy)
+        working-directory: ${{ inputs.working-directory }}
+        run: cargo clippy ${{ inputs.clippy-args }}
+
+      - name: Tests
+        working-directory: ${{ inputs.working-directory }}
+        run: cargo test ${{ inputs.test-args }}
+
+      - name: Build wasm artifact
+        if: inputs.wasm-package != ''
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          rustup target add ${{ inputs.wasm-target }}
+          cargo build --release -p ${{ inputs.wasm-package }} --target ${{ inputs.wasm-target }}
+
+      - name: Upload wasm artifact
+        if: inputs.wasm-package != ''
+        uses: forgejo/upload-artifact@v4
+        with:
+          name: ${{ inputs.wasm-artifact-name }}
+          path: ${{ inputs.wasm-artifact-path || format('{0}/target/{1}/release/*.wasm', inputs.working-directory, inputs.wasm-target) }}
+          retention-days: ${{ inputs.artifact-retention-days }}

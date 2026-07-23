@@ -1,21 +1,47 @@
 name: "[Action] Semantic Release (Monorepo)"
-description: "Run semantic-release for a single monorepo package path (e.g. ops/docker/<image>) without committing package.json."
+description: >-
+  Run semantic-release for a single monorepo package path (e.g. ops/docker/<image> or
+  deploy/charts/<chart>) without committing a fabricated package.json. Config is resolved by
+  cosmiconfig upward from the package directory: a package-local .releaserc(.cjs) wins,
+  otherwise the nearest ancestor config (usually the repo root .releaserc.js). Output contract:
+  the resolved config must include an @semantic-release/exec successCmd that writes
+  `version=${nextRelease.version}` (and optionally `tag=${nextRelease.gitTag}`) to
+  $GITHUB_OUTPUT — without it the action's outputs stay empty even when a release is cut.
 
 inputs:
   package-path:
-    description: "Path to the package directory (repo-relative), e.g. ops/docker/helm-deploy"
+    description: "Path to the package directory (repo-relative), e.g. ops/docker/helm-deploy, or '.' for a root-scoped train"
     required: true
   package-name:
-    description: "Package name used for tag prefix, e.g. helm-deploy"
+    description: "Package name for the fabricated package.json (semantic-release-monorepo derives its default tag prefix from it; an explicit tagFormat in the resolved config wins)"
     required: true
   token:
     description: "Forgejo token to use for pushing tags/releases"
     required: false
+  forge-url:
+    description: "Public Forgejo base URL used for user-facing changelog/release links (not for API traffic)"
+    required: false
+    default: "https://forgejo.webgrip.dev"
+  dry-run:
+    description: "Run semantic-release with --dry-run (no tags, releases, or commits)"
+    required: false
+    default: "false"
+  git-user-name:
+    description: "Git identity for release commit-backs (@semantic-release/git) and push auth"
+    required: false
+    default: "webgrip-ci"
+  git-user-email:
+    description: "Git email for release commit-backs"
+    required: false
+    default: "ci@webgrip.nl"
 
 outputs:
   version:
-    description: "The new version number (from exec plugin writing to $GITHUB_OUTPUT)"
+    description: "The new version number (from the config's exec successCmd writing to $GITHUB_OUTPUT; may be tag-prefixed under semantic-release-monorepo — normalize in the caller)"
     value: ${{ steps.semantic-release.outputs.version }}
+  tag:
+    description: "The full git tag of the cut release (from the config's exec successCmd; empty if no release)"
+    value: ${{ steps.semantic-release.outputs.tag }}
 
 runs:
   using: "composite"
@@ -32,16 +58,29 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.npm
-        key: ${{ runner.os }}-npm-semrel-24.2.7
+        key: ${{ runner.os }}-npm-semrel-24.2.7-r2
 
     - name: Run semantic-release
       shell: bash
       id: semantic-release
       env:
         GITHUB_OUTPUT: $GITHUB_OUTPUT
-        # Forgejo: @saithodev/semantic-release-gitea targets the runner's Forgejo instance (github.server_url).
+        # Split addressing: the release API call stays in-cluster (github.server_url =
+        # http://forgejo-http.forgejo.svc.cluster.local:3000 on the runner) so it never hairpins out
+        # through the ingress, while the user-facing changelog/release links use the public host
+        # (forge-url) via --repository-url below.
         GITEA_URL: ${{ github.server_url }}
         GITEA_TOKEN: ${{ inputs.token || github.token }}
+        # --repository-url makes semantic-release push tags (and @semantic-release/git push
+        # commits) to the PUBLIC host, which the checkout's in-cluster extraheader credential
+        # does not cover. GIT_CREDENTIALS is the env var semantic-release core understands for
+        # building an authenticated push URL. Components must be URL-encoded if they contain
+        # reserved characters.
+        GIT_CREDENTIALS: ${{ inputs.git-user-name }}:${{ inputs.token || github.token }}
+        GIT_AUTHOR_NAME: ${{ inputs.git-user-name }}
+        GIT_AUTHOR_EMAIL: ${{ inputs.git-user-email }}
+        GIT_COMMITTER_NAME: ${{ inputs.git-user-name }}
+        GIT_COMMITTER_EMAIL: ${{ inputs.git-user-email }}
       run: |
         set -euo pipefail
 
@@ -69,13 +108,28 @@ runs:
 
         cd "$pkg_dir"
 
+        # @semantic-release/git + changelog are installed for consumers whose configs commit
+        # release artifacts back (CHANGELOG.md, Chart.yaml, ...); semantic-release only loads
+        # plugins the resolved config references, so no-commit consumers are unaffected.
         npm install --no-save --no-audit --no-fund \
           semantic-release@24.2.7 \
           semantic-release-monorepo@8.0.2 \
           @semantic-release/commit-analyzer@13.0.0 \
           @semantic-release/exec@7.0.3 \
+          @semantic-release/git@10.0.1 \
+          @semantic-release/changelog@6.0.3 \
           @saithodev/semantic-release-gitea \
           @semantic-release/release-notes-generator@14.0.0 \
           conventional-changelog-conventionalcommits@7.0.2
 
-        npx semantic-release --config "${GITHUB_WORKSPACE}/.releaserc.js"
+        dry_run_flag=""
+        if [[ "${{ inputs.dry-run }}" == "true" ]]; then
+          dry_run_flag="--dry-run"
+        fi
+
+        # --repository-url pins the changelog compare/commit links and release URL to the public host.
+        # semantic-release would otherwise derive it from the CI checkout's origin remote (internal).
+        # NB: no --config flag — semantic-release has none; config resolution is cosmiconfig from cwd.
+        npx semantic-release \
+          --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
+          $dry_run_flag

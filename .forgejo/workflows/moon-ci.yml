@@ -1,0 +1,63 @@
+name: '[Call] Moon CI'
+
+# Run moon task-graph targets (https://moonrepo.dev) after an optional artifact restore.
+# The generic shape for monorepos where moon owns the cross-package task graph: the caller
+# names the targets; dependency order, caching, and affected-detection are moon's job.
+
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        description: 'CI container image (must bake node for JS actions)'
+        type: string
+        required: false
+        default: 'harbor.webgrip.dev/webgrip/node-ci-runner:1.0.0'
+      tasks:
+        description: 'Space-separated moon targets, e.g. "web:test web:build"'
+        type: string
+        required: true
+      install-command:
+        description: 'Dependency install command(s), run at the repo root (multiline OK)'
+        type: string
+        required: false
+        default: 'npm ci'
+      artifact-name:
+        description: 'Artifact from an earlier job in this run to download before installing. Empty = skip.'
+        type: string
+        required: false
+        default: ''
+      artifact-path:
+        description: 'Where to place the downloaded artifact (repo-relative)'
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  moon-ci:
+    name: 'Moon task graph'
+    runs-on: docker
+    container: ${{ inputs.runner-image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifact
+        if: inputs.artifact-name != ''
+        uses: forgejo/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.artifact-path }}
+
+      - name: Cache npm
+        # v4.1.2 deliberately: the pool execs node20 for JS actions; cache v5/v6 declare node24.
+        uses: actions/cache@v4.1.2
+        with:
+          path: ~/.npm
+          key: npm-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            npm-
+
+      - name: Install dependencies
+        run: ${{ inputs.install-command }}
+
+      - name: Run moon targets
+        run: npx moon run ${{ inputs.tasks }}

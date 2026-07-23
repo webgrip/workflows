@@ -203,6 +203,46 @@ Runs Go static analysis with `gofmt`, `go vet`, `golangci-lint`, `govulncheck`, 
 #### `go-application-tests.yml`
 Runs Go test suites and uploads coverage and test output artifacts.
 
+### Hard-Gate Quality Workflows (Forgejo-only)
+
+The `*-application-tests` / `*-application-static-analysis` family above is deliberately
+**advisory** (tools soft-fail so any repo can adopt them). The hard-gate family below is the
+opposite contract ([ADR 0003](docs/adrs/0003-hard-gate-quality-workflows.md)): every step is
+fatal, tools are toggled explicitly by the caller, runner images come from Harbor (and must bake
+node for JS actions), and artifacts flow between jobs of the same run via the
+`forgejo/upload-artifact@v4` / `forgejo/download-artifact@v4` forks. Forgejo-only —
+consume from `.forgejo/workflows/`.
+
+#### `rust-quality.yml`
+`cargo fmt --check` → `clippy` → `test` for one cargo workspace, with an optional wasm build
+(`wasm-package` input) uploaded as an artifact for sibling jobs. One job on purpose: the wasm
+build reuses the tests' target dir and cargo cache.
+
+#### `laravel-quality.yml`
+Pint → PHPStan → deptrac (`--fail-on-uncovered`) → Pest (`--ci`), all fatal. Prefer this over
+the advisory PHP pair for Laravel repos. Supports an artifact restore before `composer install`
+(e.g. a wasm binding the test suite serves) and a `pre-test-command` (env setup).
+
+#### `moon-ci.yml`
+Runs [moon](https://moonrepo.dev) task-graph targets (`tasks: "web:test web:build"`) after an
+optional artifact restore — the generic shape for monorepos where moon owns the cross-package
+task graph.
+
+#### `spa-preview.yml`
+Per-branch static SPA preview: builds with `PREVIEW_SLUG`/`PREVIEW_BASE` exported, pushes the
+bundle into a previews repo served by the in-cluster preview host
+(`https://preview.webgrip.dev/<slug>/`), and posts one marker-idempotent PR comment.
+
+**Secrets:** `PREVIEW_PUSH_TOKEN` — token of a narrowly-scoped account (default `agent-builder`),
+deliberately not the org-wide CI bot.
+
+#### `docker-mirror.yml`
+Copies already-built images between registries (default Harbor → the Forgejo registry, so images
+appear as repo-linked packages). `best-effort: true` (default) makes failures non-fatal — the
+flag lives inside the workflow because caller jobs with `uses:` cannot set `continue-on-error`.
+
+**Secrets:** `SOURCE_REGISTRY_USER`, `SOURCE_REGISTRY_TOKEN`, `TARGET_REGISTRY_TOKEN`.
+
 ### Docker & Containerization
 
 #### `docker-build-and-push.yml`
@@ -271,8 +311,14 @@ Deploys Helm charts with detailed job summaries and secret management.
 #### `helm-chart-push.yml` / `helm-charts-push.yml`
 Packages and pushes Helm charts to registries.
 
+**Inputs (Forgejo copy):** `registry`, `path`, `name`, `version`, plus optional `ref` (git ref to
+check out — pass the tag for prefixed tag schemes like `chart-v1.2.3`; defaults to `version`),
+`oci-path` (OCI repo under the registry; defaults to `<owner>/<repo>`) and `best-effort`
+(non-fatal push, for mirrors).
+
 #### `helm-chart-validate.yml` / `helm-charts-validate.yml`
-Validates Helm chart syntax and best practices.
+Validates Helm chart syntax and best practices. The Forgejo copy also renders the chart when
+`run-template: true` (with `release-name`).
 
 ### Rust Development
 
@@ -404,6 +450,30 @@ Minimal example `.releaserc.json` for a WordPress plugin that uploads the genera
     }]
   ]
 }
+```
+
+#### `semantic-release-monorepo.yml` (Forgejo-only)
+Per-package release train for monorepos: wraps the `semantic-release-monorepo` composite action
+(checkout `fetch-depth: 0`, push permissions, version normalization). Commit analysis is scoped
+to `package-path` by the [`semantic-release-monorepo`](https://github.com/pmowrer/semantic-release-monorepo)
+plugin; config is resolved by cosmiconfig from the package dir upward (a package-local
+`.releaserc.cjs` wins, else the repo root `.releaserc.js`). The consumer config **must** write
+`version=`/`tag=` to `$GITHUB_OUTPUT` via an `@semantic-release/exec` `successCmd` for the
+outputs to be populated. `@semantic-release/git` + `changelog` are pre-installed for configs
+that commit release artifacts back (CHANGELOG.md, Chart.yaml, …).
+
+**Inputs:** `package-path` (`.` for a root-scoped train), `package-name`, `dry-run`.
+**Secrets:** `FORGEJO_TOKEN`. **Outputs:** `version` (bare semver, normalized), `tag`.
+
+```yaml
+jobs:
+  release-chart:
+    uses: webgrip/workflows/.forgejo/workflows/semantic-release-monorepo.yml@main
+    with:
+      package-path: deploy/charts/myapp
+      package-name: myapp-chart
+    secrets:
+      FORGEJO_TOKEN: ${{ secrets.WEBGRIP_CI_TOKEN }}
 ```
 
 #### `wordpress-plugin-release-distribute.yml`

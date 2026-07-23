@@ -39,7 +39,17 @@ ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 # Workflows that intentionally exist ONLY in .forgejo (no .github sibling), e.g.
 # because they target infrastructure unreachable from GitHub-hosted runners.
 FORGEJO_ONLY=(
-    docker-build-and-push-harbor.yml   # in-cluster runner -> LAN-only Harbor
+    docker-build-and-push-harbor.yml        # in-cluster runner -> LAN-only Harbor
+    docker-build-and-push-harbor-fast.yml   # in-cluster runner -> LAN-only Harbor
+    docker-build-and-push-registry.yml      # generic engine behind the Harbor wrappers
+    docker-build-and-push-registry-fast.yml # generic engine behind the Harbor wrappers
+    techdocs-deploy-codeberg.yml            # Codeberg pages target, Forgejo-first
+    semantic-release-monorepo.yml           # Forgejo is the sole release authority; GitHub mirrors cut no releases
+    rust-quality.yml                        # hard-gate family (ADR 0003): Harbor runner images + forgejo artifact forks
+    laravel-quality.yml                     # hard-gate family (ADR 0003): Harbor runner images + forgejo artifact forks
+    moon-ci.yml                             # hard-gate family (ADR 0003): Harbor runner images + forgejo artifact forks
+    spa-preview.yml                         # in-cluster preview host + Forgejo API, no GitHub analog
+    docker-mirror.yml                       # Harbor -> Forgejo registry replication, no GitHub analog
 )
 
 is_forgejo_only() {
@@ -83,7 +93,10 @@ if [ -d ".forgejo" ]; then
     for entry in "${forbidden[@]}"; do
         pattern="${entry%%|*}"
         desc="${entry#*|}"
-        if matches="$(grep -rnE "$pattern" .forgejo --include='*.yml' --include='*.yaml' 2>/dev/null)"; then
+        # docker-build-and-push-ghcr.yml is exempt: it intentionally targets ghcr.io so
+        # consumers can dual-publish during the Harbor migration (see README).
+        if matches="$(grep -rnE "$pattern" .forgejo --include='*.yml' --include='*.yaml' \
+            --exclude='docker-build-and-push-ghcr.yml' 2>/dev/null)"; then
             while IFS= read -r line; do
                 err "$desc"
                 printf '      %s\n' "$line"

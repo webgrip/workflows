@@ -8,6 +8,14 @@ inputs:
   token:
     description: "Forgejo token to use for checkout/push and releases"
     required: false
+  forge-url:
+    description: "Public Forgejo base URL used for user-facing changelog/release links (not for API traffic)"
+    required: false
+    default: "https://forgejo.webgrip.dev"
+  git-user-name:
+    description: "Account name matching the token, used for push auth against the public host"
+    required: false
+    default: "webgrip-ci"
 
 outputs:
   version:
@@ -59,9 +67,18 @@ runs:
       id: semantic-release
       env:
         GITHUB_OUTPUT: $GITHUB_OUTPUT
-        # Forgejo: @saithodev/semantic-release-gitea targets the runner's Forgejo instance (github.server_url).
+        # Split addressing: the release API call stays in-cluster (github.server_url =
+        # http://forgejo-http.forgejo.svc.cluster.local:3000 on the runner) so it never hairpins out
+        # through the ingress, while the user-facing changelog/release links use the public host
+        # (forge-url) via --repository-url below.
         GITEA_URL: ${{ github.server_url }}
         GITEA_TOKEN: ${{ inputs.token || github.token }}
+        # --repository-url makes semantic-release push tags (and @semantic-release/git push
+        # commits) to the PUBLIC host, which the checkout's in-cluster extraheader credential
+        # does not cover. GIT_CREDENTIALS is the env var semantic-release core understands for
+        # building an authenticated push URL. Components must be URL-encoded if they contain
+        # reserved characters.
+        GIT_CREDENTIALS: ${{ inputs.git-user-name }}:${{ inputs.token || github.token }}
       run: |
         npm install --no-save \
           semantic-release \
@@ -75,4 +92,8 @@ runs:
           conventional-changelog-conventionalcommits
         # Forgejo: dropped semantic-release-github-actions-tags (GitHub-Actions-specific, no analog)
 
-        npx semantic-release ${{ steps.set-config.outputs.release_config }}
+        # --repository-url pins the changelog compare/commit links and release URL to the public host.
+        # semantic-release would otherwise derive it from the CI checkout's origin remote (internal).
+        npx semantic-release \
+          --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
+          ${{ steps.set-config.outputs.release_config }}

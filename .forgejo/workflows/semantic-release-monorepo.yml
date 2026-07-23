@@ -1,0 +1,71 @@
+name: '[Call] Semantic Release (Monorepo)'
+
+# Per-package release train for monorepos: runs the semantic-release-monorepo composite action
+# against one package path. Commit analysis is scoped to that path by the
+# semantic-release-monorepo plugin (referenced from the consumer's releaserc); config is
+# resolved by cosmiconfig from the package dir upward (package .releaserc.cjs wins, else the
+# repo root .releaserc.js). The consumer config must write version=/tag= to $GITHUB_OUTPUT via
+# an @semantic-release/exec successCmd for this workflow's outputs to be populated.
+
+on:
+  workflow_call:
+    inputs:
+      package-path:
+        description: 'Repo-relative package dir ("." for a root-scoped train)'
+        required: true
+        type: string
+      package-name:
+        description: 'Package name (fabricated package.json name / default tag prefix)'
+        required: true
+        type: string
+      dry-run:
+        description: 'Run semantic-release with --dry-run (no tags, releases, or commits)'
+        required: false
+        default: false
+        type: boolean
+    secrets:
+      FORGEJO_TOKEN:
+        description: 'Forgejo CI bot token used for checkout/push and releases'
+        required: false
+    outputs:
+      version:
+        description: 'Bare semver of the release cut this run (empty if none)'
+        value: ${{ jobs.semrel-monorepo.outputs.version }}
+      tag:
+        description: 'Full git tag of the release (e.g. chart-v1.2.3; empty if none)'
+        value: ${{ jobs.semrel-monorepo.outputs.tag }}
+
+jobs:
+  # NB: job id deliberately unlikely to collide with caller job ids (release, release-chart, ...):
+  # Forgejo v15 flattens reusable jobs into the caller run and rejects id collisions as cycles.
+  semrel-monorepo:
+    name: 'Semantic Release (monorepo)'
+    runs-on: docker # bare pool, no `container:` — JS actions run via the pool's node
+    permissions:
+      contents: write # push release commit + tag
+    outputs:
+      version: ${{ steps.normalize.outputs.version }}
+      tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # semantic-release needs full history + tags
+          token: ${{ secrets.FORGEJO_TOKEN || github.token }}
+
+      - id: release
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/semantic-release-monorepo@main
+        with:
+          package-path: ${{ inputs.package-path }}
+          package-name: ${{ inputs.package-name }}
+          token: ${{ secrets.FORGEJO_TOKEN }}
+          dry-run: ${{ inputs.dry-run }}
+
+      - id: normalize
+        shell: bash
+        env:
+          RAW: ${{ steps.release.outputs.version }}
+        run: |
+          # semantic-release-monorepo setups have been observed emitting both bare semver and the
+          # tag-prefixed form (<name>-v1.2.3); normalize to bare semver so callers can compose
+          # image tags / chart versions safely.
+          echo "version=${RAW##*-v}" >> "$GITHUB_OUTPUT"

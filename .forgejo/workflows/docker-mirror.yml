@@ -1,0 +1,63 @@
+name: '[Call] Mirror Docker Images'
+
+# Copy already-built images from one registry to another (pull → retag → push), e.g.
+# Harbor (the deploy source) → the Forgejo registry so images appear as packages linked to
+# their source repo (they carry org.opencontainers.image.source). best-effort lives HERE
+# because caller jobs with `uses:` cannot set continue-on-error.
+
+on:
+  workflow_call:
+    inputs:
+      images:
+        description: 'Newline-separated OWNER/IMAGE:TAG list (registry-relative, same path on both sides)'
+        type: string
+        required: true
+      source-registry:
+        description: 'Registry to pull from'
+        type: string
+        required: false
+        default: 'harbor.webgrip.dev'
+      target-registry:
+        description: 'Registry to push to'
+        type: string
+        required: false
+        default: 'forgejo.webgrip.dev'
+      target-username:
+        description: 'Login user for the target registry'
+        type: string
+        required: false
+        default: 'webgrip-ci'
+      best-effort:
+        description: 'Do not fail the caller when the mirror fails (a registry hiccup must never fail a release)'
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  docker-mirror:
+    name: 'Mirror images'
+    runs-on: docker
+    continue-on-error: ${{ inputs.best-effort }}
+    steps:
+      - name: Copy images
+        shell: bash
+        env:
+          # Env, not `${{ }}` shell interpolation: Harbor robot usernames contain `$`.
+          SOURCE_REGISTRY: ${{ inputs.source-registry }}
+          TARGET_REGISTRY: ${{ inputs.target-registry }}
+          SOURCE_USER: ${{ secrets.SOURCE_REGISTRY_USER }}
+          SOURCE_TOKEN: ${{ secrets.SOURCE_REGISTRY_TOKEN }}
+          TARGET_USER: ${{ inputs.target-username }}
+          TARGET_TOKEN: ${{ secrets.TARGET_REGISTRY_TOKEN }}
+          IMAGES: ${{ inputs.images }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$SOURCE_TOKEN" | docker login "$SOURCE_REGISTRY" -u "$SOURCE_USER" --password-stdin
+          printf '%s' "$TARGET_TOKEN" | docker login "$TARGET_REGISTRY" -u "$TARGET_USER" --password-stdin
+          while IFS= read -r img; do
+            [ -n "$img" ] || continue
+            docker pull "${SOURCE_REGISTRY}/${img}"
+            docker tag  "${SOURCE_REGISTRY}/${img}" "${TARGET_REGISTRY}/${img}"
+            docker push "${TARGET_REGISTRY}/${img}"
+            echo "mirrored ${img} ${SOURCE_REGISTRY} -> ${TARGET_REGISTRY}"
+          done <<< "$IMAGES"

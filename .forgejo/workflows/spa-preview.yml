@@ -1,0 +1,160 @@
+name: '[Call] SPA Branch Preview'
+
+# Per-branch static preview of an SPA (dark-factory pattern: manually test a PR's changes).
+# Builds with a branch-slug base path, pushes the bundle into a previews repo served by the
+# in-cluster preview host (git-sync + nginx) at <preview-url-base>/<slug>/, and posts one
+# marker-idempotent comment on the branch's PR. Only works for local-first SPAs where a static
+# bundle is a fully working preview (no backend).
+
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        description: 'CI container image (must bake node for JS actions, plus python3 + curl for the PR comment)'
+        type: string
+        required: false
+        default: 'harbor.webgrip.dev/webgrip/node-ci-runner:1.0.0'
+      build-command:
+        description: 'Build command(s), run at the repo root with PREVIEW_SLUG and PREVIEW_BASE exported (base your bundle on PREVIEW_BASE)'
+        type: string
+        required: true
+      output-dir:
+        description: 'Repo-relative directory holding the built bundle (e.g. apps/web/dist)'
+        type: string
+        required: true
+      artifact-name:
+        description: 'Artifact from an earlier job in this run to download before building. Empty = skip.'
+        type: string
+        required: false
+        default: ''
+      artifact-path:
+        description: 'Where to place the downloaded artifact (repo-relative)'
+        type: string
+        required: false
+        default: ''
+      previews-repo:
+        description: 'owner/repo receiving the preview bundles (one directory per branch slug)'
+        type: string
+        required: false
+        default: 'webgrip/previews'
+      clone-host:
+        description: 'Git host used to clone/push the previews repo (in-cluster, avoids ingress hairpin)'
+        type: string
+        required: false
+        default: 'forgejo-http.forgejo.svc.cluster.local:3000'
+      push-user:
+        description: 'Account owning the push token. Deliberately NOT the org-wide CI bot: previews build agent-authored branches, so the token should be scoped to the previews repo only.'
+        type: string
+        required: false
+        default: 'agent-builder'
+      push-email:
+        description: 'Git email for preview commits'
+        type: string
+        required: false
+        default: 'agent-builder@webgrip.dev'
+      preview-url-base:
+        description: 'Public base URL the preview host serves from'
+        type: string
+        required: false
+        default: 'https://preview.webgrip.dev'
+      api-base:
+        description: 'Forgejo API base URL for the PR comment'
+        type: string
+        required: false
+        default: 'https://forgejo.webgrip.dev/api/v1'
+      comment-marker:
+        description: 'Hidden marker keeping the PR comment idempotent (one comment per PR)'
+        type: string
+        required: false
+        default: 'spa-preview-marker'
+      comment-body:
+        description: 'PR comment text; {url} is replaced with the preview URL. The marker is appended automatically.'
+        type: string
+        required: false
+        default: '📱 **Feature preview**: {url} — static build of this branch. Updates on every push.'
+    secrets:
+      PREVIEW_PUSH_TOKEN:
+        description: 'Token of push-user with write access to the previews repo'
+        required: true
+
+jobs:
+  spa-preview:
+    name: 'Publish branch preview'
+    runs-on: docker
+    container: ${{ inputs.runner-image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifact
+        if: inputs.artifact-name != ''
+        uses: forgejo/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.artifact-path }}
+
+      - name: Build with branch base
+        run: |
+          set -euo pipefail
+          SLUG=$(echo "${GITHUB_REF_NAME}" | tr '/_' '--' | tr -cd 'a-zA-Z0-9.-' | cut -c1-63)
+          echo "PREVIEW_SLUG=${SLUG}" >> "$GITHUB_ENV"
+          echo "PREVIEW_BASE=/${SLUG}/" >> "$GITHUB_ENV"
+          export PREVIEW_SLUG="${SLUG}"
+          export PREVIEW_BASE="/${SLUG}/"
+          ${{ inputs.build-command }}
+          echo "built ${{ inputs.output-dir }} for ${PREVIEW_BASE} ($(du -sh "${{ inputs.output-dir }}" | cut -f1))"
+
+      - name: Publish to the previews repo
+        env:
+          PREVIEW_PUSH_TOKEN: ${{ secrets.PREVIEW_PUSH_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config --global user.name "${{ inputs.push-user }}"
+          git config --global user.email "${{ inputs.push-email }}"
+          src="${PWD}/${{ inputs.output-dir }}"
+          for attempt in 1 2; do
+            rm -rf /tmp/previews
+            git clone --depth 1 \
+              "http://${{ inputs.push-user }}:${PREVIEW_PUSH_TOKEN}@${{ inputs.clone-host }}/${{ inputs.previews-repo }}.git" \
+              /tmp/previews
+            rm -rf "/tmp/previews/${PREVIEW_SLUG}"
+            mkdir -p "/tmp/previews/${PREVIEW_SLUG}"
+            cp -r "${src}/." "/tmp/previews/${PREVIEW_SLUG}/"
+            cd /tmp/previews
+            git add -A
+            if git diff --cached --quiet; then echo "preview unchanged"; break; fi
+            git commit -q -m "preview: ${GITHUB_REPOSITORY}@${GITHUB_SHA} (${PREVIEW_SLUG})"
+            if git push -q origin main; then echo "published /${PREVIEW_SLUG}/"; break; fi
+            echo "push race (attempt ${attempt}) — retrying"
+            cd - >/dev/null
+          done
+
+      - name: Comment the PR (if one exists for this branch)
+        env:
+          COMMENT_BODY: ${{ inputs.comment-body }}
+          COMMENT_MARKER: ${{ inputs.comment-marker }}
+        run: |
+          set -euo pipefail
+          api="${{ inputs.api-base }}/repos/${GITHUB_REPOSITORY}"
+          export PREVIEW_URL="${{ inputs.preview-url-base }}/${PREVIEW_SLUG}/"
+          curl -fsS -H "Authorization: token ${{ github.token }}" \
+            "${api}/pulls?state=open&limit=50" -o /tmp/pulls.json || exit 0
+          PR=$(python3 - "$GITHUB_REF_NAME" <<'PY'
+          import json, sys
+          ref = sys.argv[1]
+          for p in json.load(open("/tmp/pulls.json")):
+              if p.get("head", {}).get("ref") == ref:
+                  print(p["number"]); break
+          PY
+          )
+          [ -n "$PR" ] || { echo "no open PR for ${GITHUB_REF_NAME} — skipping comment"; exit 0; }
+          # marker prevents comment spam: only post once per PR
+          curl -fsS -H "Authorization: token ${{ github.token }}" "${api}/issues/${PR}/comments" -o /tmp/comments.json || exit 0
+          if grep -q "$COMMENT_MARKER" /tmp/comments.json; then echo "preview comment already present"; exit 0; fi
+          python3 - <<'PY' > /tmp/preview-comment.json
+          import json, os
+          body = os.environ["COMMENT_BODY"].replace("{url}", os.environ["PREVIEW_URL"])
+          print(json.dumps({"body": f'{body} <!-- {os.environ["COMMENT_MARKER"]} -->'}))
+          PY
+          curl -fsS -X POST -H "Authorization: token ${{ github.token }}" \
+            -H 'Content-Type: application/json' -d @/tmp/preview-comment.json "${api}/issues/${PR}/comments" >/dev/null
+          echo "preview comment posted on PR #${PR}"

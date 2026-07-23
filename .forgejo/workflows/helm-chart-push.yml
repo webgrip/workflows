@@ -26,15 +26,29 @@ on:
         description: 'Version of the Helm chart'
         type: string
         required: true
+      ref:
+        description: 'Git ref to check out. Defaults to the version — pass the tag explicitly for repos whose tags are prefixed (e.g. chart-v1.2.3).'
+        type: string
+        required: false
+      oci-path:
+        description: 'OCI repository path under the registry. Defaults to <owner>/<repo>.'
+        type: string
+        required: false
+      best-effort:
+        description: 'Do not fail the caller when the push fails (e.g. best-effort mirrors). Lives here because caller jobs with `uses:` cannot set continue-on-error.'
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   helm-chart-push:
     name: 'Push Helm Chart'
     runs-on: docker
+    continue-on-error: ${{ inputs.best-effort }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.version }} # Make sure we are on the tagged versioned commit
+          ref: ${{ inputs.ref || inputs.version }} # Make sure we are on the tagged versioned commit
       - uses: azure/setup-helm@v4
       # validate again?
       - name: Registry login
@@ -52,4 +66,4 @@ jobs:
           export HELM_EXPERIMENTAL_OCI=1
       - run: |
           helm package ${{ inputs.path }}
-          helm push ./${{inputs.name}}-${{inputs.version}}.tgz oci://${{ inputs.registry }}/${{ github.repository }}
+          helm push ./${{ inputs.name }}-${{ inputs.version }}.tgz oci://${{ inputs.registry }}/${{ inputs.oci-path || github.repository }}
