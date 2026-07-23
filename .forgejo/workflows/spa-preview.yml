@@ -100,7 +100,11 @@ jobs:
           echo "PREVIEW_BASE=/${SLUG}/" >> "$GITHUB_ENV"
           export PREVIEW_SLUG="${SLUG}"
           export PREVIEW_BASE="/${SLUG}/"
+          # Subshell: a `cd` inside the caller's build-command must not leak into the
+          # output-dir paths below.
+          (
           ${{ inputs.build-command }}
+          )
           echo "built ${{ inputs.output-dir }} for ${PREVIEW_BASE} ($(du -sh "${{ inputs.output-dir }}" | cut -f1))"
 
       - name: Publish to the previews repo
