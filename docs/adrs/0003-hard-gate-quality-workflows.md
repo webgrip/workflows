@@ -23,12 +23,12 @@ existing consumers.
 
 ## Decision Drivers
 
-| # | Driver (why this matters)                                                        |
-| - | -------------------------------------------------------------------------------- |
-| 1 | Repos need CI that FAILS when style/types/architecture/tests fail                 |
-| 2 | Advisory-family consumers must keep their soft-fail semantics untouched           |
-| 3 | Cross-job artifact hand-off (e.g. a wasm build consumed by PHP and web jobs)      |
-| 4 | Forgejo act_runner constraints differ structurally from GitHub-hosted runners     |
+| # | Driver (why this matters)                                                     |
+| - | ----------------------------------------------------------------------------- |
+| 1 | Repos need CI that FAILS when style/types/architecture/tests fail             |
+| 2 | Advisory-family consumers must keep their soft-fail semantics untouched       |
+| 3 | Cross-job artifact hand-off (e.g. a wasm build consumed by PHP and web jobs)  |
+| 4 | Forgejo act_runner constraints differ structurally from GitHub-hosted runners |
 
 ## Considered Options
 
