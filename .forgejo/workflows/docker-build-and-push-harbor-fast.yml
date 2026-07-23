@@ -57,6 +57,11 @@ on:
         description: 'Docker build args (newline-separated KEY=VALUE entries)'
         required: false
         default: ''
+      enabled:
+        type: boolean
+        description: 'Gate the build from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass conditions (e.g. a non-empty release version) here instead.'
+        required: false
+        default: true
 
 run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }} -> ${{ inputs.registry }} (fast)
 
@@ -70,6 +75,7 @@ jobs:
     # (The literal '$' in the robot username robot$webgrip+ci is a YAML value, not shell-expanded.)
     uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push-registry-fast.yml@main
     with:
+      enabled: ${{ inputs.enabled }}
       registry: ${{ inputs.registry }}
       docker-context: ${{ inputs.docker-context }}
       docker-file: ${{ inputs.docker-file }}

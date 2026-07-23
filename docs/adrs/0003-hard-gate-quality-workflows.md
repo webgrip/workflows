@@ -69,6 +69,12 @@ to remove.
 * **Best-effort is a workflow input** (`best-effort` on `docker-mirror.yml`,
   `helm-chart-push.yml`): caller jobs using `uses:` cannot set `continue-on-error`, so the flag
   must live inside the callable workflow.
+* **Conditions are a workflow input** (`enabled` on the release/build/push/preview/mirror
+  workflows): Forgejo v15's reusable-workflow flattening DROPS `if:` conditions on `uses:`
+  caller jobs — observed live: a `release` caller with `if: github.ref == 'refs/heads/main'`
+  ran its inner job on a feature branch. Callers pass the condition as `enabled:` and the
+  gate is an `if:` on the innermost real (non-`uses:`) job, where it is honored. Nested
+  wrappers (harbor-fast → registry-fast) thread the input down to that job.
 * **Forgejo-only**: listed in `FORGEJO_ONLY` of `scripts/forgejo-parity-check.sh`. No `.github`
   siblings are written speculatively — Forgejo is where these run and where they can be tested.
 

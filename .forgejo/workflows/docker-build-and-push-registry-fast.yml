@@ -56,6 +56,11 @@ on:
         description: 'Docker build args (newline-separated KEY=VALUE entries)'
         required: false
         default: ''
+      enabled:
+        type: boolean
+        description: 'Gate the build from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so callers pass conditions (e.g. a non-empty release version) here; the gate lives on THIS job because it is the innermost real (non-uses) job of the chain.'
+        required: false
+        default: true
 
 run-name: ${{ inputs.docker-context }}/${{ inputs.docker-file }} -> ${{ inputs.registry }} (fast)
 
@@ -65,6 +70,7 @@ permissions:
 jobs:
   build:
     name: "Docker Build and Push (Registry, fast)"
+    if: inputs.enabled
     # The in-cluster Forgejo runner is the only pool (advertises `docker`); it is also the only one
     # that can reach LAN-only registries such as Harbor.
     runs-on: docker

@@ -84,6 +84,16 @@ runs:
       run: |
         set -euo pipefail
 
+        # semantic-release runs raw git commands (ls-remote during branch expansion, fetch,
+        # push) against --repository-url — the PUBLIC host. The checkout only persists an
+        # auth header for the in-cluster host, so on a PRIVATE repo the anonymous ls-remote
+        # 401s before GIT_CREDENTIALS (which only covers semantic-release's own authUrl
+        # path) ever applies. Grant git the same style of credential checkout uses, scoped
+        # to the checkout's local config, and remove it on exit.
+        forge_url="${{ inputs.forge-url }}"
+        auth_b64="$(printf '%s:%s' "x-access-token" "${GITEA_TOKEN}" | base64 -w0)"
+        git -C "${GITHUB_WORKSPACE}" config "http.${forge_url}/.extraheader" "AUTHORIZATION: basic ${auth_b64}"
+
         pkg_dir="${GITHUB_WORKSPACE}/${{ inputs.package-path }}"
         pkg_name="${{ inputs.package-name }}"
         pkg_json="$pkg_dir/package.json"
@@ -100,6 +110,7 @@ runs:
         fi
 
         cleanup() {
+          git -C "${GITHUB_WORKSPACE}" config --unset-all "http.${forge_url}/.extraheader" || true
           if [[ "$created_pkg_json" == "true" ]]; then
             rm -f "$pkg_json" || true
           fi

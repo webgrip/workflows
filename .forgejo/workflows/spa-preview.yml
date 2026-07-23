@@ -72,6 +72,11 @@ on:
         type: string
         required: false
         default: '📱 **Feature preview**: {url} — static build of this branch. Updates on every push.'
+      enabled:
+        description: 'Gate the job from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass the branch condition (e.g. not main) here instead.'
+        type: boolean
+        required: false
+        default: true
     secrets:
       PREVIEW_PUSH_TOKEN:
         description: 'Token of push-user with write access to the previews repo'
@@ -80,6 +85,7 @@ on:
 jobs:
   spa-preview:
     name: 'Publish branch preview'
+    if: inputs.enabled
     runs-on: docker
     container: ${{ inputs.runner-image }}
     steps:

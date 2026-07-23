@@ -32,10 +32,16 @@ on:
         type: boolean
         required: false
         default: true
+      enabled:
+        description: 'Gate the job from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass conditions (e.g. a non-empty release version) here instead.'
+        type: boolean
+        required: false
+        default: true
 
 jobs:
   docker-mirror:
     name: 'Mirror images'
+    if: inputs.enabled
     runs-on: docker
     continue-on-error: ${{ inputs.best-effort }}
     steps:

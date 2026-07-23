@@ -23,6 +23,11 @@ on:
         required: false
         default: false
         type: boolean
+      enabled:
+        description: 'Gate the job from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass the branch condition as an expression here instead.'
+        required: false
+        default: true
+        type: boolean
     secrets:
       FORGEJO_TOKEN:
         description: 'Forgejo CI bot token used for checkout/push and releases'
@@ -40,6 +45,7 @@ jobs:
   # Forgejo v15 flattens reusable jobs into the caller run and rejects id collisions as cycles.
   semrel-monorepo:
     name: 'Semantic Release (monorepo)'
+    if: inputs.enabled
     runs-on: docker # bare pool, no `container:` — JS actions run via the pool's node
     permissions:
       contents: write # push release commit + tag

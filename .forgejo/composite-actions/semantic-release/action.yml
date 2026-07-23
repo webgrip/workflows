@@ -80,6 +80,18 @@ runs:
         # reserved characters.
         GIT_CREDENTIALS: ${{ inputs.git-user-name }}:${{ inputs.token || github.token }}
       run: |
+        set -euo pipefail
+
+        # semantic-release runs raw git commands (ls-remote during branch expansion, fetch,
+        # push) against --repository-url — the PUBLIC host. The checkout only persists an
+        # auth header for the in-cluster host, so on a PRIVATE repo the anonymous ls-remote
+        # 401s before GIT_CREDENTIALS ever applies. Grant git the same style of credential
+        # checkout uses, scoped to the checkout's local config, and remove it on exit.
+        auth_b64="$(printf '%s:%s' "x-access-token" "${GITEA_TOKEN}" | base64 -w0)"
+        git config "http.${{ inputs.forge-url }}/.extraheader" "AUTHORIZATION: basic ${auth_b64}"
+        cleanup() { git config --unset-all "http.${{ inputs.forge-url }}/.extraheader" || true; }
+        trap cleanup EXIT
+
         npm install --no-save \
           semantic-release \
           @semantic-release/changelog \
