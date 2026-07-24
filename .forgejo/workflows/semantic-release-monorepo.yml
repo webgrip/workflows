@@ -39,6 +39,19 @@ on:
         required: false
         default: ''
         type: string
+      align-to-remote-tip:
+        description: >-
+          Before running semantic-release on a branch push, fast-forward the checkout onto the
+          remote branch tip. A concurrent release train (e.g. an app train and a chart train fired
+          by one commit that touches both) can push its own `[skip ci]` release commit after this
+          run was triggered, leaving this run's detached checkout BEHIND origin — semantic-release
+          then aborts with "The local branch is behind the remote one, therefore a new version
+          won't be published" and cuts nothing (a silent no-op that does not self-heal, since the
+          winner's commit is `[skip ci]`). Moving onto the branch tip releases from current remote
+          HEAD. Default true; disable only if a repo deliberately releases a non-tip SHA.
+        required: false
+        default: true
+        type: boolean
     secrets:
       FORGEJO_TOKEN:
         description: 'Forgejo CI bot token used for checkout/push and releases'
@@ -71,6 +84,18 @@ jobs:
         with:
           fetch-depth: 0 # semantic-release needs full history + tags
           token: ${{ secrets.FORGEJO_TOKEN || github.token }}
+
+      # Fast-forward onto the remote branch tip so a concurrent release train that advanced the
+      # branch mid-run can't strand this run "behind remote" (see the align-to-remote-tip input).
+      # Fast-forward only — a release branch's tip is exactly what should be released.
+      - name: Align to remote branch tip
+        if: inputs.align-to-remote-tip && github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch="${GITHUB_REF_NAME}"
+          git fetch --tags origin "$branch"
+          git checkout -B "$branch" "origin/$branch"
 
       - id: release
         uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/semantic-release-monorepo@main
