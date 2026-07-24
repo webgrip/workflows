@@ -40,6 +40,18 @@ jobs:
           echo "PROBE step-expr github.ref=[${{ github.ref }}]"
           echo "PROBE env GITHUB_REF=[$GITHUB_REF] GITHUB_REF_NAME=[$GITHUB_REF_NAME]"
 
+      # Verdicts are encoded in STEP STATUS so they are readable from the action_task_step table
+      # without log access (the Forgejo UI/API expose no job-log endpoint; see erfbeeld bin/ci-log).
+      - name: 'VERDICT needs-in-with (failure = needs.* baked empty at flatten; skipped = alive)'
+        if: inputs.needs-value != 'NEEDS-CONTEXT-ALIVE'
+        run: |
+          echo "needs-value arrived as [${{ inputs.needs-value }}] — needs.* does NOT survive into caller with: blocks" >&2
+          exit 1
+
+      - name: 'VERDICT github-in-with (success = github.* populated in caller with:; skipped = empty as suspected)'
+        if: inputs.github-ref-value != '' && inputs.github-ref-value != '(unset)'
+        run: echo "github-ref-value arrived non-empty [${{ inputs.github-ref-value }}]"
+
   probe-if-ref:
     name: 'Probe: job-level if sees github.ref'
     # Runs ONLY if github.ref is non-empty AND whole-token matches expected-ref at job-if
