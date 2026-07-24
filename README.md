@@ -80,6 +80,13 @@ jobs:
     uses: webgrip/workflows/.forgejo/workflows/go-application-static-analysis.yml@main
 ```
 
+> ⚠️ **One thing does differ: conditional (ref-gated) jobs.** On Forgejo v15 an `if:` on a `uses:`
+> caller job is **dropped** by reusable-workflow flattening, and caller `with:` expressions see an
+> **empty** `github` context. The GitHub examples below that write `if: github.ref == …` on a `uses:`
+> job **do not work on Forgejo** — use the `enabled` / `only-refs` / `skip-refs` inputs instead. See
+> [Conditional (ref-gated) jobs on Forgejo](#conditional-ref-gated-jobs-on-forgejo) and
+> [ADR 0003](docs/adrs/0003-hard-gate-quality-workflows.md).
+
 > **Requires Forgejo v15.0+** (cross-repository `workflow_call`). The `webgrip/workflows` repo must be
 > **public** on the Forgejo instance. The Forgejo port is being rolled out tier by tier — consult
 > `.forgejo/workflows/` for the workflows ported so far.
@@ -214,6 +221,47 @@ fatal, tools are toggled explicitly by the caller, runner images come from Harbo
 node for JS actions), and artifacts flow between jobs of the same run via the
 `forgejo/upload-artifact@v4` / `forgejo/download-artifact@v4` forks. Forgejo-only —
 consume from `.forgejo/workflows/`.
+
+#### Conditional (ref-gated) jobs on Forgejo
+
+Forgejo v15 flattens a `uses:` reusable's jobs into the caller run, and that flattening changes
+how conditions are evaluated — the GitHub idiom silently misfires:
+
+- an `if:` on a `uses:` **caller** job is **dropped** (the inner job runs regardless of branch);
+- a caller's `with:` expressions are evaluated at flatten time against an **empty** `github`
+  context, so `enabled: ${{ github.ref == 'refs/heads/main' }}` bakes to the same value on every
+  branch. `needs.*` **does** survive; a reusable's own job-level `if:` **is** runner-evaluated
+  with the true `github.ref`.
+
+So gate from **inside** the reusable, via inputs, not with a caller `if:`/`github.*`:
+
+- **branch gate** → pass a static ref list as `only-refs` (allow) or `skip-refs` (deny); the
+  reusable compares it against the true `github.ref` in its real job's `if:`;
+- **output gate** → `enabled: ${{ needs.<job>.outputs.<x> != '' }}` (`needs.*` survives flattening);
+- **non-fatal** → `best-effort: true` (a caller `continue-on-error:` on a `uses:` job is ignored).
+
+```yaml
+jobs:
+  release: # cut a release only on main / development
+    needs: [rust, php, web]
+    uses: webgrip/workflows/.forgejo/workflows/semantic-release-monorepo.yml@main
+    with:
+      only-refs: "refs/heads/main refs/heads/development"   # NOT: if: github.ref == …
+      package-path: "."
+      package-name: myapp
+  build: # build only when the release cut a version
+    needs: [release]
+    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push-harbor-fast.yml@main
+    with:
+      enabled: ${{ needs.release.outputs.version != '' }}   # needs.* survives flattening
+      docker-context: "."
+      docker-file: "Dockerfile"
+      docker-tags: "webgrip/myapp:${{ needs.release.outputs.version }}"
+```
+
+Re-verify this behaviour after a Forgejo upgrade with `.forgejo/workflows/probe-flatten-context.yml`.
+Rationale and the live-observed failure: [ADR 0003](docs/adrs/0003-hard-gate-quality-workflows.md)
+("Conditions are a workflow input").
 
 #### `rust-quality.yml`
 `cargo fmt --check` → `clippy` → `test` for one cargo workspace, with an optional wasm build
@@ -562,7 +610,7 @@ jobs:
 
   docker-build:
     needs: [static-analysis, tests]
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' # GitHub only — on Forgejo a caller-level if: on a uses: job is DROPPED (see "Conditional (ref-gated) jobs on Forgejo")
     uses: webgrip/workflows/.github/workflows/docker-build-and-push.yml@main
     with:
       docker-context: "."
@@ -574,7 +622,7 @@ jobs:
 
   semantic-release:
     needs: docker-build
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' # GitHub only — on Forgejo a caller-level if: on a uses: job is DROPPED (see "Conditional (ref-gated) jobs on Forgejo")
     uses: webgrip/workflows/.github/workflows/semantic-release.yml@main
     with:
       use-bot-to-commit: true
@@ -597,7 +645,7 @@ jobs:
     uses: webgrip/workflows/.github/workflows/rust-static-analysis.yml@main
 
   release:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' # GitHub only — on Forgejo a caller-level if: on a uses: job is DROPPED (see "Conditional (ref-gated) jobs on Forgejo")
     needs: [test, static-analysis]
     uses: webgrip/workflows/.github/workflows/rust-semantic-release.yml@main
 ```
