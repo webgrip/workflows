@@ -73,10 +73,21 @@ on:
         required: false
         default: '📱 **Feature preview**: {url} — static build of this branch. Updates on every push.'
       enabled:
-        description: 'Gate the job from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass the branch condition (e.g. not main) here instead.'
+        description: 'Gate the job from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass needs-based conditions here (needs.* survives flattening; github.* does NOT — use skip-refs for branch gating).'
         type: boolean
         required: false
         default: true
+      skip-refs:
+        description: >-
+          Space-separated full refs that must NOT publish a preview (e.g. "refs/heads/main
+          refs/heads/development"); empty = preview every ref. This exists because Forgejo v15
+          evaluates a caller's `with:` expressions at flatten time with an EMPTY github context,
+          so `enabled: ${{ github.ref_name != 'main' ... }}` came out true on every branch and
+          published previews for main. Job-level `if:` on this (real) job is runner-evaluated,
+          where github.ref is the caller run's true ref — pass the refs as static data instead.
+        type: string
+        required: false
+        default: ''
     secrets:
       PREVIEW_PUSH_TOKEN:
         description: 'Token of push-user with write access to the previews repo'
@@ -85,7 +96,9 @@ on:
 jobs:
   spa-preview:
     name: 'Publish branch preview'
-    if: inputs.enabled
+    # Space-padding both sides makes the ref match whole-token (refs/heads/main must not match
+    # refs/heads/maintenance). github.ref is trustworthy here (runner-evaluated).
+    if: inputs.enabled && !contains(format(' {0} ', inputs.skip-refs), format(' {0} ', github.ref))
     runs-on: docker
     container: ${{ inputs.runner-image }}
     steps:

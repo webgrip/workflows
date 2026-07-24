@@ -24,10 +24,21 @@ on:
         default: false
         type: boolean
       enabled:
-        description: 'Gate the job from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass the branch condition as an expression here instead.'
+        description: 'Gate the job from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass needs-based conditions here (needs.* survives flattening; github.* does NOT — use only-refs for branch gating).'
         required: false
         default: true
         type: boolean
+      only-refs:
+        description: >-
+          Space-separated full refs allowed to release (e.g. "refs/heads/main
+          refs/heads/development"); empty = no ref restriction. This exists because Forgejo v15
+          evaluates a caller's `with:` expressions at flatten time with an EMPTY github context, so
+          `enabled: ${{ github.ref == ... }}` silently gates wrong on both branches. Job-level `if:`
+          on this (real) job is evaluated on the runner, where github.ref is the caller run's true
+          ref — so pass the refs as static data and let the gate compare here.
+        required: false
+        default: ''
+        type: string
     secrets:
       FORGEJO_TOKEN:
         description: 'Forgejo CI bot token used for checkout/push and releases'
@@ -45,7 +56,10 @@ jobs:
   # Forgejo v15 flattens reusable jobs into the caller run and rejects id collisions as cycles.
   semrel-monorepo:
     name: 'Semantic Release (monorepo)'
-    if: inputs.enabled
+    # Space-padding both sides makes the ref match whole-token (refs/heads/main must not match
+    # refs/heads/maintenance). github.ref is trustworthy here (runner-evaluated), unlike in the
+    # caller's with: expressions (server flatten-time, empty github context).
+    if: inputs.enabled && (inputs.only-refs == '' || contains(format(' {0} ', inputs.only-refs), format(' {0} ', github.ref)))
     runs-on: docker # bare pool, no `container:` — JS actions run via the pool's node
     permissions:
       contents: write # push release commit + tag

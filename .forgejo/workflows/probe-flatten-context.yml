@@ -1,0 +1,52 @@
+name: '[Call] Probe Flatten Context'
+
+# Diagnostic reusable for the Forgejo v15 flattening quirks (no production use; keep it — it is
+# the cheap way to re-verify context behavior after a Forgejo upgrade). A caller passes probe
+# values computed in ITS with: block (github.*, needs.*); the jobs here echo what actually
+# arrived and test which contexts job-level if: sees. Findings as of 2026-07-24 (Forgejo v15):
+#   - caller with: expressions referencing github.* evaluate with an EMPTY github context
+#   - job-level if: on the reusable's real job is runner-evaluated with the true github context
+# This probe exists to (re)confirm whether needs.* in caller with: is dispatch-time (works) or
+# flatten-time (bakes empty).
+
+on:
+  workflow_call:
+    inputs:
+      needs-value:
+        description: 'Pass ${{ needs.<job>.outputs.<x> }} from the caller'
+        type: string
+        required: false
+        default: '(unset)'
+      github-ref-value:
+        description: 'Pass ${{ github.ref }} from the caller'
+        type: string
+        required: false
+        default: '(unset)'
+      expected-ref:
+        description: 'Static full ref the caller expects to be on (e.g. refs/heads/ci/probe)'
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  probe-echo:
+    name: 'Probe: echo received inputs'
+    runs-on: docker
+    steps:
+      - name: What arrived through the caller with-block
+        run: |
+          echo "PROBE inputs.needs-value=[${{ inputs.needs-value }}]"
+          echo "PROBE inputs.github-ref-value=[${{ inputs.github-ref-value }}]"
+          echo "PROBE step-expr github.ref=[${{ github.ref }}]"
+          echo "PROBE env GITHUB_REF=[$GITHUB_REF] GITHUB_REF_NAME=[$GITHUB_REF_NAME]"
+
+  probe-if-ref:
+    name: 'Probe: job-level if sees github.ref'
+    # Runs ONLY if github.ref is non-empty AND whole-token matches expected-ref at job-if
+    # evaluation time. If this job is skipped while probe-echo ran, job-level if: cannot be
+    # trusted for ref gating and the only-refs/skip-refs mechanism is broken.
+    if: inputs.expected-ref != '' && contains(format(' {0} ', inputs.expected-ref), format(' {0} ', github.ref))
+    runs-on: docker
+    steps:
+      - run: |
+          echo "PROBE job-level if matched github.ref=[${{ github.ref }}] against expected=[${{ inputs.expected-ref }}]"
