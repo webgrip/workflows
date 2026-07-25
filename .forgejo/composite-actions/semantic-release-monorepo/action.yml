@@ -18,6 +18,10 @@ inputs:
   token:
     description: "Forgejo token to use for pushing tags/releases"
     required: false
+  config-version:
+    description: "Pin of @webgrip/semantic-release-config to install (npm dist-tag or semver range)"
+    required: false
+    default: "1"
   forge-url:
     description: "Public Forgejo base URL used for user-facing changelog/release links (not for API traffic)"
     required: false
@@ -78,6 +82,9 @@ runs:
       id: semantic-release
       env:
         GITHUB_OUTPUT: $GITHUB_OUTPUT
+        # Required by @webgrip/semantic-release-config at load time (Forgejo is the sole release
+        # authority). Harmless for inline configs that don't read it.
+        SEMANTIC_RELEASE_GITEA: "true"
         # Split addressing: the release API call stays in-cluster (github.server_url =
         # http://forgejo-http.forgejo.svc.cluster.local:3000 on the runner) so it never hairpins out
         # through the ingress, while the user-facing changelog/release links use the public host
@@ -136,6 +143,26 @@ runs:
         if [[ "${{ inputs.dry-run }}" == "true" ]]; then
           dry_run_flag="--dry-run"
         fi
+
+        # Start every package from 0.0.0 (semantic-release otherwise hardcodes the first release to
+        # 1.0.0). Prefix "v" for a "." train, else "<package-name>-v". Idempotent; no-op on dry-run.
+        if [[ "$dry_run_flag" == "" ]]; then
+          if [[ "${{ inputs.package-path }}" == "." ]]; then seed_prefix="v"; else seed_prefix="${pkg_name}-v"; fi
+          if [[ -z "$(git tag -l "${seed_prefix}[0-9]*")" ]]; then
+            root="$(git rev-list --max-parents=0 HEAD | tail -1)"
+            echo "Seeding ${seed_prefix}0.0.0 at root commit ${root}."
+            git tag "${seed_prefix}0.0.0" "${root}"
+            git push origin "${seed_prefix}0.0.0"
+          fi
+        fi
+
+        # Install the shared config so this package's .releaserc.cjs can require it by name.
+        forge_host="${forge_url#http*://}"
+        npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
+        npm config set "//${forge_host}/api/packages/webgrip/npm/:_authToken" "${GITEA_TOKEN}"
+        npm install --no-save --no-package-lock \
+          "@webgrip/semantic-release-config@${{ inputs.config-version }}" || \
+          echo "::warning::@webgrip/semantic-release-config install failed (fine for inline-config packages)"
 
         # --repository-url pins the changelog compare/commit links and release URL to the public host.
         # semantic-release would otherwise derive it from the CI checkout's origin remote (internal).
