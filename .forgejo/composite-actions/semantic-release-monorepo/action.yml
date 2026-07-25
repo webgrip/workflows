@@ -178,7 +178,12 @@ runs:
           # @semantic-release/git + changelog are installed for consumers whose configs commit
           # release artifacts back (CHANGELOG.md, Chart.yaml, ...); semantic-release only loads
           # plugins the resolved config references, so no-commit consumers are unaffected.
+          # ONE combined install: `npm install --no-save` re-resolves the whole tree and PRUNES
+          # anything not in package.json or its own argument list — the earlier standalone
+          # @webgrip/semantic-release-config install would be silently removed here, and
+          # .releaserc.cjs would fail with MODULE_NOT_FOUND. Keep the shared config in THIS list.
           npm install --no-save --no-audit --no-fund \
+            "@webgrip/semantic-release-config@${{ inputs.config-version }}" \
             semantic-release@24.2.7 \
             semantic-release-monorepo@8.0.2 \
             @semantic-release/commit-analyzer@13.0.0 \

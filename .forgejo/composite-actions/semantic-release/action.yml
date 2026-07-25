@@ -154,7 +154,12 @@ runs:
             --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
             ${{ steps.set-config.outputs.release_config }}
         else
+          # ONE combined install: an `npm install --no-save` re-resolves the whole tree and PRUNES
+          # anything not in package.json or its own argument list — a separate earlier install of
+          # @webgrip/semantic-release-config was silently removed here ("removed 43 packages"),
+          # then .releaserc.cjs failed with MODULE_NOT_FOUND. Keep the shared config in THIS list.
           npm install --no-save \
+            "@webgrip/semantic-release-config@${{ inputs.config-version }}" \
             semantic-release \
             @semantic-release/changelog \
             @semantic-release/commit-analyzer \
