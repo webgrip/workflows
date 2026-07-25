@@ -70,12 +70,12 @@ runs:
 
     # Cache the npm download cache so the (unpinned-lockfile) semantic-release install resolves
     # from disk instead of re-fetching ~400 packages every run. Bump the key suffix when the
-    # pinned versions below change.
+    # shared-config pin or the fallback pinned versions change.
     - name: Cache npm downloads
       uses: actions/cache@v4
       with:
         path: ~/.npm
-        key: ${{ runner.os }}-npm-semrel-24.2.7-r2
+        key: ${{ runner.os }}-npm-semrel-24.2.7-r3
 
     - name: Run semantic-release
       shell: bash
@@ -156,13 +156,21 @@ runs:
           fi
         fi
 
-        # Install the shared config so this package's .releaserc.cjs can require it by name.
+        # Install the shared config so this package's .releaserc.cjs can require it by name. Its
+        # dependency tree hoists semantic-release + every plugin into node_modules, so once it
+        # installs, NO other npm install may run in this directory: with --no-save nothing enters
+        # the stub package.json, so any later install reifies npm's ideal tree from a dep-less
+        # manifest and PRUNES the config as extraneous — semantic-release then dies loading the
+        # releaserc with "Cannot find module '@webgrip/semantic-release-config'".
         forge_host="${forge_url#http*://}"
         npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
         npm config set "//${forge_host}/api/packages/webgrip/npm/:_authToken" "${GITEA_TOKEN}"
-        npm install --no-save --no-package-lock \
-          "@webgrip/semantic-release-config@${{ inputs.config-version }}" || \
+        config_installed="true"
+        npm install --no-save --no-package-lock --no-audit --no-fund \
+          "@webgrip/semantic-release-config@${{ inputs.config-version }}" || {
+          config_installed="false"
           echo "::warning::@webgrip/semantic-release-config install failed (fine for inline-config packages)"
+        }
 
         # --repository-url pins the changelog compare/commit links and release URL to the public host.
         # semantic-release would otherwise derive it from the CI checkout's origin remote (internal).
@@ -175,19 +183,24 @@ runs:
             --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
             $dry_run_flag
         else
-          # @semantic-release/git + changelog are installed for consumers whose configs commit
-          # release artifacts back (CHANGELOG.md, Chart.yaml, ...); semantic-release only loads
-          # plugins the resolved config references, so no-commit consumers are unaffected.
-          npm install --no-save --no-audit --no-fund \
-            semantic-release@24.2.7 \
-            semantic-release-monorepo@8.0.2 \
-            @semantic-release/commit-analyzer@13.0.0 \
-            @semantic-release/exec@7.0.3 \
-            @semantic-release/git@10.0.1 \
-            @semantic-release/changelog@6.0.3 \
-            @saithodev/semantic-release-gitea \
-            @semantic-release/release-notes-generator@14.0.0 \
-            conventional-changelog-conventionalcommits@7.0.2
+          # Fallback toolchain, ONLY when the shared config failed to install (inline-config
+          # package / registry outage): running it after a successful config install would prune
+          # the config from node_modules (see the install note above). @semantic-release/git +
+          # changelog are in the list for consumers whose configs commit release artifacts back
+          # (CHANGELOG.md, Chart.yaml, ...); semantic-release only loads plugins the resolved
+          # config references, so no-commit consumers are unaffected.
+          if [[ "$config_installed" != "true" ]]; then
+            npm install --no-save --no-audit --no-fund \
+              semantic-release@24.2.7 \
+              semantic-release-monorepo@8.0.2 \
+              @semantic-release/commit-analyzer@13.0.0 \
+              @semantic-release/exec@7.0.3 \
+              @semantic-release/git@10.0.1 \
+              @semantic-release/changelog@6.0.3 \
+              @saithodev/semantic-release-gitea \
+              @semantic-release/release-notes-generator@14.0.0 \
+              conventional-changelog-conventionalcommits@7.0.2
+          fi
 
           npx semantic-release \
             --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
