@@ -44,6 +44,11 @@ on:
         type: boolean
         required: false
         default: true
+      link-repo:
+        description: 'ONLY when the registry is this Forgejo instance: repo name to link the pushed chart package to, so it shows on <owner>/<repo>/packages (Forgejo packages land owner-scoped and unlinked). REGISTRY_TOKEN doubles as the API token, so it must be the CI bot token (WEBGRIP_CI_TOKEN), not a Harbor robot. Empty (default) skips linking.'
+        type: string
+        required: false
+        default: ''
 
 jobs:
   helm-chart-push:
@@ -85,3 +90,27 @@ jobs:
       - run: |
           helm package ${{ inputs.path }}
           helm push ./${{ inputs.name }}-${{ inputs.version }}.tgz oci://${{ inputs.registry }}/${{ inputs.oci-path || github.repository }}
+      # Forgejo-only: an OCI-pushed chart lands in the CONTAINER registry (type
+      # `container`, named after the chart) and is NOT shown on the repo's packages page
+      # until linked. Idempotent: the versioned GET shows .repository when already linked.
+      - name: Link chart package to repo
+        if: inputs.link-repo != ''
+        shell: bash
+        env:
+          API: ${{ github.server_url }}/api/v1
+          OWNER: ${{ github.repository_owner || 'webgrip' }}
+          PKG: ${{ inputs.name }}
+          VERSION: ${{ inputs.version }}
+          REPO: ${{ inputs.link-repo }}
+          REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          if curl -fsS -H "Authorization: token ${REGISTRY_TOKEN}" \
+              "${API}/packages/${OWNER}/container/${PKG}/${VERSION}" \
+              | grep -q "\"full_name\":\"${OWNER}/${REPO}\""; then
+            echo "Chart package ${PKG} already linked to ${OWNER}/${REPO}."
+          else
+            curl -fsS -X POST -H "Authorization: token ${REGISTRY_TOKEN}" \
+              "${API}/packages/${OWNER}/container/${PKG}/-/link/${REPO}"
+            echo "Linked chart package ${PKG} -> ${OWNER}/${REPO}."
+          fi

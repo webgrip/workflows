@@ -1,0 +1,197 @@
+name: '[Call] Forgejo Distribute'
+
+# Mirrors a release's container image and/or OCI Helm chart into the Forgejo package
+# registry and LINKS the packages to their repo, so <forge>/<owner>/<repo>/packages is
+# populated. Forgejo packages are owner-scoped and land UNLINKED — the link call is what
+# makes them show on the repo page. Proven shape: webgrip/ploeg on_release_published
+# (inline since v0.1.0-rc.9; extracted here unchanged).
+#
+# Identity: the webgrip-ci bot. Callers MUST pass WEBGRIP_CI_TOKEN as REGISTRY_TOKEN —
+# secrets.FORGEJO_TOKEN is the built-in per-job token (FORGEJO_ is a reserved secret
+# prefix, an org secret can never shadow it) and it CANNOT write org packages: it
+# docker-logins fine, builds, then 401s on push (reqPackageAccess). The username comes
+# from the org var WEBGRIP_CI_BOT_NAME (falls back to the literal bot name).
+
+on:
+  workflow_call:
+    secrets:
+      REGISTRY_TOKEN:
+        description: 'CI bot token with write:package — pass secrets.WEBGRIP_CI_TOKEN, NOT secrets.FORGEJO_TOKEN (that is the per-job token and cannot write org packages).'
+        required: true
+    inputs:
+      enabled:
+        description: 'Gate the jobs from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass conditions (e.g. a non-empty release version) here instead.'
+        type: boolean
+        required: false
+        default: true
+      version:
+        description: 'Bare semver of the release, e.g. 1.2.3 or 0.1.0-rc.4 (also the image tag and chart version).'
+        type: string
+        required: true
+      ref:
+        description: 'Git ref to check out for the chart job. Defaults to v<version>.'
+        type: string
+        required: false
+      registry:
+        description: 'Forgejo registry host.'
+        type: string
+        required: false
+        default: 'forgejo.webgrip.dev'
+      owner:
+        description: 'Package owner (org). Hardcoded default because github.repository_owner is EMPTY on Forgejo workflow_dispatch.'
+        type: string
+        required: false
+        default: 'webgrip'
+      link-repo:
+        description: 'Repository name to link the packages to (usually the calling repo). Empty skips linking.'
+        type: string
+        required: false
+        default: ''
+      image-name:
+        description: 'Container image name (e.g. ploegd). Empty skips the image job.'
+        type: string
+        required: false
+        default: ''
+      docker-file:
+        description: 'Dockerfile path from the context.'
+        type: string
+        required: false
+        default: 'Dockerfile'
+      docker-context:
+        description: 'Docker build context.'
+        type: string
+        required: false
+        default: '.'
+      platforms:
+        description: 'Target platforms, comma-separated.'
+        type: string
+        required: false
+        default: 'linux/amd64'
+      docker-build-args:
+        description: 'Docker build args (newline-separated KEY=VALUE entries), passed through verbatim.'
+        type: string
+        required: false
+        default: ''
+      push-latest:
+        description: 'Also move <image>:latest. Callers should pass false for prereleases.'
+        type: boolean
+        required: false
+        default: false
+      chart-path:
+        description: 'Path to the Helm chart (e.g. ops/helm/mychart). Empty skips the chart job. Chart.yaml version must equal <version> at <ref> (semantic-release-helm3 lockstep).'
+        type: string
+        required: false
+        default: ''
+      chart-name:
+        description: 'Chart name (the OCI package will carry this name).'
+        type: string
+        required: false
+        default: ''
+
+jobs:
+  distribute-image:
+    name: 'Distribute image (Forgejo)'
+    if: inputs.enabled && inputs.image-name != ''
+    runs-on: docker
+    env:
+      REGISTRY_USERNAME: ${{ vars.WEBGRIP_CI_BOT_NAME || 'webgrip-ci' }}
+      REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+    steps:
+      - name: Build and push
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-registry-fast@main
+        with:
+          registry: ${{ inputs.registry }}
+          docker-context: ${{ inputs.docker-context }}
+          docker-file: ${{ inputs.docker-file }}
+          platforms: ${{ inputs.platforms }}
+          docker-build-args: |
+            ${{ inputs.docker-build-args }}
+          # The composite skips empty tag lines, so the conditional latest line is safe.
+          docker-tags: |
+            ${{ inputs.owner }}/${{ inputs.image-name }}:${{ inputs.version }}
+            ${{ inputs.push-latest && format('{0}/{1}:latest', inputs.owner, inputs.image-name) || '' }}
+      - name: Link package to repo
+        if: inputs.link-repo != ''
+        shell: bash
+        env:
+          API: ${{ github.server_url }}/api/v1
+          OWNER: ${{ inputs.owner }}
+          PKG: ${{ inputs.image-name }}
+          VERSION: ${{ inputs.version }}
+          REPO: ${{ inputs.link-repo }}
+        run: |
+          set -euo pipefail
+          # Link is per package NAME and idempotency-guarded: the versioned GET shows
+          # .repository when linked (400 on re-link means already linked — only two
+          # invalid-argument paths exist: owner mismatch and already-linked).
+          if curl -fsS -H "Authorization: token ${REGISTRY_TOKEN}" \
+              "${API}/packages/${OWNER}/container/${PKG}/${VERSION}" \
+              | grep -q "\"full_name\":\"${OWNER}/${REPO}\""; then
+            echo "Package ${PKG} already linked to ${OWNER}/${REPO}."
+          else
+            curl -fsS -X POST -H "Authorization: token ${REGISTRY_TOKEN}" \
+              "${API}/packages/${OWNER}/container/${PKG}/-/link/${REPO}"
+            echo "Linked package ${PKG} -> ${OWNER}/${REPO}."
+          fi
+
+  publish-chart:
+    name: 'Publish chart (Forgejo)'
+    if: inputs.enabled && inputs.chart-path != ''
+    runs-on: docker
+    env:
+      REGISTRY_USERNAME: ${{ vars.WEBGRIP_CI_BOT_NAME || 'webgrip-ci' }}
+      REGISTRY_TOKEN: ${{ secrets.REGISTRY_TOKEN }}
+      VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || format('v{0}', inputs.version) }}
+      # helm is baked into the ci-runner host image; setup-helm remains as fallback for
+      # runners without it. Absolute URL + pinned version: data.forgejo.org has an
+      # incomplete mirror set, and 'latest' resolution rate-limits via api.github.com.
+      - name: Check for preinstalled helm
+        id: helm-check
+        shell: bash
+        run: |
+          if command -v helm >/dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: https://github.com/azure/setup-helm@v4
+        if: steps.helm-check.outputs.present != 'true'
+        with:
+          version: v3.18.4
+      - name: Push chart (OCI)
+        shell: bash
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          OWNER: ${{ inputs.owner }}
+          CHART_PATH: ${{ inputs.chart-path }}
+          CHART_NAME: ${{ inputs.chart-name }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$REGISTRY_TOKEN" | helm registry login "$REGISTRY" --username "$REGISTRY_USERNAME" --password-stdin
+          helm package "$CHART_PATH"
+          helm push "./${CHART_NAME}-${VERSION}.tgz" "oci://${REGISTRY}/${OWNER}"
+      - name: Link chart package to repo
+        if: inputs.link-repo != ''
+        shell: bash
+        env:
+          API: ${{ github.server_url }}/api/v1
+          OWNER: ${{ inputs.owner }}
+          PKG: ${{ inputs.chart-name }}
+          REPO: ${{ inputs.link-repo }}
+        run: |
+          set -euo pipefail
+          # An OCI-pushed chart lands in Forgejo's CONTAINER registry (type `container`,
+          # named after the chart) — hence container/, not helm/, in these paths.
+          if curl -fsS -H "Authorization: token ${REGISTRY_TOKEN}" \
+              "${API}/packages/${OWNER}/container/${PKG}/${VERSION}" \
+              | grep -q "\"full_name\":\"${OWNER}/${REPO}\""; then
+            echo "Chart package ${PKG} already linked to ${OWNER}/${REPO}."
+          else
+            curl -fsS -X POST -H "Authorization: token ${REGISTRY_TOKEN}" \
+              "${API}/packages/${OWNER}/container/${PKG}/-/link/${REPO}"
+            echo "Linked chart package ${PKG} -> ${OWNER}/${REPO}."
+          fi
