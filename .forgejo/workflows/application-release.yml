@@ -7,9 +7,12 @@ on:
         description: "The released version"
         value: ${{ jobs.release.outputs.version }}
     secrets:
+      CI_TOKEN:
+        description: 'CI bot token — pass secrets.WEBGRIP_CI_TOKEN. Preferred over FORGEJO_TOKEN: a caller-mapped secret named FORGEJO_TOKEN risks resolving to the built-in per-job token of the same name (Ghost releases, no native release event, no org package writes).'
+        required: false
       FORGEJO_TOKEN:
         description: "Forgejo CI bot token (repo/org-scoped) for semantic-release"
-        required: true
+        required: false
       DOCKER_USERNAME:
         description: "Docker Hub username"
         required: true
@@ -24,7 +27,7 @@ jobs:
     with:
       use-bot-to-commit: true
     secrets:
-      FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+      CI_TOKEN: ${{ secrets.CI_TOKEN || secrets.FORGEJO_TOKEN }}
 
   # Forgejo: app images are distributed via the Docker Hub variant (docker-build-and-push.yml),
   # faithful to the GitHub setup. To push to Harbor instead, switch to docker-build-and-push-ghcr.yml

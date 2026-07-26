@@ -7,9 +7,12 @@ on:
         description: "The released version"
         value: ${{ jobs.release-publish.outputs.version }}
     secrets:
+      CI_TOKEN:
+        description: 'CI bot token — pass secrets.WEBGRIP_CI_TOKEN. Preferred over FORGEJO_TOKEN: a caller-mapped secret named FORGEJO_TOKEN risks resolving to the built-in per-job token of the same name (Ghost releases, no native release event, no org package writes).'
+        required: false
       FORGEJO_TOKEN:
         description: "Forgejo CI bot token (repo/org-scoped) for semantic-release"
-        required: true
+        required: false
 
 jobs:
   release-publish:
@@ -18,4 +21,4 @@ jobs:
     with:
       use-bot-to-commit: true
     secrets:
-      FORGEJO_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+      CI_TOKEN: ${{ secrets.CI_TOKEN || secrets.FORGEJO_TOKEN }}

@@ -13,6 +13,9 @@ on:
         default: false
         type: boolean
     secrets:
+      CI_TOKEN:
+        description: 'CI bot token — pass secrets.WEBGRIP_CI_TOKEN. Preferred over FORGEJO_TOKEN: a caller-mapped secret named FORGEJO_TOKEN risks resolving to the built-in per-job token of the same name (Ghost releases, no native release event, no org package writes).'
+        required: false
       FORGEJO_TOKEN:
         description: 'Forgejo CI bot token used for checkout/push and releases'
         required: false
@@ -37,4 +40,4 @@ jobs:
         uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/semantic-release@main
         with:
           release-type: ${{ inputs.release-type }}
-          token: ${{ secrets.FORGEJO_TOKEN }}
+          token: ${{ secrets.CI_TOKEN || secrets.FORGEJO_TOKEN }}

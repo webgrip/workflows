@@ -5,9 +5,12 @@ on:
     secrets:
       CARGO_REGISTRY_TOKEN:
         required: true
+      CI_TOKEN:
+        description: 'CI bot token — pass secrets.WEBGRIP_CI_TOKEN. Preferred over FORGEJO_TOKEN: a caller-mapped secret named FORGEJO_TOKEN risks resolving to the built-in per-job token of the same name (Ghost releases, no native release event, no org package writes).'
+        required: false
       FORGEJO_TOKEN:
         description: 'Forgejo CI bot token used for releases'
-        required: true
+        required: false
     inputs:
       release-type:            # optional: "major" | "minor" | "patch"
         type: string
@@ -67,7 +70,7 @@ jobs:
         env:
           # Forgejo: @saithodev/semantic-release-gitea targets the Gitea-compatible API.
           GITEA_URL: ${{ github.server_url }}
-          GITEA_TOKEN: ${{ secrets.FORGEJO_TOKEN }}
+          GITEA_TOKEN: ${{ secrets.CI_TOKEN || secrets.FORGEJO_TOKEN }}
           FORCE_LEVEL:  ${{ inputs.release-type }}
         run: npx semantic-release
 
