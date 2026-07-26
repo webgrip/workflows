@@ -23,8 +23,11 @@ inputs:
 
 outputs:
   version:
-    description: "The new version number"
+    description: "Bare semver of the release (empty if none)"
     value: ${{ steps.semantic-release.outputs.version }}
+  tag:
+    description: "Full git tag of the release, e.g. v1.0.14 (empty if none; needed as the checkout ref for tag-pinned follow-up jobs like helm-chart-push)"
+    value: ${{ steps.semantic-release.outputs.tag }}
 
 runs:
   using: "composite"
