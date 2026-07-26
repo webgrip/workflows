@@ -154,7 +154,15 @@ runs:
             --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
             ${{ steps.set-config.outputs.release_config }}
         else
+          # ONE combined install, shared config included: `npm install --no-save` re-resolves the
+          # whole tree and PRUNES anything not in package.json or its own argument list — as a
+          # separate command it silently removed the config installed by the earlier step
+          # ("removed 43 packages" -> MODULE_NOT_FOUND from .releaserc.cjs). The legacy pins stay
+          # in the SAME list (not behind a config-installed guard like the monorepo composite):
+          # inline .releaserc.js repos still reference semantic-release-helm3, which is NOT among
+          # the shared config's deps, so skipping this list would break them instead.
           npm install --no-save \
+            "@webgrip/semantic-release-config@${{ inputs.config-version }}" \
             semantic-release \
             @semantic-release/changelog \
             @semantic-release/commit-analyzer \
