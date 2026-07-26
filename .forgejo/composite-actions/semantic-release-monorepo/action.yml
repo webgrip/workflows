@@ -77,6 +77,23 @@ runs:
         path: ~/.npm
         key: ${{ runner.os }}-npm-semrel-24.2.7-r3
 
+    # yq is required by @webgrip/semantic-release-config's helm manifest bump (Chart.yaml
+    # version/appVersion) and by repo prepareCmds. The ci-runner host image will bake it in;
+    # until that rolls out (and for other runners), install a pinned copy when absent.
+    # common-charts run 3: prepare died "yq: not found" AFTER computing v1.0.14.
+    - name: Ensure yq (helm manifest bumps)
+      shell: bash
+      run: |
+        command -v yq >/dev/null 2>&1 && { echo "yq present: $(yq --version)"; exit 0; }
+        # renovate: datasource=github-releases depName=mikefarah/yq
+        YQ_VERSION=v4.44.3
+        arch="$(uname -m)"; case "$arch" in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) echo "::error::unsupported arch: $arch"; exit 1;; esac
+        mkdir -p "$HOME/.local/bin"
+        curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${a}" -o "$HOME/.local/bin/yq"
+        chmod +x "$HOME/.local/bin/yq"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        "$HOME/.local/bin/yq" --version
+
     - name: Run semantic-release
       shell: bash
       id: semantic-release
