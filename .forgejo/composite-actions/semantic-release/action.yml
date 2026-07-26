@@ -38,20 +38,23 @@ runs:
         fetch-depth: 0 # semantic-release requires all commits/tags
         token: ${{ inputs.token || github.token }}
 
-    # node is baked into the ci-runner host image; setup-node remains as fallback for
-    # runners without it.
-    - name: Check for preinstalled node
+    # node is baked into the ci-runner host image; setup-node remains as fallback.
+    # Presence is not enough: the runner pool is heterogeneous and semantic-release 25
+    # (pinned by @webgrip/semantic-release-config) requires node ^22.14.0 || >=24.10.0
+    # — ploeg run 61 landed on a node 20 host and died on the engine check.
+    - name: Check for suitable preinstalled node
       id: node-check
       shell: bash
       run: |
+        ok=false
         if command -v node >/dev/null 2>&1; then
-          echo "present=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "present=false" >> "$GITHUB_OUTPUT"
+          ok=$(node -e 'const [M,m]=process.versions.node.split(".").map(Number); console.log((M===22&&m>=14)||(M===24&&m>=10)||M>24)')
+          echo "found node $(node --version) (suitable=${ok})"
         fi
+        echo "suitable=${ok}" >> "$GITHUB_OUTPUT"
 
     - name: Set up Node.js
-      if: steps.node-check.outputs.present != 'true'
+      if: steps.node-check.outputs.suitable != 'true'
       uses: actions/setup-node@v4
       with:
         node-version: "22"
