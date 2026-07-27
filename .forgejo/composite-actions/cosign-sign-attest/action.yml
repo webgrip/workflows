@@ -1,7 +1,10 @@
 name: "Supply Chain Security: Sign, Attest & SBOM (per registry)"
-# Canonical SHARED copy, extracted verbatim from webgrip/infrastructure
+# Canonical SHARED copy, extracted from webgrip/infrastructure
 # .forgejo/actions/cosign-sign-attest (which still runs its local twin until its
-# constrictor migration onto this one — keep the two in lockstep until then).
+# constrictor migration onto this one). Deliberate divergence from the twin: the
+# Dependency-Track API key is read from OpenBao KV with the signing token (see
+# dt-api-key-kv-path) instead of a Forgejo secret; env DT_API_KEY still wins, so
+# the twin's callers migrate without change.
 # Signing a new repo also needs OpenBao: the auth/forgejo cosign-signer role's
 # bound_claims.repository list (homelab-cluster openbao bootstrap config.sh) must
 # name the calling repo, or the OIDC exchange 400s.
@@ -65,6 +68,16 @@ inputs:
     description: "OpenBao Transit key name used to sign"
     required: false
     default: "cosign-webgrip"
+  dt-api-key-kv-path:
+    description: >-
+      OpenBao kv-v2 API path holding the Dependency-Track API key (property 'api-key',
+      PushSecret-seeded from the sbom-uploader). Read with the SAME short-lived
+      OIDC-exchanged token used for signing — the cosign-signer policy must grant read
+      here, no Forgejo org secret involved. Fail-soft: a denied/failed read just skips
+      the Dependency-Track upload. An env DT_API_KEY set by the caller always wins;
+      empty disables the KV read.
+    required: false
+    default: "secret/data/dependency-track/api-key"
 
 runs:
   using: composite
@@ -136,6 +149,7 @@ runs:
         OPENBAO_ROLE: ${{ inputs.openbao-role }}
         OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
         TRANSIT_KEY: ${{ inputs.transit-key }}
+        DT_KV_PATH: ${{ inputs.dt-api-key-kv-path }}
         IMAGE: ${{ steps.digest.outputs.image-with-digest }}
       run: |
         set -euo pipefail
@@ -176,6 +190,23 @@ runs:
         cosign sign   --yes --tlog-upload=false --key "hashivault://${TRANSIT_KEY}" "$IMAGE"
         cosign attest --yes --tlog-upload=false --key "hashivault://${TRANSIT_KEY}" \
           --predicate sbom.cdx.json --type cyclonedx "$IMAGE"
+        # 4) Dependency-Track API key from KV with the same short-lived token (no Forgejo
+        #    org secret). Caller-provided env DT_API_KEY wins; read failure (policy not yet
+        #    granting the path, missing key) is fail-soft — the DT upload step just skips.
+        if [ -z "${DT_API_KEY:-}" ] && [ -n "${DT_KV_PATH:-}" ]; then
+          if dt_json="$(curl -sSf -H "X-Vault-Token: ${VAULT_TOKEN}" "${VAULT_ADDR}/v1/${DT_KV_PATH}" 2>/dev/null)"; then
+            dt_key="$(jq -r '.data.data["api-key"] // empty' <<<"$dt_json")"
+            if [ -n "$dt_key" ]; then
+              echo "::add-mask::${dt_key}"
+              echo "DT_API_KEY=${dt_key}" >> "$GITHUB_ENV"
+              echo "Dependency-Track API key sourced from OpenBao KV (${DT_KV_PATH})"
+            else
+              echo "::warning::${DT_KV_PATH} readable but has no 'api-key' property — DT upload will be skipped"
+            fi
+          else
+            echo "::warning::could not read ${DT_KV_PATH} (policy grant pending?) — DT upload will be skipped"
+          fi
+        fi
 
     - name: "Generate Harbor-native SBOM accessory (fail-soft)"
       # Harbor-only: this hits Harbor's v2 API (no analog on ghcr.io etc.), so skip it for other
