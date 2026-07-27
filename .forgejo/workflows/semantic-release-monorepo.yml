@@ -49,6 +49,14 @@ on:
         required: false
         default: ''
         type: string
+      skip-refs:
+        description: >-
+          Space-separated full refs that must NOT run (e.g. "refs/heads/main refs/heads/development");
+          empty = no exclusion. The inverse of only-refs, for a dry-run validation job that should
+          run on feature branches (the PR) but not on the release branches where the real release runs.
+        required: false
+        default: ''
+        type: string
       align-to-remote-tip:
         description: >-
           Before running semantic-release on a branch push, fast-forward the checkout onto the
@@ -85,7 +93,10 @@ jobs:
     # Space-padding both sides makes the ref match whole-token (refs/heads/main must not match
     # refs/heads/maintenance). github.ref is trustworthy here (runner-evaluated), unlike in the
     # caller's with: expressions (server flatten-time, empty github context).
-    if: inputs.enabled && (inputs.only-refs == '' || contains(format(' {0} ', inputs.only-refs), format(' {0} ', github.ref)))
+    if: >-
+      inputs.enabled
+      && (inputs.only-refs == '' || contains(format(' {0} ', inputs.only-refs), format(' {0} ', github.ref)))
+      && !contains(format(' {0} ', inputs.skip-refs), format(' {0} ', github.ref))
     runs-on: docker # bare pool, no `container:` — JS actions run via the pool's node
     permissions:
       contents: write # push release commit + tag
