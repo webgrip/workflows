@@ -23,6 +23,16 @@ on:
         required: false
         default: false
         type: boolean
+      monorepo:
+        description: 'Set true when the resolved config uses makeConfig({monorepo:true}); the composite then installs semantic-release-monorepo (the shared config un-bundles it).'
+        required: false
+        default: false
+        type: boolean
+      config-version:
+        description: 'Pin of @webgrip/semantic-release-config to install (npm dist-tag or semver range); threads to the composite.'
+        required: false
+        default: '1'
+        type: string
       enabled:
         description: 'Gate the job from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass needs-based conditions here (needs.* survives flattening; github.* does NOT — use only-refs for branch gating).'
         required: false
@@ -36,6 +46,14 @@ on:
           `enabled: ${{ github.ref == ... }}` silently gates wrong on both branches. Job-level `if:`
           on this (real) job is evaluated on the runner, where github.ref is the caller run's true
           ref — so pass the refs as static data and let the gate compare here.
+        required: false
+        default: ''
+        type: string
+      skip-refs:
+        description: >-
+          Space-separated full refs that must NOT run (e.g. "refs/heads/main refs/heads/development");
+          empty = no exclusion. The inverse of only-refs, for a dry-run validation job that should
+          run on feature branches (the PR) but not on the release branches where the real release runs.
         required: false
         default: ''
         type: string
@@ -75,7 +93,10 @@ jobs:
     # Space-padding both sides makes the ref match whole-token (refs/heads/main must not match
     # refs/heads/maintenance). github.ref is trustworthy here (runner-evaluated), unlike in the
     # caller's with: expressions (server flatten-time, empty github context).
-    if: inputs.enabled && (inputs.only-refs == '' || contains(format(' {0} ', inputs.only-refs), format(' {0} ', github.ref)))
+    if: >-
+      inputs.enabled
+      && (inputs.only-refs == '' || contains(format(' {0} ', inputs.only-refs), format(' {0} ', github.ref)))
+      && !contains(format(' {0} ', inputs.skip-refs), format(' {0} ', github.ref))
     runs-on: docker # bare pool, no `container:` — JS actions run via the pool's node
     permissions:
       contents: write # push release commit + tag
@@ -107,6 +128,8 @@ jobs:
           package-name: ${{ inputs.package-name }}
           token: ${{ secrets.CI_TOKEN || secrets.FORGEJO_TOKEN }}
           dry-run: ${{ inputs.dry-run }}
+          monorepo: ${{ inputs.monorepo }}
+          config-version: ${{ inputs.config-version }}
 
       - id: normalize
         shell: bash

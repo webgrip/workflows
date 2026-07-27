@@ -22,6 +22,14 @@ inputs:
     description: "Pin of @webgrip/semantic-release-config to install (npm dist-tag or semver range)"
     required: false
     default: "1"
+  monorepo:
+    description: >-
+      Set true for consumers whose config uses makeConfig({monorepo:true}). The shared config
+      deliberately does NOT bundle semantic-release-monorepo (it drags a legacy dep with security
+      findings, 2026-07-26 cleanup), so it is installed here — only for monorepo consumers — instead
+      of as a config dependency that would reach every consumer.
+    required: false
+    default: "false"
   forge-url:
     description: "Public Forgejo base URL used for user-facing changelog/release links (not for API traffic)"
     required: false
@@ -78,7 +86,7 @@ runs:
       uses: actions/cache@v4
       with:
         path: ~/.npm
-        key: ${{ runner.os }}-npm-semrel-24.2.7-r3
+        key: ${{ runner.os }}-npm-semrel-25.0.8-r1
 
     # yq is required by @webgrip/semantic-release-config's helm manifest bump (Chart.yaml
     # version/appVersion) and by repo prepareCmds. The ci-runner host image will bake it in;
@@ -177,17 +185,21 @@ runs:
         fi
 
         # Install the shared config so this package's .releaserc.cjs can require it by name. Its
-        # dependency tree hoists semantic-release + every plugin into node_modules, so once it
-        # installs, NO other npm install may run in this directory: with --no-save nothing enters
-        # the stub package.json, so any later install reifies npm's ideal tree from a dep-less
-        # manifest and PRUNES the config as extraneous — semantic-release then dies loading the
-        # releaserc with "Cannot find module '@webgrip/semantic-release-config'".
+        # dependency tree hoists semantic-release@25 + every plugin into node_modules. Because
+        # --no-save leaves the stub package.json dep-less, the 440 packages are EXTRANEOUS, so any
+        # LATER `npm install` (or `npx`, which reifies) prunes the config → "Cannot find module
+        # '@webgrip/semantic-release-config'". The rule below is therefore: do the config install
+        # ONCE, then run the binary it provides DIRECTLY (never npx, never a second install).
+        # semantic-release-monorepo is added to THIS install (not the config's deps) for monorepo
+        # consumers only — the config un-bundles it on purpose (2026-07-26 security cleanup).
         forge_host="${forge_url#http*://}"
         npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
         npm config set "//${forge_host}/api/packages/webgrip/npm/:_authToken" "${GITEA_TOKEN}"
+        monorepo_pkg=()
+        [[ "${{ inputs.monorepo }}" == "true" ]] && monorepo_pkg=("semantic-release-monorepo@8.0.2")
         config_installed="true"
         npm install --no-save --no-package-lock --no-audit --no-fund \
-          "@webgrip/semantic-release-config@${{ inputs.config-version }}" || {
+          "@webgrip/semantic-release-config@${{ inputs.config-version }}" "${monorepo_pkg[@]}" || {
           config_installed="false"
           echo "::warning::@webgrip/semantic-release-config install failed (fine for inline-config packages)"
         }
@@ -195,34 +207,26 @@ runs:
         # --repository-url pins the changelog compare/commit links and release URL to the public host.
         # semantic-release would otherwise derive it from the CI checkout's origin remote (internal).
         # NB: no --config flag — semantic-release has none; config resolution is cosmiconfig from cwd.
-        # Fast path: the ci-runner host image prebakes the pinned toolchain at /opt/semrel
-        # (env SEMREL_PREBAKED) — saves ~4 min per release job.
-        if [[ -n "${SEMREL_PREBAKED:-}" && -d "${SEMREL_PREBAKED}" ]]; then
+        run_args=(--repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git")
+        [[ -n "$dry_run_flag" ]] && run_args+=("$dry_run_flag")
+        if [[ "$config_installed" == "true" ]]; then
+          # Preferred: the sr25 toolchain the config just installed. Direct binary, no prune. Do NOT
+          # use SEMREL_PREBAKED here — it is sr24, a version skew against the sr25 shared config.
+          ./node_modules/.bin/semantic-release "${run_args[@]}"
+        elif [[ -n "${SEMREL_PREBAKED:-}" && -d "${SEMREL_PREBAKED}" ]]; then
+          # Inline-config consumer (no @webgrip config) + a prebaked toolchain on the ci-runner image.
           export PATH="${SEMREL_PREBAKED}/.bin:${PATH}"
-          semantic-release \
-            --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
-            $dry_run_flag
+          semantic-release "${run_args[@]}"
         else
-          # Fallback toolchain, ONLY when the shared config failed to install (inline-config
-          # package / registry outage): running it after a successful config install would prune
-          # the config from node_modules (see the install note above). @semantic-release/git +
-          # changelog are in the list for consumers whose configs commit release artifacts back
-          # (CHANGELOG.md, Chart.yaml, ...); semantic-release only loads plugins the resolved
-          # config references, so no-commit consumers are unaffected.
-          if [[ "$config_installed" != "true" ]]; then
-            npm install --no-save --no-audit --no-fund \
-              semantic-release@24.2.7 \
-              semantic-release-monorepo@8.0.2 \
-              @semantic-release/commit-analyzer@13.0.0 \
-              @semantic-release/exec@7.0.3 \
-              @semantic-release/git@10.0.1 \
-              @semantic-release/changelog@6.0.3 \
-              @saithodev/semantic-release-gitea \
-              @semantic-release/release-notes-generator@14.0.0 \
-              conventional-changelog-conventionalcommits@7.0.2
-          fi
-
-          npx semantic-release \
-            --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
-            $dry_run_flag
+          # Inline-config consumer, no prebake: install a fallback toolchain aligned to the sr25 line
+          # (so it can't reintroduce version skew), then run the direct binary.
+          npm install --no-save --no-audit --no-fund \
+            semantic-release@25.0.8 \
+            semantic-release-monorepo@8.0.2 \
+            @semantic-release/exec@7.1.0 \
+            @semantic-release/git@11.0.1 \
+            @semantic-release/changelog@7.0.0 \
+            @saithodev/semantic-release-gitea@2.1.0 \
+            conventional-changelog-conventionalcommits@10.2.1
+          ./node_modules/.bin/semantic-release "${run_args[@]}"
         fi
