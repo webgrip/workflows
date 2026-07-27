@@ -198,10 +198,18 @@ runs:
         monorepo_pkg=()
         [[ "${{ inputs.monorepo }}" == "true" ]] && monorepo_pkg=("semantic-release-monorepo@8.0.2")
         config_installed="true"
-        npm install --no-save --no-package-lock --no-audit --no-fund \
-          "@webgrip/semantic-release-config@${{ inputs.config-version }}" "${monorepo_pkg[@]}" || {
-          config_installed="false"
-          echo "::warning::@webgrip/semantic-release-config install failed (fine for inline-config packages)"
+        config_spec=("@webgrip/semantic-release-config@${{ inputs.config-version }}" "${monorepo_pkg[@]}")
+        npm install --no-save --no-package-lock --no-audit --no-fund "${config_spec[@]}" || {
+          # npm sends _authToken unconditionally once set, so an under-scoped caller token (e.g. a
+          # repo-scoped bot PAT without package read access) turns this PUBLIC package into a hard
+          # E401 that anonymous access would not have hit. Drop the credential and retry before
+          # concluding the config is unavailable.
+          echo "::notice::config install with token failed - retrying anonymously"
+          npm config delete "//${forge_host}/api/packages/webgrip/npm/:_authToken" || true
+          npm install --no-save --no-package-lock --no-audit --no-fund "${config_spec[@]}" || {
+            config_installed="false"
+            echo "::warning::@webgrip/semantic-release-config install failed (fine for inline-config packages)"
+          }
         }
 
         # --repository-url pins the changelog compare/commit links and release URL to the public host.
