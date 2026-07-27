@@ -1,9 +1,11 @@
 name: '[Call] Mirror Docker Images'
 
-# Copy already-built images from one registry to another (pull → retag → push), e.g.
-# Harbor (the deploy source) → the Forgejo registry so images appear as packages linked to
-# their source repo (they carry org.opencontainers.image.source). best-effort lives HERE
-# because caller jobs with `uses:` cannot set continue-on-error.
+# Copy already-built images from one registry to another, e.g. Harbor (the deploy source)
+# → the Forgejo registry so images appear as packages linked to their source repo (they
+# carry org.opencontainers.image.source). The copy uses `docker buildx imagetools create`,
+# which clones the whole multi-arch manifest list by digest — a docker pull/tag/push loop
+# would silently flatten it to the runner's arch. best-effort lives HERE because caller
+# jobs with `uses:` cannot set continue-on-error.
 
 on:
   workflow_call:
@@ -45,6 +47,8 @@ jobs:
     runs-on: docker
     continue-on-error: ${{ inputs.best-effort }}
     steps:
+      # setup-buildx guarantees the buildx CLI plugin for imagetools; no builder is used.
+      - uses: docker/setup-buildx-action@v3
       - name: Copy images
         shell: bash
         env:
@@ -62,8 +66,6 @@ jobs:
           printf '%s' "$TARGET_TOKEN" | docker login "$TARGET_REGISTRY" -u "$TARGET_USER" --password-stdin
           while IFS= read -r img; do
             [ -n "$img" ] || continue
-            docker pull "${SOURCE_REGISTRY}/${img}"
-            docker tag  "${SOURCE_REGISTRY}/${img}" "${TARGET_REGISTRY}/${img}"
-            docker push "${TARGET_REGISTRY}/${img}"
+            docker buildx imagetools create -t "${TARGET_REGISTRY}/${img}" "${SOURCE_REGISTRY}/${img}"
             echo "mirrored ${img} ${SOURCE_REGISTRY} -> ${TARGET_REGISTRY}"
           done <<< "$IMAGES"
