@@ -1,0 +1,263 @@
+name: "Supply Chain Security: Sign, Attest & SBOM (per registry)"
+# Canonical SHARED copy, extracted verbatim from webgrip/infrastructure
+# .forgejo/actions/cosign-sign-attest (which still runs its local twin until its
+# constrictor migration onto this one — keep the two in lockstep until then).
+# Signing a new repo also needs OpenBao: the auth/forgejo cosign-signer role's
+# bound_claims.repository list (homelab-cluster openbao bootstrap config.sh) must
+# name the calling repo, or the OIDC exchange 400s.
+description: >-
+  Forgejo/Harbor analog of .github/actions/cosign-sign-attest. Signs the pushed image
+  with cosign via OpenBao Transit — the signing key is generated in OpenBao and NEVER
+  leaves it. The job authenticates with a per-job Forgejo Actions OIDC token (requires
+  enable-openid-connect) exchanged at OpenBao's JWT auth, whose role is bound to this
+  repo + event=release + ref=refs/tags/* — so ONLY the release workflow on a tag can sign
+  (no Fulcio, no private key in Forgejo secrets, no shared runner ServiceAccount), then
+  generates a CycloneDX + SPDX SBOM with Syft, attests the CycloneDX SBOM into Harbor,
+  and uploads it to Dependency-Track. Verified at admission by the Kyverno
+  image-verify-harbor-audit policy using the matching public key.
+  GitHub-only capabilities are intentionally dropped: SLSA build provenance
+  (actions/attest-build-provenance) and the Trivy SARIF -> GitHub Security tab upload
+  have no Forgejo analog; in-cluster Trivy Operator + Harbor's scanner + Dependency-Track
+  cover vulnerability analysis instead.
+
+inputs:
+  registry:
+    description: "Harbor registry host"
+    required: false
+    default: "harbor.webgrip.dev"
+  image-name:
+    description: "Fully-qualified image name WITHOUT tag, e.g. harbor.webgrip.dev/webgrip/github-runner"
+    required: true
+  image-version:
+    description: "Version tag that was pushed (e.g. 1.2.3)"
+    required: true
+  dependency-track-url:
+    description: "In-cluster Dependency-Track API base URL"
+    required: false
+    default: "http://dependency-track-api-server.security.svc.cluster.local:8080"
+  cosign-version:
+    description: "cosign release to install"
+    required: false
+    # Deliberately held on 2.x: cosign 3.x changes the default bundle/attestation format and the
+    # verification surface, so it must be rolled out together with the Kyverno image-verify policy
+    # and anything already consuming these attestations. Renovate will raise the major as a PR —
+    # treat it as a coordinated migration, not a version bump.
+    # renovate: datasource=github-releases depName=sigstore/cosign
+    default: "v2.4.3"
+  syft-version:
+    description: "Syft release to install"
+    required: false
+    # renovate: datasource=github-releases depName=anchore/syft
+    default: "v1.48.0"
+  openbao-addr:
+    description: "In-cluster OpenBao address (Vault-compatible API)"
+    required: false
+    default: "http://openbao.security.svc.cluster.local:8200"
+  openbao-role:
+    description: "OpenBao JWT-auth role (auth/forgejo) granting Transit sign-only on the cosign key"
+    required: false
+    default: "cosign-signer"
+  oidc-audience:
+    description: "Audience to request for the Forgejo OIDC token; must match the role's bound_audiences"
+    required: false
+    default: "openbao-cosign"
+  transit-key:
+    description: "OpenBao Transit key name used to sign"
+    required: false
+    default: "cosign-webgrip"
+
+runs:
+  using: composite
+  steps:
+    # Absolute github.com URLs: Forgejo's default action host (data.forgejo.org) is an incomplete
+    # mirror and 404s on these (as it does on actions/github-script). Pin to the canonical source.
+    - name: Install cosign
+      uses: https://github.com/sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      with:
+        cosign-release: ${{ inputs.cosign-version }}
+
+    - name: Install Syft (SBOM generator)
+      uses: https://github.com/anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+      with:
+        syft-version: ${{ inputs.syft-version }}
+
+    - name: Log in to the target registry
+      shell: bash
+      env:
+        # Generic registry creds so this action signs ANY registry (Harbor robot, GHCR PAT, …). The
+        # Harbor robot username carries a literal '$' (robot$webgrip+ci); env-var expansion keeps it
+        # intact, and --password-stdin keeps the token out of argv/logs.
+        REGISTRY_USERNAME: ${{ env.REGISTRY_USERNAME }}
+        REGISTRY_TOKEN: ${{ env.REGISTRY_TOKEN }}
+        REGISTRY: ${{ inputs.registry }}
+      run: |
+        set -euo pipefail
+        printf '%s' "$REGISTRY_TOKEN" \
+          | docker login "$REGISTRY" -u "$REGISTRY_USERNAME" --password-stdin
+
+    - name: Resolve image digest
+      id: digest
+      shell: bash
+      env:
+        IMAGE_REF: ${{ inputs.image-name }}:${{ inputs.image-version }}
+        IMAGE_NAME: ${{ inputs.image-name }}
+      run: |
+        set -euo pipefail
+        # Always sign/attest by digest, never by tag (prevents tag-mutation attacks).
+        DIGEST="$(docker buildx imagetools inspect "$IMAGE_REF" --format '{{.Manifest.Digest}}')"
+        [[ "$DIGEST" == sha256:* ]] || { echo "::error::could not resolve digest for $IMAGE_REF"; exit 1; }
+        echo "image-with-digest=${IMAGE_NAME}@${DIGEST}" >> "$GITHUB_OUTPUT"
+
+    - name: "Generate SBOM (Syft: CycloneDX)"
+      id: sbom
+      shell: bash
+      env:
+        IMAGE: ${{ steps.digest.outputs.image-with-digest }}
+        # The job runs inside the runner's dind sidecar, whose cgroup is capped at 3Gi. Syft's
+        # default parallelism (one worker per CPU) cataloging a multi-GB toolchain image
+        # (rust-ci-runner, tauri-ci-runner) blows past that and the kernel kills it silently —
+        # the step log just stops after 15-25 min (runs 102/104/123). Single-threaded
+        # cataloging bounds peak RSS; it's slower but survives.
+        SYFT_PARALLELISM: "1"
+      run: |
+        set -euo pipefail
+        # registry: source — pull layers straight from Harbor into syft's temp dir instead of
+        # routing through the dind daemon (which would store a second full copy of the image).
+        # SPDX output dropped: nothing consumed sbom.spdx.json (cosign attests the CycloneDX,
+        # Dependency-Track ingests CycloneDX) and serializing a second whole-image document
+        # roughly doubles syft's memory footprint.
+        syft "registry:$IMAGE" -o "cyclonedx-json=sbom.cdx.json"
+        echo "components=$(jq '.components | length' sbom.cdx.json)" >> "$GITHUB_OUTPUT"
+
+    - name: Sign & attest via Forgejo OIDC -> OpenBao Transit
+      shell: bash
+      env:
+        VAULT_ADDR: ${{ inputs.openbao-addr }}
+        OPENBAO_ROLE: ${{ inputs.openbao-role }}
+        OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
+        TRANSIT_KEY: ${{ inputs.transit-key }}
+        IMAGE: ${{ steps.digest.outputs.image-with-digest }}
+      run: |
+        set -euo pipefail
+        # 1) Fetch this job's Forgejo OIDC token (requires enable-openid-connect on the job).
+        #    Its claims must satisfy the OpenBao cosign-signer role's bound_claims/bound_audiences.
+        #    NB: the Forgejo flow triggers on_release_published via workflow_dispatch on a branch,
+        #    NOT a release event on a tag — so the role must bind event_name=workflow_dispatch, not
+        #    event_name=release/ref=refs/tags/* (the GitHub-shaped binding). See the printed claims.
+        [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || { echo "::error::no OIDC token endpoint — is enable-openid-connect set on this job?"; exit 1; }
+        # GitHub's request URL already has a query string; Forgejo's may not — pick the right separator
+        # so the audience param is actually applied (a malformed URL yields the default audience -> 400).
+        case "$ACTIONS_ID_TOKEN_REQUEST_URL" in *\?*) sep='&';; *) sep='?';; esac
+        oidc_code="$(curl -sS -o /tmp/oidc.json -w '%{http_code}' \
+          -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+          "${ACTIONS_ID_TOKEN_REQUEST_URL}${sep}audience=${OIDC_AUDIENCE}" || echo 000)"
+        [ "$oidc_code" = "200" ] || { echo "::error::OIDC token request HTTP ${oidc_code}: $(cat /tmp/oidc.json 2>/dev/null)"; exit 1; }
+        oidc="$(jq -r '.value' /tmp/oidc.json)"
+        [ -n "$oidc" ] && [ "$oidc" != "null" ] || { echo "::error::OIDC token endpoint returned no .value"; exit 1; }
+        # Diagnostic: decode + print the token's CLAIMS only (never the token itself). These are what
+        # the OpenBao role binds against — compare to bound_claims/bound_audiences if the login 400s.
+        b64pad() { p="$(printf '%s' "$1" | tr '_-' '/+')"; m=$(( ${#p} % 4 )); [ "$m" -ne 0 ] && p="${p}$(printf '%*s' $((4 - m)) '' | tr ' ' '=')"; printf '%s' "$p"; }
+        echo "OIDC token claims: $(b64pad "$(printf '%s' "$oidc" | cut -d. -f2)" | base64 -d 2>/dev/null | jq -c '{sub, repository, event_name, ref, workflow, aud}' 2>/dev/null || echo '<undecodable>')"
+        # 2) Exchange it for a short-lived OpenBao token scoped to Transit sign-only. Capture the body
+        #    so a rejected claim/audience shows the exact reason instead of a bare curl exit 22.
+        login_code="$(curl -sS -o /tmp/bao.json -w '%{http_code}' --request POST \
+          --data "$(jq -nc --arg jwt "$oidc" --arg role "$OPENBAO_ROLE" '{jwt:$jwt, role:$role}')" \
+          "${VAULT_ADDR}/v1/auth/forgejo/login" || echo 000)"
+        [ "$login_code" = "200" ] || { echo "::error::OpenBao JWT login HTTP ${login_code}: $(cat /tmp/bao.json 2>/dev/null)"; exit 1; }
+        VAULT_TOKEN="$(jq -r '.auth.client_token' /tmp/bao.json)"
+        [ -n "$VAULT_TOKEN" ] && [ "$VAULT_TOKEN" != "null" ] || { echo "::error::OpenBao login returned no client_token"; exit 1; }
+        export VAULT_ADDR VAULT_TOKEN
+        # 3) The signing key never leaves OpenBao: cosign calls transit/sign over the API.
+        # --tlog-upload=false keeps signing fully in-cluster: with a static OpenBao Transit key we do
+        # NOT need the public sigstore transparency log (rekor.sigstore.dev), which would publish our
+        # image digests + timestamps to a world-readable, immutable log and add an internet dependency.
+        # Safe because verification is key-only: the Kyverno image-verify-harbor-audit policy has no
+        # `rekor` block (unlike the GHCR keyless policy), so it never looks up a tlog entry.
+        cosign sign   --yes --tlog-upload=false --key "hashivault://${TRANSIT_KEY}" "$IMAGE"
+        cosign attest --yes --tlog-upload=false --key "hashivault://${TRANSIT_KEY}" \
+          --predicate sbom.cdx.json --type cyclonedx "$IMAGE"
+
+    - name: "Generate Harbor-native SBOM accessory (fail-soft)"
+      # Harbor-only: this hits Harbor's v2 API (no analog on ghcr.io etc.), so skip it for other
+      # registries — the cosign attestation + DT upload above already cover GHCR's provenance.
+      if: ${{ contains(inputs.registry, 'harbor') }}
+      shell: bash
+      env:
+        REGISTRY_USERNAME: ${{ env.REGISTRY_USERNAME }}
+        REGISTRY_TOKEN: ${{ env.REGISTRY_TOKEN }}
+        REGISTRY: ${{ inputs.registry }}
+        IMAGE: ${{ steps.digest.outputs.image-with-digest }}
+      run: |
+        set -euo pipefail
+        # The cosign attestation above is a `.att` accessory consumed by Kyverno admission +
+        # Dependency-Track — it does NOT populate Harbor's own "SBOM" column. That column is fed
+        # ONLY by Harbor's native (scanner-backed) SBOM generator, which produces a separate `.sbom`
+        # accessory. Ask Harbor to generate it for the pushed DIGEST so the registry UI/API exposes
+        # an SBOM too. Harbor >= 2.11 with an SBOM-capable scanner (Trivy):
+        #   POST /api/v2.0/projects/{project}/repositories/{repo}/artifacts/{ref}/scan {"scan_type":"sbom"}
+        # Fail-soft (like the Dependency-Track upload): a robot missing the sbom/scan permission, an
+        # older Harbor, or a scanner without SBOM support must NEVER fail the release — the signed
+        # cosign attestation already proves provenance, and this column is convenience visibility.
+        # IMAGE = harbor.webgrip.dev/webgrip/<image>@sha256:<digest>
+        digest="${IMAGE##*@}"
+        repo_path="${IMAGE%@*}"      # harbor.webgrip.dev/webgrip/<image>
+        repo_path="${repo_path#*/}"  # webgrip/<image>  (drop the registry host)
+        project="${repo_path%%/*}"   # webgrip
+        repository="${repo_path#*/}" # <image>  (may itself contain '/' for nested repos)
+        # Harbor wants the repository path-segment URL-encoded ('/' -> %2F); single-segment names
+        # like techdocs-builder are unaffected.
+        repo_enc="${repository//\//%2F}"
+        url="https://${REGISTRY}/api/v2.0/projects/${project}/repositories/${repo_enc}/artifacts/${digest}/scan"
+        # Keep the robot token out of argv/the process list: pass credentials via a 0600 curl config,
+        # not -u (the robot user's literal '$'/'+' survive the quoted curl-config value verbatim).
+        umask 077
+        cfg="$(mktemp)"; trap 'rm -f "$cfg"' EXIT
+        printf 'user = "%s:%s"\n' "$REGISTRY_USERNAME" "$REGISTRY_TOKEN" > "$cfg"
+        code="$(curl -sS -K "$cfg" -o /tmp/sbom-gen.json -w '%{http_code}' \
+          -X POST "$url" -H 'Content-Type: application/json' \
+          --data '{"scan_type":"sbom"}' || echo 000)"
+        case "$code" in
+          200|202) echo "Harbor SBOM generation queued for ${project}/${repository}@${digest}" ;;
+          *) echo "::warning::Harbor SBOM generation request returned HTTP ${code} (non-fatal): $(cat /tmp/sbom-gen.json 2>/dev/null)" ;;
+        esac
+
+    - name: Upload SBOM to Dependency-Track (fail-soft)
+      shell: bash
+      env:
+        DT_API_KEY: ${{ env.DT_API_KEY }}
+        DT_URL: ${{ inputs.dependency-track-url }}
+        PROJECT: ${{ inputs.image-name }}
+        VERSION: ${{ inputs.image-version }}
+      run: |
+        set -euo pipefail
+        if [ -z "${DT_API_KEY:-}" ]; then
+          echo "DT_API_KEY not set; skipping Dependency-Track upload"; exit 0
+        fi
+        # Fail-soft: DT may be unreachable from the runner (NetworkPolicy); cluster-side
+        # Trivy Operator + Harbor scanner still cover this image, so never fail the build.
+        code="$(curl -sS -o /dev/null -w '%{http_code}' \
+          -X POST "${DT_URL}/api/v1/bom" \
+          -H "X-Api-Key: ${DT_API_KEY}" \
+          -F autoCreate=true \
+          -F "projectName=${PROJECT}" \
+          -F "projectVersion=${VERSION}" \
+          -F "bom=@sbom.cdx.json;type=application/json" || echo 000)"
+        case "$code" in
+          200|201) echo "uploaded SBOM to Dependency-Track (${PROJECT}:${VERSION})" ;;
+          *) echo "::warning::Dependency-Track upload returned HTTP ${code} (non-fatal)" ;;
+        esac
+
+    - name: Summary
+      if: always()
+      shell: bash
+      env:
+        IMAGE: ${{ steps.digest.outputs.image-with-digest }}
+        COMPONENTS: ${{ steps.sbom.outputs.components }}
+      run: |
+        {
+          echo "## 🔐 Supply chain (Harbor)"
+          echo ""
+          echo "- Signed (cosign via OpenBao Transit): \`${IMAGE}\`"
+          echo "- CycloneDX SBOM attested in Harbor + uploaded to Dependency-Track (${COMPONENTS:-?} components)"
+          echo "- Harbor-native SBOM accessory generation requested for the pushed digest (populates Harbor's SBOM column; fail-soft)"
+        } >> "$GITHUB_STEP_SUMMARY"
