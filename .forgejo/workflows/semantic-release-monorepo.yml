@@ -23,6 +23,16 @@ on:
         required: false
         default: false
         type: boolean
+      monorepo:
+        description: 'Set true when the resolved config uses makeConfig({monorepo:true}); the composite then installs semantic-release-monorepo (the shared config un-bundles it).'
+        required: false
+        default: false
+        type: boolean
+      config-version:
+        description: 'Pin of @webgrip/semantic-release-config to install (npm dist-tag or semver range); threads to the composite.'
+        required: false
+        default: '1'
+        type: string
       enabled:
         description: 'Gate the job from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass needs-based conditions here (needs.* survives flattening; github.* does NOT — use only-refs for branch gating).'
         required: false
@@ -107,6 +117,8 @@ jobs:
           package-name: ${{ inputs.package-name }}
           token: ${{ secrets.CI_TOKEN || secrets.FORGEJO_TOKEN }}
           dry-run: ${{ inputs.dry-run }}
+          monorepo: ${{ inputs.monorepo }}
+          config-version: ${{ inputs.config-version }}
 
       - id: normalize
         shell: bash
