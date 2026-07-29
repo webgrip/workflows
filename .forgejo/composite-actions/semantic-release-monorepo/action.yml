@@ -95,12 +95,34 @@ runs:
     - name: Ensure yq (helm manifest bumps)
       shell: bash
       run: |
+        set -euo pipefail
         command -v yq >/dev/null 2>&1 && { echo "yq present: $(yq --version)"; exit 0; }
         # renovate: datasource=github-releases depName=mikefarah/yq
         YQ_VERSION=v4.44.3
         arch="$(uname -m)"; case "$arch" in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) echo "::error::unsupported arch: $arch"; exit 1;; esac
+
+        # Checksums for the version pinned above, from the release's own `checksums` asset. A
+        # renovate bump lands here with no recorded hash: that WARNS rather than failing, so an
+        # automated version bump cannot break every consumer's release job — but the warning is
+        # the signal to record the new pair.
+        case "${YQ_VERSION}_${a}" in
+          v4.44.3_amd64) want="a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7" ;;
+          v4.44.3_arm64) want="0e7e1524f68d91b3ff9b089872d185940ab0fa020a5a9052046ef10547023156" ;;
+          *) want="" ;;
+        esac
+
         mkdir -p "$HOME/.local/bin"
         curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${a}" -o "$HOME/.local/bin/yq"
+        if [[ -n "$want" ]]; then
+          got="$(sha256sum "$HOME/.local/bin/yq" | cut -d' ' -f1)"
+          if [[ "$got" != "$want" ]]; then
+            echo "::error::yq checksum mismatch for ${YQ_VERSION}/${a}: expected ${want}, got ${got}"
+            rm -f "$HOME/.local/bin/yq"
+            exit 1
+          fi
+        else
+          echo "::warning::no recorded sha256 for yq ${YQ_VERSION}/${a} — downloaded unverified; record the checksum in this action"
+        fi
         chmod +x "$HOME/.local/bin/yq"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
         "$HOME/.local/bin/yq" --version
@@ -109,7 +131,6 @@ runs:
       shell: bash
       id: semantic-release
       env:
-        GITHUB_OUTPUT: $GITHUB_OUTPUT
         # Required by @webgrip/semantic-release-config at load time (Forgejo is the sole release
         # authority). Harmless for inline configs that don't read it.
         SEMANTIC_RELEASE_GITEA: "true"
@@ -157,8 +178,17 @@ runs:
           created_pkg_json="true"
         fi
 
+        # Keep the registry credential in a run-scoped npmrc instead of $HOME/.npmrc: the runner's
+        # HOME outlives the job on a self-hosted pool, and a release token has no business
+        # surviving there. Seeded from the existing user config so a runner-level registry mirror
+        # or proxy setting is not lost.
+        npmrc="$(mktemp)"
+        [[ -f "$HOME/.npmrc" ]] && cat "$HOME/.npmrc" > "$npmrc"
+        export npm_config_userconfig="$npmrc"
+
         cleanup() {
           git -C "${GITHUB_WORKSPACE}" config --unset-all "http.${forge_url}/.extraheader" || true
+          rm -f "$npmrc" || true
           if [[ "$created_pkg_json" == "true" ]]; then
             rm -f "$pkg_json" || true
           fi
@@ -182,6 +212,40 @@ runs:
             git tag "${seed_prefix}0.0.0" "${root}"
             git push origin "${seed_prefix}0.0.0"
           fi
+        fi
+
+        # THE TOOLCHAIN, in preference order — see docs/adrs/0005-semantic-release-toolchain-image.md.
+        # A prebaked toolchain (SEMREL_PREBAKED -> a node_modules dir on the runner image, or a
+        # release container built from a locked package.json) wins when it is the SAME MAJOR this
+        # action targets and carries the shared config; otherwise install. The unchecked version of
+        # this branch would have paired an sr24 prebake with an sr25 config — the release runs, and
+        # the config it was supposed to obey is a different generation.
+        SEMREL_MAJOR=25
+
+        prebake=false
+        if [[ -n "${SEMREL_PREBAKED:-}" && -x "${SEMREL_PREBAKED}/.bin/semantic-release" ]]; then
+          have="$(node -p "require('${SEMREL_PREBAKED}/semantic-release/package.json').version" 2>/dev/null || echo "0.0.0")"
+          monorepo_ok=true
+          [[ "${{ inputs.monorepo }}" == "true" && ! -f "${SEMREL_PREBAKED}/semantic-release-monorepo/package.json" ]] && monorepo_ok=false
+          if [[ "${have%%.*}" != "$SEMREL_MAJOR" ]]; then
+            echo "::notice::prebaked semantic-release ${have} is not the ${SEMREL_MAJOR}.x line this action targets - installing instead"
+          elif [[ ! -f "${SEMREL_PREBAKED}/@webgrip/semantic-release-config/package.json" || "$monorepo_ok" != "true" ]]; then
+            echo "::notice::prebaked toolchain is missing the shared config or semantic-release-monorepo - installing instead"
+          else
+            prebake=true
+          fi
+        fi
+
+        if [[ "$prebake" == "true" ]]; then
+          echo "Using prebaked toolchain at ${SEMREL_PREBAKED} (semantic-release ${have})"
+          export PATH="${SEMREL_PREBAKED}/.bin:${PATH}"
+          # This package's .releaserc.cjs does a bare require(), which resolves against its own
+          # node_modules only — NODE_PATH is what makes the prebaked config resolvable from there.
+          export NODE_PATH="${SEMREL_PREBAKED}${NODE_PATH:+:${NODE_PATH}}"
+          run_args=(--repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git")
+          [[ -n "$dry_run_flag" ]] && run_args+=("$dry_run_flag")
+          "${SEMREL_PREBAKED}/.bin/semantic-release" "${run_args[@]}"
+          exit 0
         fi
 
         # Install the shared config so this package's .releaserc.cjs can require it by name. Its
@@ -218,17 +282,12 @@ runs:
         run_args=(--repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git")
         [[ -n "$dry_run_flag" ]] && run_args+=("$dry_run_flag")
         if [[ "$config_installed" == "true" ]]; then
-          # Preferred: the sr25 toolchain the config just installed. Direct binary, no prune. Do NOT
-          # use SEMREL_PREBAKED here — it is sr24, a version skew against the sr25 shared config.
+          # The sr25 toolchain the config just installed. Direct binary, no prune.
           ./node_modules/.bin/semantic-release "${run_args[@]}"
-        elif [[ -n "${SEMREL_PREBAKED:-}" && -d "${SEMREL_PREBAKED}" ]]; then
-          # Inline-config consumer (no @webgrip config) + a prebaked toolchain on the ci-runner image.
-          export PATH="${SEMREL_PREBAKED}/.bin:${PATH}"
-          semantic-release "${run_args[@]}"
         else
           # Inline-config consumer, no prebake: install a fallback toolchain aligned to the sr25 line
           # (so it can't reintroduce version skew), then run the direct binary.
-          npm install --no-save --no-audit --no-fund \
+          npm install --no-save --no-package-lock --no-audit --no-fund \
             semantic-release@25.0.8 \
             semantic-release-monorepo@8.0.2 \
             @semantic-release/exec@7.1.0 \
@@ -238,3 +297,30 @@ runs:
             conventional-changelog-conventionalcommits@10.2.1
           ./node_modules/.bin/semantic-release "${run_args[@]}"
         fi
+
+    - name: Release summary
+      if: always()
+      shell: bash
+      env:
+        VERSION: ${{ steps.semantic-release.outputs.version }}
+        TAG: ${{ steps.semantic-release.outputs.tag }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        FORGE_URL: ${{ inputs.forge-url }}
+        PKG: ${{ inputs.package-name }}
+      run: |
+        set -euo pipefail
+        {
+          echo "### Semantic Release — \`${PKG}\`"
+          echo
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "Dry run — no tag, release or commit was pushed."
+          elif [[ -n "$VERSION" ]]; then
+            echo "- **version**: \`${VERSION}\`"
+            if [[ -n "$TAG" ]]; then
+              echo "- **tag**: [\`${TAG}\`](${FORGE_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG})"
+            fi
+          else
+            echo "No release cut for this run (no releasable commits under this package path, or"
+            echo "the config emitted no \`version=\` to \`\$GITHUB_OUTPUT\` from its exec successCmd)."
+          fi
+        } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"

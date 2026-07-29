@@ -463,20 +463,41 @@ Detects changed directories for monorepo workflows.
 ### Release Management
 
 #### `semantic-release.yml`
-Automated semantic versioning and releases using conventional commits.
+Automated semantic versioning and releases using conventional commits — one release train for the
+whole repository. (For per-package trains in a monorepo, use `semantic-release-monorepo.yml`.)
 
 **Features:**
-- GitHub App authentication support
-- Conventional commit parsing
-- Automated changelog generation
-- Tag and release creation
+- Conventional commit parsing, changelog generation, tag + release creation
+- Resolves the repo's `.releaserc.cjs|js|json` and installs **only** the toolchain that config
+  needs: the shared `@webgrip/semantic-release-config` (which carries its own pinned
+  semantic-release 25 + plugins), or the pinned legacy plugin set for repos still on an inline
+  config. One install, then the binary is run directly — never `npx`, which would prune it.
+- Skips the install entirely when the runner provides a prebaked toolchain (`SEMREL_PREBAKED`),
+  **after** verifying it is the same semantic-release major and carries the shared config. See
+  [ADR 0005](docs/adrs/0005-semantic-release-toolchain-image.md) for where that is going.
+- Serialized per ref (`concurrency`, no cancel-in-progress) and realigned to the remote branch tip,
+  so two runs cannot race for the same tag or die "behind remote" and silently release nothing.
 
 **Inputs:**
 - `release-type` (optional) - Type of release
-- `use-bot-to-commit` - Use GitHub App for commits
+- `use-bot-to-commit` - Use the CI bot for commits
+- `config-version` (default `1`) - Pin of `@webgrip/semantic-release-config`
+- `dry-run` (default `false`) - `--dry-run`: no tags, releases, or commits
+- `install-dependencies` (default `auto`) - Install the *consumer's* npm deps before releasing.
+  `auto` only does so when a lockfile / build script actually exists and never fails the release;
+  `true` is the same but fatal on failure; `false` skips both. A Go/PHP/Rust repo that merely
+  carries a `package.json` wants `auto` or `false`.
+- `enabled`, `only-refs`, `skip-refs` - Gating from inside the reusable (Forgejo v15 evaluates a
+  caller's `with:` at flatten time with an empty `github` context, so branch gating must happen here)
+- `align-to-remote-tip` (default `true`)
 
 **Outputs:**
-- `version` - Generated version number
+- `version` - Bare semver of the release (empty if none)
+- `tag` - Full git tag, e.g. `v1.2.3` — the checkout ref for tag-pinned follow-up jobs
+
+**Output contract:** the resolved config must include an `@semantic-release/exec` `successCmd`
+that writes `version=`/`tag=` to `$GITHUB_OUTPUT`; without it the outputs stay empty even when a
+release is cut.
 
 **WordPress packaging (optional):**
 This workflow/composite action also supports `@semantic-release/wordpress` (https://github.com/semantic-release/wordpress) for packaging WordPress plugins/themes during `semantic-release`.
@@ -515,9 +536,11 @@ plugin; config is resolved by cosmiconfig from the package dir upward (a package
 `.releaserc.cjs` wins, else the repo root `.releaserc.js`). The consumer config **must** write
 `version=`/`tag=` to `$GITHUB_OUTPUT` via an `@semantic-release/exec` `successCmd` for the
 outputs to be populated. `@semantic-release/git` + `changelog` are pre-installed for configs
-that commit release artifacts back (CHANGELOG.md, Chart.yaml, …). When the runner image prebakes
-the toolchain at `/opt/semrel` (env `SEMREL_PREBAKED`), the npm install is skipped entirely
-(~4 min saved per release job).
+that commit release artifacts back (CHANGELOG.md, Chart.yaml, …). When the runner provides a
+prebaked toolchain (env `SEMREL_PREBAKED`) that matches the semantic-release major this action
+targets **and** contains the shared config, the npm install is skipped entirely (~4 min saved per
+release job); a mismatch logs a notice and installs instead of releasing against a skewed
+toolchain. See [ADR 0005](docs/adrs/0005-semantic-release-toolchain-image.md).
 
 **Inputs:** `package-path` (`.` for a root-scoped train), `package-name`, `dry-run`.
 **Secrets:** `FORGEJO_TOKEN`. **Outputs:** `version` (bare semver, normalized), `tag`.

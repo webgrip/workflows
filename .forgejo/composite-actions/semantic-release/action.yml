@@ -1,5 +1,11 @@
 name: "[Action] Semantic Release"
-description: "Use semantic-release to automate versioning and releases"
+description: >-
+  Run semantic-release for a whole repository (one release train). Checks out with full history,
+  resolves the repo's config, installs exactly the toolchain that config needs, and cuts the
+  release against Forgejo. Output contract: the resolved config must include an
+  @semantic-release/exec successCmd that writes `version=${nextRelease.version}` (and optionally
+  `tag=${nextRelease.gitTag}`) to $GITHUB_OUTPUT — without it the outputs stay empty even when a
+  release is cut.
 
 inputs:
   release-type:
@@ -17,9 +23,36 @@ inputs:
     required: false
     default: "https://forgejo.webgrip.dev"
   git-user-name:
-    description: "Account name matching the token, used for push auth against the public host"
+    description: "Account name matching the token, used for push auth against the public host and for release commit-backs"
     required: false
     default: "webgrip-ci"
+  git-user-email:
+    description: "Git email for release commit-backs (@semantic-release/git)"
+    required: false
+    default: "ci@webgrip.nl"
+  dry-run:
+    description: "Run semantic-release with --dry-run (no tags, releases, or commits; also skips the baseline seed)"
+    required: false
+    default: "false"
+  align-to-remote-tip:
+    description: >-
+      Before running semantic-release on a branch push, move the checkout onto the remote branch
+      tip. A concurrent push can land after this run was triggered, leaving the detached checkout
+      BEHIND origin — semantic-release then aborts with "The local branch is behind the remote
+      one, therefore a new version won't be published" and cuts nothing. That no-op does not
+      self-heal, because the commit that overtook it is usually a `[skip ci]` release commit.
+    required: false
+    default: "true"
+  install-dependencies:
+    description: >-
+      Install the CONSUMER's npm dependencies (and run its build script) before releasing, for
+      repos whose prepare/publish commands need them. "auto" (default) installs only when a
+      lockfile is present and builds only when a build script exists, and never fails the release
+      — a Go/PHP/Rust repo that merely carries a package.json is left alone instead of printing an
+      npm EUSAGE wall. "true" is the same but FAILS the job when install or build fails. "false"
+      skips both.
+    required: false
+    default: "auto"
 
 outputs:
   version:
@@ -37,6 +70,17 @@ runs:
       with:
         fetch-depth: 0 # semantic-release requires all commits/tags
         token: ${{ inputs.token || github.token }}
+
+    # See the align-to-remote-tip input: releases the branch's current remote HEAD rather than the
+    # SHA this run was queued at, so a concurrent train cannot strand this run "behind remote".
+    - name: Align to remote branch tip
+      if: inputs.align-to-remote-tip == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
+      shell: bash
+      run: |
+        set -euo pipefail
+        branch="${GITHUB_REF_NAME}"
+        git fetch --tags origin "$branch"
+        git checkout -B "$branch" "origin/$branch"
 
     # node is baked into the ci-runner host image; setup-node remains as fallback.
     # Presence is not enough: the runner pool is heterogeneous and semantic-release 25
@@ -57,57 +101,135 @@ runs:
       if: steps.node-check.outputs.suitable != 'true'
       uses: actions/setup-node@v4
       with:
-        node-version: "22"
+        node-version: "24"
 
-    - name: Install dependencies
-      shell: bash
-      run: npm ci || true
+    # Cache the npm download cache so the (unpinned-lockfile) semantic-release install resolves
+    # from disk instead of re-fetching ~400 packages every run. Bump the key suffix when the
+    # shared-config pin or the fallback pinned versions change.
+    - name: Cache npm downloads
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-npm-semrel-25.0.8-r1
 
-    - name: Build
+    # Consumer dependencies, only where they exist. `npm ci` without a lockfile is a hard EUSAGE
+    # error, and `npm run build` without a build script is a hard ENOENT — both used to run
+    # unconditionally under `|| true`, so every non-Node repo printed a full npm error wall on a
+    # green release. See the install-dependencies input for the strict variant.
+    - name: Install consumer dependencies
+      if: inputs.install-dependencies != 'false'
       shell: bash
-      run: npm run build || true
+      env:
+        STRICT: ${{ inputs.install-dependencies }}
+      run: |
+        set -uo pipefail
+        [[ "$STRICT" == "true" ]] && set -e
+
+        if [[ ! -f package.json ]]; then
+          echo "No package.json; nothing to install."
+          exit 0
+        fi
+
+        if [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
+          npm ci --no-audit --no-fund
+        else
+          echo "package.json without a lockfile; skipping npm ci (nothing to install deterministically)."
+        fi
+
+        if node -e 'process.exit((require("./package.json").scripts||{}).build ? 0 : 1)' 2>/dev/null; then
+          npm run build
+        else
+          echo "No build script; skipping."
+        fi
 
     - name: Set semantic-release config file
       id: set-config
       shell: bash
       run: |
+        set -euo pipefail
+        release_config=""
+        config_file=""
+
         if [[ -n "${{ inputs.release-type }}" ]]; then
-          if [[ -f ".releaserc.${{ inputs.release-type }}.js" ]]; then
-            echo "release_config=--extends=./.releaserc.${{ inputs.release-type }}.js" >> "$GITHUB_OUTPUT"
-          elif [[ -f ".releaserc.${{ inputs.release-type }}.json" ]]; then
-            echo "release_config=--extends=./.releaserc.${{ inputs.release-type }}.json" >> "$GITHUB_OUTPUT"
-          fi
+          for ext in js json; do
+            f=".releaserc.${{ inputs.release-type }}.${ext}"
+            if [[ -f "$f" ]]; then
+              release_config="--extends=./${f}"
+              config_file="$f"
+              break
+            fi
+          done
         else
-          if [[ -f ".releaserc.cjs" ]]; then
-            echo "release_config=--config=./.releaserc.cjs" >> "$GITHUB_OUTPUT"
-          elif [[ -f ".releaserc.js" ]]; then
-            echo "release_config=--config=./.releaserc.js" >> "$GITHUB_OUTPUT"
-          elif [[ -f ".releaserc.json" ]]; then
-            echo "release_config=--config=./.releaserc.json" >> "$GITHUB_OUTPUT"
-          fi
+          for f in .releaserc.cjs .releaserc.js .releaserc.json; do
+            if [[ -f "$f" ]]; then
+              release_config="--config=./${f}"
+              config_file="$f"
+              break
+            fi
+          done
         fi
 
-    # Install the shared config so a repo's ~3-line .releaserc.cjs can require it by name (its deps
-    # — semantic-release + plugins — hoist into the workspace node_modules). Non-fatal: repos still
-    # carrying an inline .releaserc.js are unaffected.
-    - name: Install shared release config
+        echo "release_config=${release_config}" >> "$GITHUB_OUTPUT"
+        echo "config_file=${config_file}" >> "$GITHUB_OUTPUT"
+
+        # Which toolchain the run step installs depends on which config this repo uses: the shared
+        # config brings its own pinned semantic-release 25 + plugins, while an inline config still
+        # references plugins (semantic-release-helm3 above all) that the shared config deliberately
+        # does not depend on. Installing both lists would re-introduce version skew against the
+        # config's own pin, so decide here, from the file that will actually be loaded.
+        shared=false
+        if [[ -n "$config_file" ]] && grep -q "@webgrip/semantic-release-config" "$config_file"; then
+          shared=true
+        fi
+        echo "shared_config=${shared}" >> "$GITHUB_OUTPUT"
+        echo "config=${config_file:-<none, semantic-release defaults>} (shared=${shared})"
+
+    # yq is required by @webgrip/semantic-release-config's helm manifest bump (Chart.yaml
+    # version/appVersion) and by repo prepareCmds. The ci-runner host image will bake it in;
+    # until that rolls out (and for other runners), install a pinned copy when absent.
+    # common-charts run 3: prepare died "yq: not found" AFTER computing v1.0.14.
+    - name: Ensure yq (helm manifest bumps)
       shell: bash
-      env:
-        FORGEJO_NPM_TOKEN: ${{ inputs.token || github.token }}
       run: |
-        forge_url="${{ inputs.forge-url }}"
-        forge_host="${forge_url#http*://}"
-        npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
-        npm config set "//${forge_host}/api/packages/webgrip/npm/:_authToken" "${FORGEJO_NPM_TOKEN}"
-        npm install --no-save --no-package-lock \
-          "@webgrip/semantic-release-config@${{ inputs.config-version }}" || \
-          echo "::warning::@webgrip/semantic-release-config install failed (fine for inline-config repos)"
+        set -euo pipefail
+        command -v yq >/dev/null 2>&1 && { echo "yq present: $(yq --version)"; exit 0; }
+        # renovate: datasource=github-releases depName=mikefarah/yq
+        YQ_VERSION=v4.44.3
+        arch="$(uname -m)"; case "$arch" in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) echo "::error::unsupported arch: $arch"; exit 1;; esac
+
+        # Checksums for the version pinned above, from the release's own `checksums` asset. A
+        # renovate bump lands here with no recorded hash: that WARNS rather than failing, so an
+        # automated version bump cannot break every consumer's release job — but the warning is
+        # the signal to record the new pair.
+        case "${YQ_VERSION}_${a}" in
+          v4.44.3_amd64) want="a2c097180dd884a8d50c956ee16a9cec070f30a7947cf4ebf87d5f36213e9ed7" ;;
+          v4.44.3_arm64) want="0e7e1524f68d91b3ff9b089872d185940ab0fa020a5a9052046ef10547023156" ;;
+          *) want="" ;;
+        esac
+
+        mkdir -p "$HOME/.local/bin"
+        curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${a}" -o "$HOME/.local/bin/yq"
+        if [[ -n "$want" ]]; then
+          got="$(sha256sum "$HOME/.local/bin/yq" | cut -d' ' -f1)"
+          if [[ "$got" != "$want" ]]; then
+            echo "::error::yq checksum mismatch for ${YQ_VERSION}/${a}: expected ${want}, got ${got}"
+            rm -f "$HOME/.local/bin/yq"
+            exit 1
+          fi
+        else
+          echo "::warning::no recorded sha256 for yq ${YQ_VERSION}/${a} — downloaded unverified; record the checksum in this action"
+        fi
+        chmod +x "$HOME/.local/bin/yq"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        "$HOME/.local/bin/yq" --version
 
     # Start every repo from 0.0.0 (semantic-release otherwise hardcodes the first release to 1.0.0).
     # Idempotent: skipped once any v* tag exists. Needs the fetch-depth: 0 checkout above.
     - name: Seed baseline version tag (0.0.0)
+      if: inputs.dry-run != 'true'
       shell: bash
       run: |
+        set -euo pipefail
         if [ -n "$(git tag -l 'v[0-9]*')" ]; then
           echo "Release tags already exist (v*); skipping baseline seed."
           exit 0
@@ -117,28 +239,10 @@ runs:
         git tag "v0.0.0" "${root}"
         git push origin "v0.0.0"
 
-    # yq is required by @webgrip/semantic-release-config's helm manifest bump (Chart.yaml
-    # version/appVersion) and by repo prepareCmds. The ci-runner host image will bake it in;
-    # until that rolls out (and for other runners), install a pinned copy when absent.
-    # common-charts run 3: prepare died "yq: not found" AFTER computing v1.0.14.
-    - name: Ensure yq (helm manifest bumps)
-      shell: bash
-      run: |
-        command -v yq >/dev/null 2>&1 && { echo "yq present: $(yq --version)"; exit 0; }
-        # renovate: datasource=github-releases depName=mikefarah/yq
-        YQ_VERSION=v4.44.3
-        arch="$(uname -m)"; case "$arch" in x86_64) a=amd64;; aarch64|arm64) a=arm64;; *) echo "::error::unsupported arch: $arch"; exit 1;; esac
-        mkdir -p "$HOME/.local/bin"
-        curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${a}" -o "$HOME/.local/bin/yq"
-        chmod +x "$HOME/.local/bin/yq"
-        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-        "$HOME/.local/bin/yq" --version
-
     - name: Run semantic-release
       shell: bash
       id: semantic-release
       env:
-        GITHUB_OUTPUT: $GITHUB_OUTPUT
         # Required by @webgrip/semantic-release-config at load time (Forgejo is the sole release
         # authority). Harmless for inline configs that don't read it.
         SEMANTIC_RELEASE_GITEA: "true"
@@ -154,8 +258,17 @@ runs:
         # building an authenticated push URL. Components must be URL-encoded if they contain
         # reserved characters.
         GIT_CREDENTIALS: ${{ inputs.git-user-name }}:${{ inputs.token || github.token }}
+        GIT_AUTHOR_NAME: ${{ inputs.git-user-name }}
+        GIT_AUTHOR_EMAIL: ${{ inputs.git-user-email }}
+        GIT_COMMITTER_NAME: ${{ inputs.git-user-name }}
+        GIT_COMMITTER_EMAIL: ${{ inputs.git-user-email }}
+        RELEASE_CONFIG: ${{ steps.set-config.outputs.release_config }}
+        SHARED_CONFIG: ${{ steps.set-config.outputs.shared_config }}
       run: |
         set -euo pipefail
+
+        forge_url="${{ inputs.forge-url }}"
+        forge_host="${forge_url#http*://}"
 
         # semantic-release runs raw git commands (ls-remote during branch expansion, fetch,
         # push) against --repository-url — the PUBLIC host. The checkout only persists an
@@ -163,41 +276,126 @@ runs:
         # 401s before GIT_CREDENTIALS ever applies. Grant git the same style of credential
         # checkout uses, scoped to the checkout's local config, and remove it on exit.
         auth_b64="$(printf '%s:%s' "x-access-token" "${GITEA_TOKEN}" | base64 -w0)"
-        git config "http.${{ inputs.forge-url }}/.extraheader" "AUTHORIZATION: basic ${auth_b64}"
-        cleanup() { git config --unset-all "http.${{ inputs.forge-url }}/.extraheader" || true; }
+        git config "http.${forge_url}/.extraheader" "AUTHORIZATION: basic ${auth_b64}"
+
+        # Keep the registry credential in a run-scoped npmrc instead of $HOME/.npmrc: the runner's
+        # HOME outlives the job on a self-hosted pool, and a release token has no business
+        # surviving there. Seeded from the existing user config so a runner-level registry mirror
+        # or proxy setting is not lost.
+        npmrc="$(mktemp)"
+        [[ -f "$HOME/.npmrc" ]] && cat "$HOME/.npmrc" > "$npmrc"
+        export npm_config_userconfig="$npmrc"
+
+        cleanup() {
+          git config --unset-all "http.${forge_url}/.extraheader" || true
+          rm -f "$npmrc" || true
+        }
         trap cleanup EXIT
+
+        dry_run_flag=()
+        [[ "${{ inputs.dry-run }}" == "true" ]] && dry_run_flag=(--dry-run)
+
+        # THE TOOLCHAIN, in preference order. Everything below installs the same 25.x line; the
+        # pins here are the fallback of last resort, not the intended steady state — see
+        # docs/adrs/0005-semantic-release-toolchain-image.md.
+        #
+        # 1. A prebaked toolchain (SEMREL_PREBAKED -> a node_modules dir on the runner image, or
+        #    a release container built from a locked package.json). Zero install, deterministic.
+        # 2. npm install of the shared config, which carries its own pinned plugin set.
+        # 3. npm install of the pinned legacy set, for repos still on an inline config.
+        #
+        # The prebake is only usable if it is the SAME MAJOR this action targets and — for a repo
+        # whose config requires it — actually contains the shared config. The unchecked version of
+        # this branch shipped an sr24 prebake against an sr25 config, which is a silent skew: the
+        # release runs, and the config it was supposed to obey is a different generation.
+        SEMREL_MAJOR=25
+
+        prebake=false
+        if [[ -n "${SEMREL_PREBAKED:-}" && -x "${SEMREL_PREBAKED}/.bin/semantic-release" ]]; then
+          have="$(node -p "require('${SEMREL_PREBAKED}/semantic-release/package.json').version" 2>/dev/null || echo "0.0.0")"
+          if [[ "${have%%.*}" != "$SEMREL_MAJOR" ]]; then
+            echo "::notice::prebaked semantic-release ${have} is not the ${SEMREL_MAJOR}.x line this action targets - installing instead"
+          elif [[ "$SHARED_CONFIG" == "true" && ! -f "${SEMREL_PREBAKED}/@webgrip/semantic-release-config/package.json" ]]; then
+            echo "::notice::prebaked toolchain has no @webgrip/semantic-release-config - installing instead"
+          else
+            prebake=true
+          fi
+        fi
+
+        # ONE install, then run the binary it provides DIRECTLY. `npm install` (and `npx`, which
+        # reifies) re-resolves the whole tree and PRUNES anything not in package.json or its own
+        # argument list, so a second install silently removes what the first one put there
+        # ("removed 43 packages" -> MODULE_NOT_FOUND from .releaserc.cjs). One install, one run.
+        sr_bin="./node_modules/.bin/semantic-release"
+        if [[ "$prebake" == "true" ]]; then
+          echo "Using prebaked toolchain at ${SEMREL_PREBAKED} (semantic-release ${have})"
+          sr_bin="${SEMREL_PREBAKED}/.bin/semantic-release"
+          export PATH="${SEMREL_PREBAKED}/.bin:${PATH}"
+          # The repo's .releaserc.cjs does a bare require() from the workspace, which resolves
+          # against the workspace's node_modules only — NODE_PATH is what makes the prebaked
+          # config (and plugins) resolvable from outside it.
+          export NODE_PATH="${SEMREL_PREBAKED}${NODE_PATH:+:${NODE_PATH}}"
+        elif [[ "$SHARED_CONFIG" == "true" ]]; then
+          # The shared config carries its own pinned semantic-release 25 + plugin set; installing
+          # it is installing the toolchain.
+          npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
+          npm config set "//${forge_host}/api/packages/webgrip/npm/:_authToken" "${GITEA_TOKEN}"
+          config_spec="@webgrip/semantic-release-config@${{ inputs.config-version }}"
+          npm install --no-save --no-package-lock --no-audit --no-fund "$config_spec" || {
+            # npm sends _authToken unconditionally once set, so an under-scoped caller token (e.g. a
+            # repo-scoped bot PAT without package read access) turns this PUBLIC package into a hard
+            # E401 that anonymous access would not have hit. Drop the credential and retry before
+            # concluding the config is unavailable.
+            echo "::notice::config install with token failed - retrying anonymously"
+            npm config delete "//${forge_host}/api/packages/webgrip/npm/:_authToken" || true
+            npm install --no-save --no-package-lock --no-audit --no-fund "$config_spec"
+          }
+        else
+          # Inline-config repo, no prebake: install the legacy plugin set, pinned to the sr25 line
+          # so it cannot drift into a different major than the shared-config path. semantic-release-helm3
+          # lives here and only here — inline configs still reference it, the shared config does not.
+          # Forgejo: dropped semantic-release-github-actions-tags (GitHub-Actions-specific, no analog)
+          npm install --no-save --no-package-lock --no-audit --no-fund \
+            semantic-release@25.0.8 \
+            @semantic-release/changelog@7.0.0 \
+            @semantic-release/commit-analyzer@13.0.1 \
+            @semantic-release/exec@7.1.0 \
+            @semantic-release/git@11.0.1 \
+            @semantic-release/release-notes-generator@14.1.1 \
+            @saithodev/semantic-release-gitea@2.1.0 \
+            semantic-release-helm3@2.10.0 \
+            conventional-changelog-conventionalcommits@10.2.1
+        fi
 
         # --repository-url pins the changelog compare/commit links and release URL to the public host.
         # semantic-release would otherwise derive it from the CI checkout's origin remote (internal).
-        # Fast path: the ci-runner host image prebakes the pinned toolchain at /opt/semrel
-        # (env SEMREL_PREBAKED) — saves ~4 min per release job.
-        if [[ -n "${SEMREL_PREBAKED:-}" && -d "${SEMREL_PREBAKED}" ]]; then
-          export PATH="${SEMREL_PREBAKED}/.bin:${PATH}"
-          semantic-release \
-            --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
-            ${{ steps.set-config.outputs.release_config }}
-        else
-          # ONE combined install, shared config included: `npm install --no-save` re-resolves the
-          # whole tree and PRUNES anything not in package.json or its own argument list — as a
-          # separate command it silently removed the config installed by the earlier step
-          # ("removed 43 packages" -> MODULE_NOT_FOUND from .releaserc.cjs). The legacy pins stay
-          # in the SAME list (not behind a config-installed guard like the monorepo composite):
-          # inline .releaserc.js repos still reference semantic-release-helm3, which is NOT among
-          # the shared config's deps, so skipping this list would break them instead.
-          npm install --no-save \
-            "@webgrip/semantic-release-config@${{ inputs.config-version }}" \
-            semantic-release \
-            @semantic-release/changelog \
-            @semantic-release/commit-analyzer \
-            @semantic-release/exec \
-            @semantic-release/git \
-            @saithodev/semantic-release-gitea \
-            semantic-release-helm3 \
-            @semantic-release/release-notes-generator \
-            conventional-changelog-conventionalcommits
-          # Forgejo: dropped semantic-release-github-actions-tags (GitHub-Actions-specific, no analog)
+        run_args=(--repository-url "${forge_url}/${{ github.repository }}.git" "${dry_run_flag[@]}")
+        [[ -n "$RELEASE_CONFIG" ]] && run_args+=("$RELEASE_CONFIG")
 
-          npx semantic-release \
-            --repository-url "${{ inputs.forge-url }}/${{ github.repository }}.git" \
-            ${{ steps.set-config.outputs.release_config }}
-        fi
+        "$sr_bin" "${run_args[@]}"
+
+    - name: Release summary
+      if: always()
+      shell: bash
+      env:
+        VERSION: ${{ steps.semantic-release.outputs.version }}
+        TAG: ${{ steps.semantic-release.outputs.tag }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        FORGE_URL: ${{ inputs.forge-url }}
+      run: |
+        set -euo pipefail
+        {
+          echo "### Semantic Release"
+          echo
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "Dry run — no tag, release or commit was pushed."
+          elif [[ -n "$VERSION" ]]; then
+            echo "- **version**: \`${VERSION}\`"
+            if [[ -n "$TAG" ]]; then
+              echo "- **tag**: [\`${TAG}\`](${FORGE_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG})"
+            fi
+          else
+            echo "No release cut for this run (no releasable commits, or the config emitted no"
+            echo "\`version=\` to \`\$GITHUB_OUTPUT\` from its exec successCmd)."
+          fi
+        } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
