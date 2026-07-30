@@ -172,8 +172,9 @@ outlives the job. No data classification change.
 
 * **Related Decisions**: ADR 0002 (two-tree layout — the images serve the `.forgejo` tree; the
   frozen `.github` tree keeps installing), ADR 0004 (`CI_TOKEN` identity used by these jobs).
-* **Where the images are built**: `webgrip/infrastructure` — `ops/docker/semantic-release/`
-  (one Dockerfile, three targets, three committed lockfiles, Renovate-owned).
+* **Where the images are built**: `webgrip/infrastructure` — `ops/docker/semantic-release{,-monorepo,-rust}/`,
+  one independent image per directory, each with its own committed lockfile (Renovate-owned) folded
+  into the same `package.json` that carries the image's release version.
 * **Follow-ups / TODOs**:
   1. Publish the images from `webgrip/infrastructure` **before** merging the composite defaults
      here; the reusables default to them, so a missing image fails at the container pull.
