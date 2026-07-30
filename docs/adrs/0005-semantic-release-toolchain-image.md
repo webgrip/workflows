@@ -62,15 +62,26 @@ The estate already had the right pattern in use: `rust-semantic-release.yml` run
 
 ### Chosen Option
 
-**Option 3.** Three images, built from one Dockerfile in **`webgrip/infrastructure`** (alongside
-`rust-releaser`, which is the same pattern), all sharing every layer except their own
-`node_modules`:
+**Option 3.** Three **independent** images, built in **`webgrip/infrastructure`** (alongside
+`rust-releaser`, which is the same pattern):
 
 | Image | Adds | Used by |
 | ----- | ---- | ------- |
 | `harbor.webgrip.dev/webgrip/semantic-release` | semantic-release 25, `@webgrip/semantic-release-config`, the plugin set, `semantic-release-helm3`, node 24, git, yq | `semantic-release.yml` |
-| `…/semantic-release-monorepo` | + `semantic-release-monorepo` | `semantic-release-monorepo.yml` |
-| `…/semantic-release-rust` | + cargo (rustup), `semantic-release-cargo` | `rust-semantic-release` composite |
+| `…/semantic-release-monorepo` | the same, plus `semantic-release-monorepo` | `semantic-release-monorepo.yml` |
+| `…/semantic-release-rust` | the same, plus cargo (rustup), `semantic-release-cargo` | `rust-semantic-release` composite |
+
+They were briefly chained — the variants building `FROM` the base — and that cost three runs before
+it was reverted. A `FROM` on a sibling makes that sibling's *published* artifact a build dependency,
+and in a repo where a distribute run can be killed on a shared runner pool, publishing is not
+guaranteed: `semantic-release-v0.1.0` was released, its image build was killed mid-flight, and both
+variants then failed on a `FROM` that could never resolve. Pinning harder did not help — the third
+run had the right pin and the image simply did not exist. Independent images cannot fail that way,
+and the chain was never buying much: a variant REPLACED the base's `node_modules` wholesale
+(semantic-release resolves plugins relative to its own install and the cwd, not via `NODE_PATH`), so
+the shared layers were the cheap ones. They are now repeated verbatim and guarded byte-for-byte in
+CI, which costs Dockerfile text rather than registry or pull bytes: identical instructions on an
+identical base produce identical layer digests.
 
 Option 2 was rejected as the *primary* mechanism because it couples the toolchain's lifecycle to
 the runner image's: bumping a plugin means rebuilding and rolling the runner fleet, and a runner
