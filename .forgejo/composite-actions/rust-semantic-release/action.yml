@@ -1,7 +1,7 @@
 name: "[Action] Semantic Release (Rust)"
 description: >-
   Cut a Rust crate's release with semantic-release (optionally alongside a JS package). Expects to
-  run in the rust toolchain image (harbor.webgrip.dev/webgrip/semantic-release-rust:1.0.0 — see
+  run in the rust toolchain image (harbor.webgrip.dev/webgrip/semantic-release-rust:0.1.0 — see
   docs/adrs/0005-semantic-release-toolchain-image.md), which bakes in cargo, node, git, yq,
   semantic-release 25, @webgrip/semantic-release-config and semantic-release-cargo, so this action
   installs nothing. Release mechanics are identical to the plain semantic-release composite:
@@ -106,7 +106,7 @@ runs:
 
         sr="${SEMREL_PREBAKED:-/nonexistent}/.bin/semantic-release"
         if [[ ! -x "$sr" ]]; then
-          echo "::warning::not running in the toolchain image (SEMREL_PREBAKED unset) - installing an UNLOCKED toolchain. Run this job in harbor.webgrip.dev/webgrip/semantic-release-rust:1.0.0 (ADR 0005, built in webgrip/infrastructure)."
+          echo "::warning::not running in the toolchain image (SEMREL_PREBAKED unset) - installing an UNLOCKED toolchain. Run this job in harbor.webgrip.dev/webgrip/semantic-release-rust:0.1.0 (ADR 0005, built in webgrip/infrastructure)."
           npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
           npm install --no-save --no-package-lock --no-audit --no-fund \
             "@webgrip/semantic-release-config@${{ inputs.config-version }}" semantic-release-cargo@2.4.2

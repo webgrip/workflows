@@ -2,7 +2,7 @@ name: "[Action] Semantic Release (Monorepo)"
 description: >-
   Run semantic-release for a single monorepo package path (e.g. ops/docker/<image> or
   deploy/charts/<chart>) without committing a fabricated package.json. Expects to run in the
-  toolchain image (harbor.webgrip.dev/webgrip/semantic-release-monorepo:1.0.0 — see
+  toolchain image (harbor.webgrip.dev/webgrip/semantic-release-monorepo:0.1.0 — see
   docs/adrs/0005-semantic-release-toolchain-image.md), which bakes in node, git, yq,
   semantic-release 25, @webgrip/semantic-release-config and semantic-release-monorepo, so this
   action installs nothing. Config is resolved by cosmiconfig upward from the package directory: a
@@ -132,7 +132,7 @@ runs:
         # NB: install into the PACKAGE dir, since that is the cwd semantic-release resolves from.
         sr="${SEMREL_PREBAKED:-/nonexistent}/.bin/semantic-release"
         if [[ ! -x "$sr" ]]; then
-          echo "::warning::not running in the toolchain image (SEMREL_PREBAKED unset) - installing an UNLOCKED toolchain. Run this job in harbor.webgrip.dev/webgrip/semantic-release-monorepo:1.0.0 (ADR 0005, built in webgrip/infrastructure)."
+          echo "::warning::not running in the toolchain image (SEMREL_PREBAKED unset) - installing an UNLOCKED toolchain. Run this job in harbor.webgrip.dev/webgrip/semantic-release-monorepo:0.1.0 (ADR 0005, built in webgrip/infrastructure)."
           npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
           npm install --no-save --no-package-lock --no-audit --no-fund \
             "@webgrip/semantic-release-config@${{ inputs.config-version }}" semantic-release-monorepo@8.0.2

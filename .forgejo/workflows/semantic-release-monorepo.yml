@@ -38,7 +38,7 @@ on:
           needs extra tooling (helm, php, docker CLI).
         required: false
         # renovate: datasource=docker depName=harbor.webgrip.dev/webgrip/semantic-release-monorepo
-        default: 'harbor.webgrip.dev/webgrip/semantic-release-monorepo:1.0.0'
+        default: 'harbor.webgrip.dev/webgrip/semantic-release-monorepo:0.1.0'
         type: string
       config-version:
         description: 'Pin of @webgrip/semantic-release-config for the no-image fallback only; inside the toolchain image the image tag IS the version.'
