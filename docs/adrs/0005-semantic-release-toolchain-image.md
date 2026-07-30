@@ -79,8 +79,8 @@ variants then failed on a `FROM` that could never resolve. Pinning harder did no
 run had the right pin and the image simply did not exist. Independent images cannot fail that way,
 and the chain was never buying much: a variant REPLACED the base's `node_modules` wholesale
 (semantic-release resolves plugins relative to its own install and the cwd, not via `NODE_PATH`), so
-the shared layers were the cheap ones. They are now repeated verbatim and guarded byte-for-byte in
-CI, which costs Dockerfile text rather than registry or pull bytes: identical instructions on an
+the shared layers were the cheap ones. They are now repeated in each Dockerfile and kept in step by
+hand, which costs Dockerfile text rather than registry or pull bytes: identical instructions on an
 identical base produce identical layer digests.
 
 Option 2 was rejected as the *primary* mechanism because it couples the toolchain's lifecycle to
