@@ -1,6 +1,6 @@
 # ADR 0005 – The semantic-release Toolchain Is an Image, Not an Install
 
-* **Status**: Proposed
+* **Status**: Accepted
 * **Deciders**: Ryan Grippeling
 * **Date**: 2026-07-29
 * **Tags**: CI::ReusableWorkflows, Forgejo, SupplyChain, Performance
@@ -10,33 +10,34 @@
 
 ## Context and Problem Statement
 
-Every release job in the estate builds its own toolchain at release time. `ploeg` run 122 is
+Every release job in the estate built its own toolchain at release time. `ploeg` run 122 is
 representative: `npm install` resolved 413 packages in **2m**, a second install added 15 more in
 21s, and only then did semantic-release start — roughly **3m45s of setup for ~25s of work**, on
 every release, in every repo.
 
 Worse than the time is what "resolve at release time" means for a release:
 
-- **It is not reproducible.** No lockfile governs it. Two runs of the same commit, a week apart,
-  can cut the release with different plugin versions. The thing that decides your version numbers
-  is itself unversioned.
-- **It re-resolves from the network on the critical path.** A registry outage, a yanked version,
-  or a transitive dep that starts requiring a newer node is an outage of *releasing*, in every
-  repo simultaneously.
-- **The audit output is noise.** `11 vulnerabilities (6 moderate, 5 high)` prints on every green
-  release, so nobody reads it, and a real finding would land in exactly the same place.
-- **Nothing upgrades it deliberately.** Unpinned specs float; pinned ones (this repo now pins the
-  fallback list) go stale silently because Renovate cannot see version numbers embedded in a bash
-  heredoc inside an `action.yml`.
+- **It is not reproducible.** No lockfile governed it. Two runs of the same commit, a week apart,
+  could cut the release with different plugin versions. The thing that decides your version
+  numbers was itself unversioned.
+- **It re-resolved from the network on the critical path.** A registry outage, a yanked version, or
+  a transitive dep that starts requiring a newer node is an outage of *releasing*, everywhere, at
+  once.
+- **The audit output was noise.** `11 vulnerabilities (6 moderate, 5 high)` printed on every green
+  release, so nobody read it, and a real finding would land in exactly the same place.
+- **Nothing upgraded it deliberately.** Unpinned specs floated; pinned ones went stale silently,
+  because Renovate cannot see a version embedded in a bash heredoc inside an `action.yml`.
 
-A partial answer already exists on the runner image: `SEMREL_PREBAKED` points at a prebaked
-`node_modules`. It is undocumented, unversioned, built from no lockfile, and currently ships
+A partial answer already existed on the runner image: `SEMREL_PREBAKED` pointed at a prebaked
+`node_modules`. It was undocumented, unversioned, built from no lockfile, and shipped
 semantic-release **24** while `@webgrip/semantic-release-config` pins **25** — so the composites
-had to route *around* it for shared-config repos, and any repo that used it was silently running
-its release against a different major than its config was written for.
+routed *around* it for shared-config repos, and any repo that did use it was releasing against a
+different major than its config was written for. It also exported `PATH` but not `NODE_PATH`, so a
+consumer's bare `require('@webgrip/semantic-release-config')` could not have resolved against it
+anyway: the fast path could not work as written.
 
-The estate already has the right pattern in use elsewhere: `rust-semantic-release.yml` runs in
-`harbor.webgrip.dev/webgrip/rust-releaser:1.2.0`, a versioned image with the toolchain baked in.
+The estate already had the right pattern in use: `rust-semantic-release.yml` runs in
+`harbor.webgrip.dev/webgrip/rust-releaser:1.2.0`, a versioned image with its toolchain baked in.
 
 ## Decision Drivers
 
@@ -47,105 +48,129 @@ The estate already has the right pattern in use elsewhere: `rust-semantic-releas
 | 3 | Toolchain upgrades must be a reviewed, revertable commit — not an implicit re-resolve |
 | 4 | Security findings must arrive as a PR against one lockfile, not as noise in N release logs |
 | 5 | A version skew between the toolchain and the shared config must be impossible, not routed around |
+| 6 | The composite actions should hold release semantics only, not dependency management |
 
 ## Considered Options
 
-1. **Install at release time** (today) — `npm install` in the consumer workspace on every run.
-2. **Prebake into the ci-runner host image** (today's `SEMREL_PREBAKED`, formalized) — one
-   `node_modules` on the runner, versioned with the runner image.
-3. **A dedicated, versioned toolchain image** built from a committed `package.json` +
-   `package-lock.json`, with Renovate owning the lockfile.
+1. **Install at release time** (the status quo) — `npm install` in the consumer workspace, every run.
+2. **Prebake into the ci-runner host image** (`SEMREL_PREBAKED`, formalized) — one `node_modules`
+   on the runner, versioned with the runner image.
+3. **Dedicated, versioned toolchain images** built from committed lockfiles, Renovate-owned, with
+   the release job running *inside* them.
 
 ## Decision Outcome
 
 ### Chosen Option
 
-**Option 3 — a dedicated toolchain image, with the install path kept as a fallback.**
+**Option 3.** Three images, built from one Dockerfile in **`webgrip/infrastructure`** (alongside
+`rust-releaser`, which is the same pattern), all sharing every layer except their own
+`node_modules`:
 
-`harbor.webgrip.dev/webgrip/semantic-release:<major>` (name/registry to be confirmed against the
-image repo's conventions), built from:
+| Image | Adds | Used by |
+| ----- | ---- | ------- |
+| `harbor.webgrip.dev/webgrip/semantic-release` | semantic-release 25, `@webgrip/semantic-release-config`, the plugin set, `semantic-release-helm3`, node 24, git, yq | `semantic-release.yml` |
+| `…/semantic-release-monorepo` | + `semantic-release-monorepo` | `semantic-release-monorepo.yml` |
+| `…/semantic-release-rust` | + cargo (rustup), `semantic-release-cargo` | `rust-semantic-release` composite |
 
-```
-package.json + package-lock.json   # npm ci --omit=dev — the release toolchain, locked
-  semantic-release                 # the 25.x line
-  @semantic-release/{changelog,commit-analyzer,exec,git,release-notes-generator}
-  @saithodev/semantic-release-gitea
-  @webgrip/semantic-release-config # the shared config itself
-  semantic-release-monorepo, semantic-release-helm3, conventional-changelog-conventionalcommits
-+ node 24, git, yq (checksum-verified), curl
-```
+Option 2 was rejected as the *primary* mechanism because it couples the toolchain's lifecycle to
+the runner image's: bumping a plugin means rebuilding and rolling the runner fleet, and a runner
+pool that is heterogeneous by design (it already is — that is why the node check existed) gives
+different repos different toolchains. It survives as the *contract*, which is the useful half.
 
-The contract with the composites is deliberately the one that already exists:
-**`SEMREL_PREBAKED` names a directory containing the installed `node_modules`** (so
-`$SEMREL_PREBAKED/.bin/semantic-release` runs, and `NODE_PATH=$SEMREL_PREBAKED` makes a
-consumer's `require('@webgrip/semantic-release-config')` resolve). Setting it in the image's `ENV`
-is the whole integration — no composite change is needed to adopt it.
+**The images are built in `webgrip/infrastructure`, not here.** Building them in this repo was the
+first attempt and it was wrong: this repo's release jobs would then run in an image whose build is
+orchestrated by this repo's own reusable workflows. That circle has no good answer to "which came
+first" — a broken toolchain image cannot be fixed by a pipeline that needs the toolchain image, and
+a reader tracing why a release failed ends up back where they started. Images are artifacts;
+`webgrip/infrastructure` is where the estate's artifacts are built (`rust-releaser` already lives
+there), and it consumes this library the same way every other repo does. This repo keeps only the
+*contract* — `SEMREL_PREBAKED` — and the composites that read it.
 
-What changed in the composites to make that safe (this PR, ahead of the image):
+**The contract is `SEMREL_PREBAKED`**: an installed `node_modules` directory, with `PATH` and
+`NODE_PATH` pointing into it. The images set it in `ENV`; the composites read it and run. Nothing
+else is negotiated at release time. Rejecting Option 2 as a mechanism did not mean discarding its
+interface — a runner image that prebakes a *correct* toolchain still works unchanged.
 
-- The prebake is **verified before use**: its `semantic-release` major must equal the line the
-  action targets, and for a repo whose config requires it, `@webgrip/semantic-release-config` must
-  be present in the prebake. A mismatch logs a notice and falls back to installing. The sr24/sr25
-  skew that forced the previous work-around is now detected rather than avoided.
-- `NODE_PATH` is exported alongside `PATH`, which is what a shared-config repo needs for the
-  prebaked tree to be usable at all.
-- The install fallback is fully pinned, so even the slow path is reproducible.
+Tags follow `webgrip/infrastructure`'s existing per-image release train: a conventional commit under
+`ops/docker/<image>/` cuts `<image>-v<version>`, and the release event builds and pushes
+`webgrip/<image>:<version>` (plus `:latest` for a final release). The reusable workflows here pin an
+exact version in the `toolchain-image` input default, watched by a Renovate annotation — the same
+way `techdocs-runner` pins `techdocs-builder`. So a toolchain upgrade is two reviewed commits (the
+lockfile there, the pin here) and never something that moves under a repo's feet.
 
-Renovate then owns the toolchain: it opens a PR against the image repo's `package-lock.json`, CI
-builds and tags the image, and consumers pick it up by moving one image tag. A toolchain upgrade
-becomes a diff someone approved.
+A semantic-release **major** bump additionally has to change each image's build-time assertion,
+which is what stops one arriving silently.
 
 ### Positive Consequences
 
-* Release setup drops from ~3m45s to ~0 — no resolve, no download, no audit wall.
-* The toolchain that decides version numbers is itself a versioned, revertable artifact.
-* Vulnerabilities surface once, as a Renovate PR on one lockfile, instead of as ignored warnings
-  in every release log in the org.
+* Release setup drops from ~3m45s to ~0: no resolve, no download, no audit wall, no yq fetch.
+* The toolchain that decides version numbers is a versioned, revertable, scannable artifact.
+* Vulnerabilities surface once, as a Renovate PR against three lockfiles, instead of as ignored
+  warnings in every release log in the org.
 * The registry is off the release critical path.
+* The composite actions lose ~60% of their length and everything they still contain is release
+  semantics: checkout, branch-tip alignment, baseline seed, credentials, `--repository-url`, the
+  run, the summary.
+* Consumers needing extra tooling (helm, php, docker CLI) build FROM these images and pass
+  `toolchain-image`, which puts environment needs in an image instead of in ad-hoc job steps.
 
 ### Negative Consequences / Trade-offs
 
-* A second artifact to build, tag, and keep current; a stale image is a stale toolchain, and
-  unlike a floating install it will not fix itself.
-* Consumers on an old image tag can diverge from the shared config's pin — mitigated by the
-  major-line check, which now falls back to installing rather than releasing on a skew.
-* The install fallback cannot be deleted: repos on inline configs and non-container runners
-  still need it, so both paths must keep working.
+* Three artifacts to build, tag and keep current; a stale image is a stale toolchain and, unlike a
+  floating install, will not fix itself.
+* The release job now runs in a container, so anything a repo's `prepareCmd` shells out to must
+  exist in that image. This is the real migration risk, and the escape hatch is `toolchain-image`.
+* The install fallback cannot be deleted outright: a job run outside the image still has to
+  release. It stays, warns loudly, and is explicitly unlocked.
+* The toolchain and the composites that depend on it now live in **two repositories**, so a change
+  to the contract spans two PRs and has an ordering requirement (publish, then point at it). That
+  is the price of not having a circular dependency, and it is the cheaper of the two.
 
 ### Risks & Mitigations
 
-* **Image and shared config drift apart.** Mitigated by the version check above, and by the image
-  bundling the shared config rather than resolving it at runtime.
-* **The image becomes the only path and a bad tag blocks all releases.** Mitigated by keeping the
-  install fallback and by the check failing *open* (fall back and install) rather than closed.
-* **Renovate bumps a version whose checksum is recorded elsewhere** (yq): recorded checksums are
-  matched per version and an unrecorded version *warns* rather than fails, so an automated bump
-  cannot break every consumer's release.
+* **A repo's release breaks because its `prepareCmd` needs a tool the image lacks.** Mitigated by
+  `toolchain-image` (build FROM ours), and by rolling this out on `ploeg` first.
+* **The image is missing when a consumer upgrades.** The build workflow must run and publish before
+  the composites' new defaults merge; the container pull fails loudly rather than silently
+  releasing with the wrong toolchain.
+* **Renovate bumps semantic-release to a major the composites do not target.** The Dockerfile
+  asserts the major at build time, so the PR fails in CI instead of shipping a skew.
+* **Harbor is unreachable from a runner.** Same exposure as `rust-releaser` today, which the estate
+  already accepts; the images are also pullable by digest for disaster recovery.
 
 ## Validation
 
-* **Immediate proof** — a release job on a runner exporting `SEMREL_PREBAKED` logs
-  `Using prebaked toolchain at … (semantic-release 25.x)` and performs no `npm install`; the same
-  job on a runner with the sr24 prebake logs the skew notice and installs instead.
-* **Ongoing guardrails** — release job wall-clock (setup should stay under ~30s once the image
-  lands); a Renovate PR against the image lockfile is the only way the toolchain moves.
+* **Immediate proof** — all three images build and were smoke-tested locally: `semantic-release`
+  25.0.8 resolvable, `require('@webgrip/semantic-release-config')` resolving from an arbitrary cwd
+  (i.e. `NODE_PATH` works), `yq` 4.44.3, `git`, and for the rust image `cargo` +
+  `semantic-release-cargo`. The Dockerfile re-asserts each of these at build time, so a lockfile
+  bump that breaks the contract fails the build rather than a release.
+* **Ongoing guardrails** — release job wall-clock (setup should stay under ~30s); the build-time
+  major assertion; Renovate PRs against the lockfiles in `webgrip/infrastructure` as the only way
+  the toolchain moves.
 
 ## Compliance, Security & Privacy Impact
 
-Net positive: the release toolchain becomes a scannable, pinned artifact instead of a nightly
-re-resolve of ~430 packages fetched onto a runner that holds a release token. No data
-classification change. Registry credentials for the shared config move to a run-scoped npmrc in
-this PR, so a release token no longer persists in `$HOME/.npmrc` on a shared runner.
+Net positive: the release toolchain becomes a scannable, pinned artifact instead of a re-resolve of
+~430 packages fetched onto a runner that holds a release token. The `@webgrip` scope is read
+anonymously (the registry allows it), so no npm credential is written to a runner's `$HOME` at all
+in the image path — the previous flow wrote a release token into `~/.npmrc` on a pool where `HOME`
+outlives the job. No data classification change.
 
 ## Notes
 
-* **Related Decisions**: ADR 0002 (two-tree layout — the image serves the `.forgejo` tree; the
+* **Related Decisions**: ADR 0002 (two-tree layout — the images serve the `.forgejo` tree; the
   frozen `.github` tree keeps installing), ADR 0004 (`CI_TOKEN` identity used by these jobs).
+* **Where the images are built**: `webgrip/infrastructure` — `ops/docker/semantic-release/`
+  (one Dockerfile, three targets, three committed lockfiles, Renovate-owned).
 * **Follow-ups / TODOs**:
-  1. Create the image (repo TBD — `webgrip/infrastructure` alongside `rust-releaser`, or this
-     repo under `ops/docker/semantic-release/`), with `ENV SEMREL_PREBAKED=/opt/semrel/node_modules`.
-  2. Add `container:` support to the release reusables so a consumer can opt in by tag.
+  1. Publish the images from `webgrip/infrastructure` **before** merging the composite defaults
+     here; the reusables default to them, so a missing image fails at the container pull.
+  2. Roll out on `ploeg` first, then the chart trains.
   3. Retire the unversioned `SEMREL_PREBAKED` bake on the ci-runner host image once consumers move.
+  4. `rust-semantic-release.yml` (the workflow, not the composite) still builds with hardcoded
+     `mybin` targets and calls `npx semantic-release` directly; it needs a real consumer before it
+     can be pointed at the rust image.
 
 ---
 

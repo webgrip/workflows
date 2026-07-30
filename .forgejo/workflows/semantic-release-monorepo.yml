@@ -28,8 +28,20 @@ on:
         required: false
         default: false
         type: boolean
+      toolchain-image:
+        description: >-
+          The image the release runs in — node, git, yq, semantic-release 25,
+          @webgrip/semantic-release-config and semantic-release-monorepo, all locked (ADR 0005).
+          Built and released in webgrip/infrastructure (ops/docker/semantic-release-monorepo), so
+          the tag is that image's own release version and this default is bumped deliberately, by a
+          PR here, when the toolchain moves. Override with an image built FROM it if your prepareCmd
+          needs extra tooling (helm, php, docker CLI).
+        required: false
+        # renovate: datasource=docker depName=harbor.webgrip.dev/webgrip/semantic-release-monorepo
+        default: 'harbor.webgrip.dev/webgrip/semantic-release-monorepo:1.0.0'
+        type: string
       config-version:
-        description: 'Pin of @webgrip/semantic-release-config to install (npm dist-tag or semver range); threads to the composite.'
+        description: 'Pin of @webgrip/semantic-release-config for the no-image fallback only; inside the toolchain image the image tag IS the version.'
         required: false
         default: '1'
         type: string
@@ -97,7 +109,12 @@ jobs:
       inputs.enabled
       && (inputs.only-refs == '' || contains(format(' {0} ', inputs.only-refs), format(' {0} ', github.ref)))
       && !contains(format(' {0} ', inputs.skip-refs), format(' {0} ', github.ref))
-    runs-on: docker # bare pool, no `container:` — JS actions run via the pool's node
+    runs-on: docker
+    # The toolchain is the image, not an install (ADR 0005): node (which also runs the JS actions),
+    # git, yq, semantic-release and semantic-release-monorepo are baked in, so the job does no
+    # dependency resolution at all.
+    container:
+      image: ${{ inputs.toolchain-image }}
     permissions:
       contents: write # push release commit + tag
     outputs:
