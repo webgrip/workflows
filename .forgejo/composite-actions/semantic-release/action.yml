@@ -1,7 +1,7 @@
 name: "[Action] Semantic Release"
 description: >-
   Cut a repository's release with semantic-release. Expects to run in the toolchain image
-  (harbor.webgrip.dev/webgrip/semantic-release:0.1.0 — see docs/adrs/0005-semantic-release-toolchain-image.md),
+  (harbor.webgrip.dev/webgrip/semantic-release:0.1.1 — see docs/adrs/0005-semantic-release-toolchain-image.md),
   which bakes in node, git, yq, semantic-release 25 and @webgrip/semantic-release-config, so this
   action installs nothing and this file is only about RELEASE semantics. Output contract: the
   resolved config must include an @semantic-release/exec successCmd that writes
@@ -153,7 +153,7 @@ runs:
         # still releases — unlocked and loudly, which is the point: it should be visible, not fatal.
         sr="${SEMREL_PREBAKED:-/nonexistent}/.bin/semantic-release"
         if [[ ! -x "$sr" ]]; then
-          echo "::warning::not running in the toolchain image (SEMREL_PREBAKED unset) - installing an UNLOCKED toolchain. Run this job in harbor.webgrip.dev/webgrip/semantic-release:0.1.0 (ADR 0005, built in webgrip/infrastructure)."
+          echo "::warning::not running in the toolchain image (SEMREL_PREBAKED unset) - installing an UNLOCKED toolchain. Run this job in harbor.webgrip.dev/webgrip/semantic-release:0.1.1 (ADR 0005, built in webgrip/infrastructure)."
           npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
           npm install --no-save --no-package-lock --no-audit --no-fund \
             "@webgrip/semantic-release-config@${{ inputs.config-version }}" semantic-release-helm3@2.10.0
