@@ -149,11 +149,21 @@ runs:
         git config "http.${forge_url}/.extraheader" "AUTHORIZATION: basic ${auth_b64}"
         trap 'git config --unset-all "http.'"${forge_url}"'/.extraheader" || true' EXIT
 
-        # The toolchain is the image (ADR 0005). The fallback exists so a job that is NOT run in it
-        # still releases — unlocked and loudly, which is the point: it should be visible, not fatal.
+        # The toolchain is the image (ADR 0005); the fallback installs, unlocked and loudly.
+        # Probe rather than test for the file: pre-ADR-0005 ci-runners also export SEMREL_PREBAKED,
+        # at an sr24 tree with no shared config, which would pass an -x check and die at config load.
         sr="${SEMREL_PREBAKED:-/nonexistent}/.bin/semantic-release"
+        if [[ -x "$sr" ]] && ! NODE_PATH="${SEMREL_PREBAKED:-}" node -e '
+              const v = require("semantic-release/package.json").version;
+              if (v.split(".")[0] !== "25") throw new Error("semantic-release " + v);
+              require.resolve("@webgrip/semantic-release-config");
+              require.resolve("semantic-release-helm3");
+            ' 2>/dev/null; then
+          echo "::warning::SEMREL_PREBAKED (${SEMREL_PREBAKED:-}) is not the ADR-0005 toolchain; ignoring it."
+          sr=""
+        fi
         if [[ ! -x "$sr" ]]; then
-          echo "::warning::not running in the toolchain image (SEMREL_PREBAKED unset) - installing an UNLOCKED toolchain. Run this job in harbor.webgrip.dev/webgrip/semantic-release:0.1.2 (ADR 0005, built in webgrip/infrastructure)."
+          echo "::warning::no usable prebaked toolchain; installing an UNLOCKED one. Run in harbor.webgrip.dev/webgrip/semantic-release:0.1.2 or on a ci-runner that bakes it (ADR 0005)."
           npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
           npm install --no-save --no-package-lock --no-audit --no-fund \
             "@webgrip/semantic-release-config@${{ inputs.config-version }}" semantic-release-helm3@2.10.0

@@ -104,9 +104,21 @@ runs:
         git config "http.${forge_url}/.extraheader" "AUTHORIZATION: basic ${auth_b64}"
         trap 'git config --unset-all "http.'"${forge_url}"'/.extraheader" || true' EXIT
 
+        # Probe rather than test for the file: pre-ADR-0005 ci-runners also export SEMREL_PREBAKED,
+        # at an sr24 tree with no shared config. It also handles a ci-runner baking the MONOREPO
+        # toolchain, which has no semantic-release-cargo — rust correctly falls through there.
         sr="${SEMREL_PREBAKED:-/nonexistent}/.bin/semantic-release"
+        if [[ -x "$sr" ]] && ! NODE_PATH="${SEMREL_PREBAKED:-}" node -e '
+              const v = require("semantic-release/package.json").version;
+              if (v.split(".")[0] !== "25") throw new Error("semantic-release " + v);
+              require.resolve("@webgrip/semantic-release-config");
+              require.resolve("semantic-release-cargo");
+            ' 2>/dev/null; then
+          echo "::warning::SEMREL_PREBAKED (${SEMREL_PREBAKED:-}) is not the ADR-0005 rust toolchain; ignoring it."
+          sr=""
+        fi
         if [[ ! -x "$sr" ]]; then
-          echo "::warning::not running in the toolchain image (SEMREL_PREBAKED unset) - installing an UNLOCKED toolchain. Run this job in harbor.webgrip.dev/webgrip/semantic-release-rust:0.1.0 (ADR 0005, built in webgrip/infrastructure)."
+          echo "::warning::no usable prebaked toolchain; installing an UNLOCKED one. Run in harbor.webgrip.dev/webgrip/semantic-release-rust:0.1.0 (ADR 0005)."
           npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
           npm install --no-save --no-package-lock --no-audit --no-fund \
             "@webgrip/semantic-release-config@${{ inputs.config-version }}" semantic-release-cargo@2.4.2

@@ -130,9 +130,20 @@ runs:
         # The toolchain is the image (ADR 0005). The fallback exists so a job that is NOT run in it
         # still releases — unlocked and loudly, which is the point: it should be visible, not fatal.
         # NB: install into the PACKAGE dir, since that is the cwd semantic-release resolves from.
+        # Probe rather than test for the file: pre-ADR-0005 ci-runners also export SEMREL_PREBAKED,
+        # at an sr24 tree with no shared config, which would pass an -x check and die at config load.
         sr="${SEMREL_PREBAKED:-/nonexistent}/.bin/semantic-release"
+        if [[ -x "$sr" ]] && ! NODE_PATH="${SEMREL_PREBAKED:-}" node -e '
+              const v = require("semantic-release/package.json").version;
+              if (v.split(".")[0] !== "25") throw new Error("semantic-release " + v);
+              require.resolve("@webgrip/semantic-release-config");
+              require.resolve("semantic-release-monorepo");
+            ' 2>/dev/null; then
+          echo "::warning::SEMREL_PREBAKED (${SEMREL_PREBAKED:-}) is not the ADR-0005 toolchain; ignoring it."
+          sr=""
+        fi
         if [[ ! -x "$sr" ]]; then
-          echo "::warning::not running in the toolchain image (SEMREL_PREBAKED unset) - installing an UNLOCKED toolchain. Run this job in harbor.webgrip.dev/webgrip/semantic-release-monorepo:0.1.0 (ADR 0005, built in webgrip/infrastructure)."
+          echo "::warning::no usable prebaked toolchain; installing an UNLOCKED one. Run in harbor.webgrip.dev/webgrip/semantic-release-monorepo:0.1.0 or on a ci-runner that bakes it (ADR 0005)."
           npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
           npm install --no-save --no-package-lock --no-audit --no-fund \
             "@webgrip/semantic-release-config@${{ inputs.config-version }}" semantic-release-monorepo@8.0.2
@@ -145,7 +156,29 @@ runs:
         args=(--repository-url "${forge_url}/${{ github.repository }}.git")
         [[ "$dry_run" == "true" ]] && args+=(--dry-run)
 
-        "$sr" "${args[@]}"
+        # Retry the version-bump push-back race between sibling package jobs (Forgejo ignores
+        # strategy.max-parallel, so they really are concurrent). Both symptoms lose before the tag
+        # exists, so reset-and-rerun is safe. The log grep is needed because the behind-remote
+        # symptom exits 0 WITHOUT publishing — run 141 dropped two releases that way.
+        for attempt in 1 2 3; do
+          set +e
+          "$sr" "${args[@]}" 2>&1 | tee /tmp/semrel.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -eq 0 ] && ! grep -q 'is behind the remote one' /tmp/semrel.log; then
+            break
+          fi
+          if [ "$attempt" -lt 3 ] && grep -Eq 'fetch first|non-fast-forward|is behind the remote one' /tmp/semrel.log; then
+            echo "::warning::a concurrent release job moved ${GITHUB_REF_NAME} mid-run (attempt ${attempt}); resetting onto the updated branch and retrying"
+            git -C "$GITHUB_WORKSPACE" fetch origin "$GITHUB_REF_NAME"
+            git -C "$GITHUB_WORKSPACE" reset --hard "origin/$GITHUB_REF_NAME"
+            continue
+          fi
+          # Retries exhausted, or a non-retryable error. rc can still be 0 here (behind-remote on
+          # the final attempt) — that is a DROPPED release, not a success. Fail loudly.
+          [ "$rc" -eq 0 ] && rc=1
+          exit "$rc"
+        done
 
     - name: Release summary
       if: always()
