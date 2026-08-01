@@ -175,6 +175,19 @@ runs:
           ${{ inputs.docker-build-args }}
         cache-from: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }}
         cache-to: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }},mode=max,compression=zstd
+        # SLSA build provenance + an SBOM, emitted by BuildKit as OCI referrers alongside the image.
+        #
+        # This closes the largest regression from the GitHub migration. webgrip/infrastructure
+        # ADR-0004 records it plainly: actions/attest-build-provenance had no Forgejo analog, so the
+        # signature proved WHO built an image and nothing proved HOW. BuildKit generates the same
+        # in-toto SLSA predicate natively, with no GitHub involvement.
+        #
+        # mode=max records the full build definition including build-args. Verified safe for current
+        # callers — the args in use are REGISTRY_* prefixes and IMAGE_CREATED/VERSION/REVISION, none
+        # of them secret. DO NOT pass a credential as a build-arg while this is on; use a secret
+        # mount, which is the correct mechanism regardless.
+        provenance: mode=max
+        sbom: true
 
     - name: Render build summary
       if: always()
