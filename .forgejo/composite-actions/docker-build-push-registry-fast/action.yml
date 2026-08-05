@@ -8,6 +8,30 @@ description: >
   the original is removed once nothing references it. buildx is KEPT (the docker-container driver is
   required for `cache-to: type=registry` to export); the Harbor registry layer cache is unchanged.
 
+  # WHY THIS CALLS THE DOCKER CLI INSTEAD OF docker/*-action
+  #
+  # Measured on run 224: "Set up job" took 2m04s against 21s of actual build. act does not download
+  # actions the way GitHub does. GitHub's runner fetches a TARBALL of a single ref from the API —
+  # build-push-action@v6 is ~1MB and lands in under a second. act `git clone`s the action repo,
+  # full history, all refs, into a per-pod cache that dies with the pod:
+  #
+  #   docker/build-push-action@v6    181 MB   58.6s
+  #   docker/login-action@v3         134 MB   27.7s
+  #   docker/setup-buildx-action@v3   66 MB   15.9s
+  #   docker/setup-qemu-action@v3     35 MB    9.0s   <- and its `if:` was FALSE; act fetches
+  #                                                      every `uses:` before evaluating conditions
+  #   actions/github-script@v8         8 MB    2.9s
+  #
+  # ~416 MB of git history to format command-line arguments. The actions are not wasteful; act's
+  # fetch strategy is, and it is not configurable. The ci-runner image already ships the docker CLI
+  # and buildx v0.34.1 at /usr/local/lib/docker/cli-plugins/docker-buildx, so the wrappers buy
+  # nothing here that the CLI does not already do.
+  #
+  # This is not a new pattern in this codebase: @webgrip/semantic-release-config's dockerVerifyGate()
+  # already drives `docker buildx create` + `docker buildx build` directly, in the release job, with
+  # no setup action anywhere. The invocation below deliberately mirrors the one it has been running
+  # in production — same driver, same buildkit image, same shape.
+
 inputs:
   registry:
     description: "Target registry host, e.g. harbor.webgrip.dev."
@@ -39,37 +63,173 @@ inputs:
     description: "Layer compression for the pushed image: 'gzip' (default) or 'zstd'. zstd layers decompress ~2x faster on pull; opt-in because very old dockerd cannot pull zstd."
     required: false
     default: "gzip"
+  buildkit-image:
+    description: "BuildKit image for the docker-container driver. Defaults to the Harbor dockerhub proxy so the builder itself is not an anonymous Docker Hub pull on every build."
+    required: false
+    # Tag AND digest, because a digest always wins over a tag — so pinning both lets Renovate move
+    # the tag while the build keeps using exactly the image that was reviewed. `buildx-stable-1` is
+    # a FLOATING tag that upstream repoints; without the digest, the thing bootstrapping every build
+    # in this org could change under us with no commit anywhere.
+    # renovate: datasource=docker depName=moby/buildkit versioning=docker
+    default: "harbor.webgrip.dev/dockerhub/moby/buildkit:buildx-stable-1@sha256:2f5adac4ecd194d9f8c10b7b5d7bceb5186853db1b26e5abd3a657af0b7e26ec"
+  buildkitd-endpoint:
+    description: >-
+      Address of a long-lived BuildKit daemon to build against instead of starting a throwaway one.
+      Probed before use; if it does not answer, the build falls back to the docker-container driver
+      and still works. Set to empty to force the throwaway builder.
+    required: false
+    # forgejo-buildkitd's Service is internalTrafficPolicy: Local, so this name resolves to the
+    # daemon on THIS node — same shape as the dind Service, and the reason the endpoint can be a
+    # fixed DNS name rather than a per-pod node IP.
+    default: "tcp://forgejo-buildkitd.forgejo.svc.cluster.local:1234"
+  binfmt-image:
+    description: "binfmt installer image, used only when a non-amd64 platform is requested."
+    required: false
+    # Was `:latest` in the first draft of this change, which is worse than what it replaced: an
+    # unpinned, mutable image run with --privileged. Digest-pinned.
+    # renovate: datasource=docker depName=tonistiigi/binfmt versioning=docker
+    default: "harbor.webgrip.dev/dockerhub/tonistiigi/binfmt:latest@sha256:400a4873b838d1b89194d982c45e5fb3cda4593fbfd7e08a02e76b03b21166f0"
 
 runs:
   using: "composite"
   steps:
     - uses: actions/checkout@v4
 
-    - name: Log in to Docker Hub (authenticated pulls)
-      if: env.DOCKER_USERNAME != '' && env.DOCKER_TOKEN != ''
-      uses: docker/login-action@v3
-      with:
-        username: ${{ env.DOCKER_USERNAME }}
-        password: ${{ env.DOCKER_TOKEN }}
+    # Fail here rather than 40 lines into a buildx invocation with a confusing error. buildx comes
+    # from the ci-runner image (inherited from the actions-runner base), which is a property no
+    # workflow can see — so assert it instead of assuming it.
+    - name: Verify docker toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        command -v docker >/dev/null \
+          || { echo "::error::docker CLI not on PATH. This action drives the CLI directly; runs-on must provide it."; exit 1; }
+        docker buildx version >/dev/null 2>&1 \
+          || { echo "::error::docker buildx plugin missing. The ci-runner image is expected to ship it at /usr/local/lib/docker/cli-plugins/docker-buildx."; exit 1; }
 
-    # QEMU/binfmt is only needed to build a non-host arch under emulation. Skip it for the
-    # amd64-only default (the homelab's only arch) — this is the main speedup over the base action.
-    - name: Set up QEMU (only when a non-amd64 arch is requested)
+    - name: Log in to registries
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        DOCKER_USERNAME: ${{ env.DOCKER_USERNAME }}
+        DOCKER_TOKEN: ${{ env.DOCKER_TOKEN }}
+        REGISTRY_USERNAME: ${{ env.REGISTRY_USERNAME }}
+        REGISTRY_TOKEN: ${{ env.REGISTRY_TOKEN }}
+      run: |
+        set -euo pipefail
+
+        # --password-stdin, never as an argv: an argument is visible in the daemon's process table
+        # and in any `set -x` output. This is also what login-action does under the hood.
+        if [[ -n "${DOCKER_USERNAME:-}" && -n "${DOCKER_TOKEN:-}" ]]; then
+          printf '%s' "$DOCKER_TOKEN" | docker login --username "$DOCKER_USERNAME" --password-stdin
+          echo "logged in to Docker Hub for authenticated base-image pulls"
+        fi
+
+        if [[ -z "${REGISTRY_USERNAME:-}" || -z "${REGISTRY_TOKEN:-}" ]]; then
+          echo "::error::REGISTRY_USERNAME/REGISTRY_TOKEN are empty; cannot push to ${REGISTRY}."
+          exit 1
+        fi
+        printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY" --username "$REGISTRY_USERNAME" --password-stdin
+
+    # binfmt is only needed to build a non-host arch under emulation. Skipped for the amd64-only
+    # default (the homelab's only arch) — this is the main speedup over the base action. Unlike the
+    # `uses:` it replaces, this genuinely costs nothing when the condition is false: act fetched
+    # setup-qemu-action's 35 MB regardless of its `if:`, because conditions are evaluated after
+    # every action in the job has already been resolved.
+    - name: Install binfmt (only when a non-amd64 arch is requested)
       if: ${{ inputs.platforms != 'linux/amd64' }}
-      uses: docker/setup-qemu-action@v3
-    # buildx stays: `cache-to: type=registry` needs the docker-container driver it provides.
-    - uses: docker/setup-buildx-action@v3
-    - uses: docker/login-action@v3
-      with:
-        registry: ${{ inputs.registry }}
-        username: ${{ env.REGISTRY_USERNAME }}
-        password: ${{ env.REGISTRY_TOKEN }}
+      shell: bash
+      env:
+        BINFMT_IMAGE: ${{ inputs.binfmt-image }}
+      run: |
+        set -euo pipefail
+        docker run --privileged --rm "$BINFMT_IMAGE" --install all
+
+    - name: Select a builder
+      id: builder
+      shell: bash
+      env:
+        BUILDKIT_IMAGE: ${{ inputs.buildkit-image }}
+        PLATFORMS: ${{ inputs.platforms }}
+        BUILDKITD_ENDPOINT: ${{ inputs.buildkitd-endpoint }}
+      run: |
+        set -euo pipefail
+
+        # PREFER THE SHARED PER-NODE DAEMON, FALL BACK TO A THROWAWAY ONE.
+        #
+        # The docker-container driver starts a buildkit container, bootstraps it, builds, and is
+        # torn down — per job. Its LOCAL cache dies with it, so every build is cache-cold locally
+        # and leans entirely on `cache-from type=registry`: a network round-trip per layer against
+        # Harbor for what should be a disk read. forgejo-buildkitd (homelab-cluster) is a
+        # long-lived DaemonSet whose cache lives on node disk and survives.
+        #
+        # The fallback is not decoration. forgejo-buildkitd is deliberately NOT a dependency of the
+        # runner pool, so it can be absent, draining, or not yet rolled out — and this composite
+        # also runs in repos and contexts that may not have it at all. When it cannot be reached,
+        # builds must keep working exactly as they did before, slower.
+        #
+        # A unique name per job either way: buildx keeps its builder registry in the CLIENT's
+        # ~/.docker/buildx, which is empty in a fresh pod, while a docker-container builder lives
+        # on the shared per-node dind daemon and outlives it. A fixed name would collide with a
+        # container the client has no record of.
+        name="builder-${GITHUB_RUN_ID:-0}-${GITHUB_JOB:-job}-$RANDOM"
+        driver=docker-container
+
+        # AMD64 ONLY on the remote path. `buildctl debug workers` reports
+        # linux/amd64,linux/amd64/v2,linux/amd64/v3,linux/386 — buildkitd carries no emulation, and
+        # the binfmt step above registers handlers via the dind daemon, not inside buildkitd's
+        # container. Whether those kernel registrations are visible to it is unverified, so a
+        # non-amd64 request keeps the driver that is known to work rather than one that might.
+        if [ -n "${BUILDKITD_ENDPOINT}" ] && [ "${PLATFORMS}" = "linux/amd64" ]; then
+          host="${BUILDKITD_ENDPOINT#tcp://}"; host="${host%%:*}"
+          port="${BUILDKITD_ENDPOINT##*:}"
+          # Probe with bash's /dev/tcp: resolution AND reachability in one go, no extra tooling.
+          # Same technique the runner entrypoint uses to pick its dind endpoint.
+          if (exec 3<>"/dev/tcp/${host}/${port}") 2>/dev/null; then
+            exec 3>&- || true
+            if docker buildx create --name "$name" --driver remote --use "${BUILDKITD_ENDPOINT}" >/dev/null 2>&1 \
+               && docker buildx inspect --bootstrap --builder "$name" >/dev/null 2>&1; then
+              driver=remote
+            else
+              # Reachable but unusable. Remove the half-made client entry before falling back,
+              # otherwise the name is taken and the docker-container create below fails too.
+              docker buildx rm --force "$name" >/dev/null 2>&1 || true
+              echo "::warning::${BUILDKITD_ENDPOINT} answered but the remote builder did not come up; falling back to docker-container."
+            fi
+          else
+            echo "::warning::${BUILDKITD_ENDPOINT} is not reachable; falling back to docker-container. Builds still work, with a cold local cache."
+          fi
+        fi
+
+        if [ "$driver" = "docker-container" ]; then
+          # NOTE the entitlement flags, which the remote path does NOT carry: they configure a
+          # buildkitd this job starts, and forgejo-buildkitd is started without them. No Dockerfile
+          # in webgrip/infrastructure uses `RUN --security=insecure` or `--network=host`, so nothing
+          # depends on them today; if one ever does, it fails loudly on the remote path rather than
+          # silently building something different.
+          docker buildx create \
+            --name "$name" \
+            --driver docker-container \
+            --driver-opt "image=${BUILDKIT_IMAGE}" \
+            --buildkitd-flags '--allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host' \
+            --use >/dev/null
+          docker buildx inspect --bootstrap --builder "$name" >/dev/null
+          echo "buildx builder $name ready (docker-container, buildkit: ${BUILDKIT_IMAGE})"
+        else
+          echo "buildx builder $name ready (remote: ${BUILDKITD_ENDPOINT}, shared node cache)"
+        fi
+
+        echo "name=$name" >> "$GITHUB_OUTPUT"
+        echo "driver=$driver" >> "$GITHUB_OUTPUT"
 
     - name: Enforce registry tag format
       id: normalized-tags
       shell: bash
       env:
         REGISTRY: ${{ inputs.registry }}
+        # Via env, not `${{ }}` interpolated into the script body: a tag containing a quote or a
+        # backtick would otherwise be pasted straight into bash source.
+        RAW_TAGS: ${{ inputs.docker-tags }}
       run: |
         set -euo pipefail
 
@@ -78,7 +238,7 @@ runs:
           exit 1
         fi
 
-        raw="${{ inputs.docker-tags }}"
+        raw="$RAW_TAGS"
         if [[ -z "${raw//[[:space:]]/}" ]]; then
           echo "docker-tags input is empty" >&2
           exit 1
@@ -136,62 +296,146 @@ runs:
     - name: Get cache tag
       id: cache-tag
       shell: bash
+      env:
+        TAGS: ${{ steps.normalized-tags.outputs.tags }}
       run: |
         # Split the normalized tags by newline, ignore empty lines, and select the first tag.
-        primary=$(echo "${{ steps.normalized-tags.outputs.tags }}" | grep -v '^\s*$' | head -n 1)
+        primary=$(echo "$TAGS" | grep -v '^\s*$' | head -n 1)
         # Use :cache to avoid conflicts with the image's actual release tags.
         cache="${primary%:*}:cache"
         echo "cache_tag=$cache" >> "$GITHUB_OUTPUT"
-    - name: Compute image output spec
-      id: image-output
-      shell: bash
-      env:
-        COMPRESSION: ${{ inputs.compression }}
-      run: |
-        # zstd layers decompress ~2x faster on pull; opt-in because very old dockerd cannot
-        # pull zstd. When zstd, push is expressed via an explicit image output (replacing
-        # `push: true`); when gzip, the output stays empty and the invocation is unchanged.
-        if [[ "$COMPRESSION" == "zstd" ]]; then
-          echo "outputs=type=image,compression=zstd,compression-level=3,force-compression=true,push=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "outputs=" >> "$GITHUB_OUTPUT"
-        fi
+
     - name: Build and push image
       id: build
-      uses: docker/build-push-action@v6
+      shell: bash
       env:
-        DOCKER_BUILD_SUMMARY: "false"
-      with:
-        context: ${{ inputs.docker-context }}
-        file: ${{ inputs.docker-context }}/${{ inputs.docker-file }}
-        platforms: ${{ inputs.platforms }}
-        # zstd pushes via the image output spec instead; both at once would double-express push.
-        push: ${{ inputs.compression != 'zstd' }}
-        outputs: ${{ steps.image-output.outputs.outputs }}
-        tags: |
-          ${{ steps.normalized-tags.outputs.tags }}
-        target: ${{ inputs.docker-target }}
-        build-args: |
-          ${{ inputs.docker-build-args }}
-        cache-from: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }}
-        cache-to: type=registry,ref=${{ steps.cache-tag.outputs.cache_tag }},mode=max,compression=zstd
-        # SLSA build provenance + an SBOM, emitted by BuildKit as OCI referrers alongside the image.
+        BUILDER: ${{ steps.builder.outputs.name }}
+        CONTEXT: ${{ inputs.docker-context }}
+        DOCKERFILE: ${{ inputs.docker-file }}
+        PLATFORMS: ${{ inputs.platforms }}
+        TARGET: ${{ inputs.docker-target }}
+        COMPRESSION: ${{ inputs.compression }}
+        CACHE_TAG: ${{ steps.cache-tag.outputs.cache_tag }}
+        TAGS: ${{ steps.normalized-tags.outputs.tags }}
+        RAW_BUILD_ARGS: ${{ inputs.docker-build-args }}
+      run: |
+        set -euo pipefail
+
+        args=(
+          buildx build
+          --builder "$BUILDER"
+          --file "${CONTEXT}/${DOCKERFILE}"
+          --platform "$PLATFORMS"
+          --cache-from "type=registry,ref=${CACHE_TAG}"
+          --cache-to   "type=registry,ref=${CACHE_TAG},mode=max,compression=zstd"
+          # SLSA build provenance + an SBOM, emitted by BuildKit as OCI referrers alongside the
+          # image.
+          #
+          # This closes the largest regression from the GitHub migration. webgrip/infrastructure
+          # ADR-0004 records it plainly: actions/attest-build-provenance had no Forgejo analog, so
+          # the signature proved WHO built an image and nothing proved HOW. BuildKit generates the
+          # same in-toto SLSA predicate natively, with no GitHub involvement.
+          #
+          # mode=max records the full build definition including build-args. Verified safe for
+          # current callers — the args in use are REGISTRY_* prefixes and
+          # IMAGE_CREATED/VERSION/REVISION, none of them secret. DO NOT pass a credential as a
+          # build-arg while this is on; use a secret mount, which is the correct mechanism
+          # regardless.
+          # `--provenance=mode=max`, not `--provenance mode=max`: buildx declares both of these with
+          # a NoOptDefVal so that a bare `--sbom` means `--sbom=true`. Passed as two argv elements,
+          # the flag would take its default and the VALUE would be parsed as a positional argument —
+          # silently becoming the build context.
+          --provenance=mode=max
+          --sbom=true
+          --metadata-file /tmp/buildx-metadata.json
+        )
+
+        while IFS= read -r line; do
+          tag="${line//$'\r'/}"
+          [[ -z "${tag//[[:space:]]/}" ]] && continue
+          args+=(--tag "$tag")
+        done <<< "$TAGS"
+
+        # Build-args arrive as a newline-separated block. Each line is passed as ONE argv element so
+        # a value containing spaces survives; only blank lines are dropped.
+        while IFS= read -r line; do
+          arg="${line//$'\r'/}"
+          [[ -z "${arg//[[:space:]]/}" ]] && continue
+          args+=(--build-arg "$arg")
+        done <<< "$RAW_BUILD_ARGS"
+
+        [[ -n "${TARGET//[[:space:]]/}" ]] && args+=(--target "$TARGET")
+
+        # zstd layers decompress ~2x faster on pull; opt-in because very old dockerd cannot pull
+        # zstd. When zstd, push is expressed via an explicit image output; when gzip, plain --push.
+        # Never both — that would double-express the push.
+        if [[ "$COMPRESSION" == "zstd" ]]; then
+          args+=(--output "type=image,compression=zstd,compression-level=3,force-compression=true,push=true")
+        else
+          args+=(--push)
+        fi
+
+        args+=("$CONTEXT")
+
+        printf 'docker'; printf ' %q' "${args[@]}"; printf '\n'
+        docker "${args[@]}"
+
+        # buildx writes the pushed digest here; build-push-action's `digest` output is the same
+        # value read the same way.
+        digest=""
+        if [[ -f /tmp/buildx-metadata.json ]]; then
+          digest="$(jq -r '."containerimage.digest" // empty' /tmp/buildx-metadata.json)"
+          {
+            echo 'metadata<<EOF'
+            cat /tmp/buildx-metadata.json
+            echo
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+        fi
+        echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+    # Replaces the post-steps the actions registered, which act DOES run — they are just folded into
+    # "Complete job" instead of appearing as their own step, which is why they are easy to miss:
+    #
+    #   ⭐ Run Post Set up Docker Buildx
+    #     [command]/usr/bin/docker buildx rm builder-0798c774-…
+    #   ⭐ Run Post Log in to Harbor
+    #     [command]/usr/bin/docker logout harbor.webgrip.dev
+    #
+    # So this is not new cleanup; it is the cleanup that already existed, made visible. The buildkit
+    # container matters because it runs on the shared per-node dind daemon rather than in this pod,
+    # so it would outlive the job. The logout matters less — pods are ephemeral and take one job —
+    # but dropping it would still be a silent behaviour change.
+    #
+    # The real fix is to stop creating a builder per job at all: a long-lived buildkitd reached via
+    # the `remote` driver removes the create, the bootstrap AND this step, and keeps a warm local
+    # cache between builds instead of starting cold every time.
+    - name: Clean up builder and credentials
+      if: always()
+      shell: bash
+      env:
+        BUILDER: ${{ steps.builder.outputs.name }}
+        DRIVER: ${{ steps.builder.outputs.driver }}
+        REGISTRY: ${{ inputs.registry }}
+        DOCKER_USERNAME: ${{ env.DOCKER_USERNAME }}
+      run: |
+        # Only the docker-container driver leaves anything behind. It creates a buildkit container
+        # on the shared per-node dind daemon, which outlives this pod — that is the whole reason a
+        # teardown exists at all, and setup-buildx-action was doing exactly this in a post-step that
+        # act folds invisibly into "Complete job".
         #
-        # This closes the largest regression from the GitHub migration. webgrip/infrastructure
-        # ADR-0004 records it plainly: actions/attest-build-provenance had no Forgejo analog, so the
-        # signature proved WHO built an image and nothing proved HOW. BuildKit generates the same
-        # in-toto SLSA predicate natively, with no GitHub involvement.
-        #
-        # mode=max records the full build definition including build-args. Verified safe for current
-        # callers — the args in use are REGISTRY_* prefixes and IMAGE_CREATED/VERSION/REVISION, none
-        # of them secret. DO NOT pass a credential as a build-arg while this is on; use a secret
-        # mount, which is the correct mechanism regardless.
-        provenance: mode=max
-        sbom: true
+        # The remote driver creates NOTHING remotely. Its builder is a line in the client's
+        # ~/.docker/buildx, and the client is an ephemeral pod. Nothing to remove.
+        if [[ "${DRIVER:-}" == "docker-container" && -n "${BUILDER:-}" ]]; then
+          docker buildx rm --force "$BUILDER" >/dev/null 2>&1
+        fi
+        docker logout "$REGISTRY" >/dev/null 2>&1
+        [[ -n "${DOCKER_USERNAME:-}" ]] && docker logout >/dev/null 2>&1
+        exit 0
 
     - name: Render build summary
       if: always()
-      uses: https://github.com/actions/github-script@v8
+      shell: bash
       env:
         BUILD_DIGEST: ${{ steps.build.outputs.digest }}
         BUILD_METADATA: ${{ steps.build.outputs.metadata }}
@@ -201,59 +445,41 @@ runs:
         BUILD_PLATFORMS: ${{ inputs.platforms }}
         BUILD_TARGET: ${{ inputs.docker-target }}
         BUILD_CACHE_TAG: ${{ steps.cache-tag.outputs.cache_tag }}
-      with:
-        script: |
-          const digest = (process.env.BUILD_DIGEST || '').trim();
-          const metadataRaw = process.env.BUILD_METADATA || '';
-          const tagsRaw = process.env.BUILD_TAGS || '';
-          const contextPath = process.env.BUILD_CONTEXT || '.';
-          const dockerfilePath = process.env.BUILD_FILE || 'Dockerfile';
-          const platforms = process.env.BUILD_PLATFORMS || '';
-          const target = process.env.BUILD_TARGET || '';
-          const cacheTag = process.env.BUILD_CACHE_TAG || '';
+      run: |
+        set -euo pipefail
 
-          const tags = tagsRaw
-            .split('\n')
-            .map((value) => value.trim())
-            .filter(Boolean);
+        ctx="${BUILD_CONTEXT:-.}"
+        {
+          echo "## Docker Build and Push (Registry, fast)"
+          echo ""
+          echo "| Field | Value |"
+          echo "| --- | --- |"
+          echo "| Context | \`${ctx}\` |"
+          echo "| Dockerfile | \`${ctx}/${BUILD_FILE:-Dockerfile}\` |"
+          echo "| Platforms | ${BUILD_PLATFORMS:--} |"
+          echo "| Target | ${BUILD_TARGET:--} |"
+          echo "| Cache tag | \`${BUILD_CACHE_TAG:--}\` |"
+          echo "| Digest | \`${BUILD_DIGEST:--}\` |"
+          echo ""
 
-          const detailsBlock = (title, bodyMarkdown) =>
-            `\n<details><summary><strong>${title}</strong></summary>\n\n${bodyMarkdown}\n</details>\n`;
+          if [[ -n "${BUILD_TAGS//[[:space:]]/}" ]]; then
+            echo "### Published Tags"
+            echo ""
+            while IFS= read -r line; do
+              tag="${line//$'\r'/}"
+              [[ -z "${tag//[[:space:]]/}" ]] && continue
+              echo "- \`${tag}\`"
+            done <<< "$BUILD_TAGS"
+            echo ""
+          fi
 
-          const fenced = (lang, content) =>
-            '```' + lang + '\n' + String(content).replace(/```/g, '`\u200b``') + '\n```';
-
-          core.summary
-            .addHeading('Docker Build and Push (Registry, fast)', 2)
-            .addTable([
-              [
-                { data: 'Field', header: true },
-                { data: 'Value', header: true },
-              ],
-              ['Context', contextPath],
-              ['Dockerfile', `${contextPath}/${dockerfilePath}`],
-              ['Platforms', platforms || '-'],
-              ['Target', target || '-'],
-              ['Cache tag', cacheTag || '-'],
-              ['Digest', digest || '-'],
-            ])
-            .addEOL();
-
-          if (tags.length > 0) {
-            core.summary
-              .addHeading('Published Tags', 3)
-              .addRaw(tags.map((tag) => `- ${tag}`).join('\n'))
-              .addEOL()
-              .addEOL();
-          }
-
-          if (metadataRaw.trim()) {
-            try {
-              const metadata = JSON.parse(metadataRaw);
-              core.summary.addRaw(detailsBlock('Build metadata', fenced('json', JSON.stringify(metadata, null, 2))));
-            } catch {
-              core.summary.addRaw(detailsBlock('Build metadata (raw)', fenced('json', metadataRaw)));
-            }
-          }
-
-          await core.summary.write();
+          if [[ -n "${BUILD_METADATA//[[:space:]]/}" ]]; then
+            echo "<details><summary><strong>Build metadata</strong></summary>"
+            echo ""
+            echo '```json'
+            printf '%s\n' "$BUILD_METADATA"
+            echo '```'
+            echo ""
+            echo "</details>"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
