@@ -82,6 +82,13 @@ inputs:
     # daemon on THIS node — same shape as the dind Service, and the reason the endpoint can be a
     # fixed DNS name rather than a per-pod node IP.
     default: "tcp://forgejo-buildkitd.forgejo.svc.cluster.local:1234"
+  sbom-generator:
+    description: >-
+      Image BuildKit uses to generate the SBOM attestation. Defaults to the Harbor proxy, digest-pinned;
+      BuildKit's own default is docker.io/docker/buildkit-syft-scanner at the floating `stable-1` tag.
+    required: false
+    # renovate: datasource=docker depName=docker/buildkit-syft-scanner versioning=docker
+    default: "harbor.webgrip.dev/dockerhub/docker/buildkit-syft-scanner:stable-1@sha256:79e7b013cbec16bbb436f312819a49a4a57752b2270c1a9332ae1a10fcc82a68"
   binfmt-image:
     description: "binfmt installer image, used only when a non-amd64 platform is requested."
     required: false
@@ -318,6 +325,7 @@ runs:
         CACHE_TAG: ${{ steps.cache-tag.outputs.cache_tag }}
         TAGS: ${{ steps.normalized-tags.outputs.tags }}
         RAW_BUILD_ARGS: ${{ inputs.docker-build-args }}
+        SBOM_GENERATOR: ${{ inputs.sbom-generator }}
       run: |
         set -euo pipefail
 
@@ -346,7 +354,12 @@ runs:
           # the flag would take its default and the VALUE would be parsed as a positional argument —
           # silently becoming the build context.
           --provenance=mode=max
-          --sbom=true
+          # `--sbom=true` makes BuildKit fetch its scanner from docker.io/docker/buildkit-syft-scanner
+          # at the FLOATING `stable-1` tag. Measured on infrastructure run 234: 105.7s, from Docker
+          # Hub, on every build — an unpinned external dependency in the hot path of the job that
+          # produces our provenance. Naming the generator moves it to the Harbor proxy and pins the
+          # digest, like every other image this composite touches.
+          --sbom=generator=${SBOM_GENERATOR}
           --metadata-file /tmp/buildx-metadata.json
         )
 
@@ -357,10 +370,23 @@ runs:
         done <<< "$TAGS"
 
         # Build-args arrive as a newline-separated block. Each line is passed as ONE argv element so
-        # a value containing spaces survives; only blank lines are dropped.
+        # a value containing spaces survives.
+        #
+        # COMMENT LINES ARE DROPPED, and that is not cosmetic. docker/build-push-action stripped
+        # them; the first version of this rewrite did not, so every `#` line in a caller's
+        # docker-build-args block became its own build-arg. Run 234 shows the result:
+        #
+        #   --build-arg '# Route base images through Harbor: the Dockerfiles default these to ...'
+        #   --build-arg '# (so .github/GHCR builds work unchanged); the in-cluster build overrides ...'
+        #
+        # Harmless to the build itself — an undeclared ARG is ignored — but `--provenance=mode=max`
+        # records the full build definition, so the prose was being written into the signed SLSA
+        # attestation of every image. Provenance that contains a Dockerfile comment mangled into an
+        # argument name is provenance nobody will trust.
         while IFS= read -r line; do
           arg="${line//$'\r'/}"
           [[ -z "${arg//[[:space:]]/}" ]] && continue
+          [[ "${arg#"${arg%%[![:space:]]*}"}" == \#* ]] && continue
           args+=(--build-arg "$arg")
         done <<< "$RAW_BUILD_ARGS"
 
