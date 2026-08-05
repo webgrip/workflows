@@ -72,6 +72,16 @@ inputs:
     # in this org could change under us with no commit anywhere.
     # renovate: datasource=docker depName=moby/buildkit versioning=docker
     default: "harbor.webgrip.dev/dockerhub/moby/buildkit:buildx-stable-1@sha256:2f5adac4ecd194d9f8c10b7b5d7bceb5186853db1b26e5abd3a657af0b7e26ec"
+  buildkitd-endpoint:
+    description: >-
+      Address of a long-lived BuildKit daemon to build against instead of starting a throwaway one.
+      Probed before use; if it does not answer, the build falls back to the docker-container driver
+      and still works. Set to empty to force the throwaway builder.
+    required: false
+    # forgejo-buildkitd's Service is internalTrafficPolicy: Local, so this name resolves to the
+    # daemon on THIS node — same shape as the dind Service, and the reason the endpoint can be a
+    # fixed DNS name rather than a per-pod node IP.
+    default: "tcp://forgejo-buildkitd.forgejo.svc.cluster.local:1234"
   binfmt-image:
     description: "binfmt installer image, used only when a non-amd64 platform is requested."
     required: false
@@ -135,28 +145,82 @@ runs:
         set -euo pipefail
         docker run --privileged --rm "$BINFMT_IMAGE" --install all
 
-    - name: Create buildx builder
+    - name: Select a builder
       id: builder
       shell: bash
       env:
         BUILDKIT_IMAGE: ${{ inputs.buildkit-image }}
+        PLATFORMS: ${{ inputs.platforms }}
+        BUILDKITD_ENDPOINT: ${{ inputs.buildkitd-endpoint }}
       run: |
         set -euo pipefail
 
-        # A unique name per job, for the same reason setup-buildx-action generates one: buildx keeps
-        # its builder registry in the CLIENT's ~/.docker/buildx, which is empty in a fresh pod, while
-        # the buildkit CONTAINER lives on the shared per-node dind daemon and outlives it. A fixed
-        # name would collide with a container the client has no record of.
+        # PREFER THE SHARED PER-NODE DAEMON, FALL BACK TO A THROWAWAY ONE.
+        #
+        # The docker-container driver starts a buildkit container, bootstraps it, builds, and is
+        # torn down — per job. Its LOCAL cache dies with it, so every build is cache-cold locally
+        # and leans entirely on `cache-from type=registry`: a network round-trip per layer against
+        # Harbor for what should be a disk read. forgejo-buildkitd (homelab-cluster) is a
+        # long-lived DaemonSet whose cache lives on node disk and survives.
+        #
+        # The fallback is not decoration. forgejo-buildkitd is deliberately NOT a dependency of the
+        # runner pool, so it can be absent, draining, or not yet rolled out — and this composite
+        # also runs in repos and contexts that may not have it at all. When it cannot be reached,
+        # builds must keep working exactly as they did before, slower.
+        #
+        # A unique name per job either way: buildx keeps its builder registry in the CLIENT's
+        # ~/.docker/buildx, which is empty in a fresh pod, while a docker-container builder lives
+        # on the shared per-node dind daemon and outlives it. A fixed name would collide with a
+        # container the client has no record of.
         name="builder-${GITHUB_RUN_ID:-0}-${GITHUB_JOB:-job}-$RANDOM"
-        docker buildx create \
-          --name "$name" \
-          --driver docker-container \
-          --driver-opt "image=${BUILDKIT_IMAGE}" \
-          --buildkitd-flags '--allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host' \
-          --use >/dev/null
-        docker buildx inspect --bootstrap --builder "$name" >/dev/null
+        driver=docker-container
+
+        # AMD64 ONLY on the remote path. `buildctl debug workers` reports
+        # linux/amd64,linux/amd64/v2,linux/amd64/v3,linux/386 — buildkitd carries no emulation, and
+        # the binfmt step above registers handlers via the dind daemon, not inside buildkitd's
+        # container. Whether those kernel registrations are visible to it is unverified, so a
+        # non-amd64 request keeps the driver that is known to work rather than one that might.
+        if [ -n "${BUILDKITD_ENDPOINT}" ] && [ "${PLATFORMS}" = "linux/amd64" ]; then
+          host="${BUILDKITD_ENDPOINT#tcp://}"; host="${host%%:*}"
+          port="${BUILDKITD_ENDPOINT##*:}"
+          # Probe with bash's /dev/tcp: resolution AND reachability in one go, no extra tooling.
+          # Same technique the runner entrypoint uses to pick its dind endpoint.
+          if (exec 3<>"/dev/tcp/${host}/${port}") 2>/dev/null; then
+            exec 3>&- || true
+            if docker buildx create --name "$name" --driver remote --use "${BUILDKITD_ENDPOINT}" >/dev/null 2>&1 \
+               && docker buildx inspect --bootstrap --builder "$name" >/dev/null 2>&1; then
+              driver=remote
+            else
+              # Reachable but unusable. Remove the half-made client entry before falling back,
+              # otherwise the name is taken and the docker-container create below fails too.
+              docker buildx rm --force "$name" >/dev/null 2>&1 || true
+              echo "::warning::${BUILDKITD_ENDPOINT} answered but the remote builder did not come up; falling back to docker-container."
+            fi
+          else
+            echo "::warning::${BUILDKITD_ENDPOINT} is not reachable; falling back to docker-container. Builds still work, with a cold local cache."
+          fi
+        fi
+
+        if [ "$driver" = "docker-container" ]; then
+          # NOTE the entitlement flags, which the remote path does NOT carry: they configure a
+          # buildkitd this job starts, and forgejo-buildkitd is started without them. No Dockerfile
+          # in webgrip/infrastructure uses `RUN --security=insecure` or `--network=host`, so nothing
+          # depends on them today; if one ever does, it fails loudly on the remote path rather than
+          # silently building something different.
+          docker buildx create \
+            --name "$name" \
+            --driver docker-container \
+            --driver-opt "image=${BUILDKIT_IMAGE}" \
+            --buildkitd-flags '--allow-insecure-entitlement security.insecure --allow-insecure-entitlement network.host' \
+            --use >/dev/null
+          docker buildx inspect --bootstrap --builder "$name" >/dev/null
+          echo "buildx builder $name ready (docker-container, buildkit: ${BUILDKIT_IMAGE})"
+        else
+          echo "buildx builder $name ready (remote: ${BUILDKITD_ENDPOINT}, shared node cache)"
+        fi
+
         echo "name=$name" >> "$GITHUB_OUTPUT"
-        echo "buildx builder $name ready (buildkit: ${BUILDKIT_IMAGE})"
+        echo "driver=$driver" >> "$GITHUB_OUTPUT"
 
     - name: Enforce registry tag format
       id: normalized-tags
@@ -351,10 +415,20 @@ runs:
       shell: bash
       env:
         BUILDER: ${{ steps.builder.outputs.name }}
+        DRIVER: ${{ steps.builder.outputs.driver }}
         REGISTRY: ${{ inputs.registry }}
         DOCKER_USERNAME: ${{ env.DOCKER_USERNAME }}
       run: |
-        [[ -n "${BUILDER:-}" ]] && docker buildx rm --force "$BUILDER" >/dev/null 2>&1
+        # Only the docker-container driver leaves anything behind. It creates a buildkit container
+        # on the shared per-node dind daemon, which outlives this pod — that is the whole reason a
+        # teardown exists at all, and setup-buildx-action was doing exactly this in a post-step that
+        # act folds invisibly into "Complete job".
+        #
+        # The remote driver creates NOTHING remotely. Its builder is a line in the client's
+        # ~/.docker/buildx, and the client is an ephemeral pod. Nothing to remove.
+        if [[ "${DRIVER:-}" == "docker-container" && -n "${BUILDER:-}" ]]; then
+          docker buildx rm --force "$BUILDER" >/dev/null 2>&1
+        fi
         docker logout "$REGISTRY" >/dev/null 2>&1
         [[ -n "${DOCKER_USERNAME:-}" ]] && docker logout >/dev/null 2>&1
         exit 0
