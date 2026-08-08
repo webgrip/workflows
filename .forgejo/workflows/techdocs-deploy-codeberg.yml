@@ -37,8 +37,9 @@ jobs:
     name: "Publish to Codeberg pages branch"
     runs-on: docker
     # Same first-party build image as techdocs-generate (Harbor ghcr pull-through, DinD-pullable).
-    # This job only needs a shell + git to push the built site; it apk-adds git below. Was the
-    # stale docker.io `webgrip/techdocs-runner:latest`.
+    # This job only needs a shell + git to push the built site; it apk-adds both below — the image
+    # is Alpine and ships neither, and the publish step declares `shell: bash` (run 271 died with
+    # exec: "bash": executable file not found). Was the stale docker.io `webgrip/techdocs-runner:latest`.
     container: harbor.webgrip.dev/ghcr/webgrip/techdocs-builder:latest
     steps:
       # forgejo/* fork, NOT actions/*: download-artifact@v4 ships @actions/artifact v2, which refuses
@@ -50,7 +51,7 @@ jobs:
           name: techdocs-site
           path: ./techdocs-site
 
-      - run: apk add --no-cache git
+      - run: apk add --no-cache bash git
 
       - name: Publish site to Codeberg pages branch
         env:
