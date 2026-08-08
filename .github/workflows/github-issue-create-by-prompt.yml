@@ -70,7 +70,7 @@ jobs:
 
       - name: Run AI Inference for prompt file
         id: inference
-        uses: actions/ai-inference@v1
+        uses: actions/ai-inference@v2
         with:
           prompt-file: ./__prompt-repo/${{ inputs.prompt-path }}
           input: |
