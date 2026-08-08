@@ -68,7 +68,7 @@ runs:
 
     - name: Install cargo-release & git-cliff
       if: steps.detect.outputs.is_rust == 'true'
-      uses: cargo-bins/cargo-binstall@v1.12.7
+      uses: cargo-bins/cargo-binstall@v1.20.1
       with:
         binary: "cargo-release git-cliff"
 
