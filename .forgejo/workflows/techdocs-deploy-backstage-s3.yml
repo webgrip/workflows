@@ -1,0 +1,57 @@
+# Forgejo-only: publish the built TechDocs site into the Garage `techdocs` bucket, keyed by
+# catalog entity, where Backstage TechDocs (`builder: external`) serves it — homelab-cluster
+# ADR-0039. Runs alongside techdocs-deploy-codeberg.yml (the ADR-0038 off-site DR mirror);
+# both legs consume the SAME `techdocs-site` artifact from techdocs-generate.yml, no rebuild.
+#
+# Credentials/config are webgrip ORG Actions secrets/vars, converged from OpenBao
+# secret/garage/techdocs by the forgejo-actions-secrets CronJob (homelab-cluster):
+#   secrets TECHDOCS_S3_ACCESS_KEY_ID / TECHDOCS_S3_SECRET_ACCESS_KEY   publish key — RW on the techdocs bucket ONLY
+#   vars    TECHDOCS_S3_ENDPOINT / TECHDOCS_S3_BUCKET / TECHDOCS_S3_REGION
+# Garage's ClusterIP is only reachable from the CI runner (forgejo-runner-allow-garage
+# NetworkPolicy) — LAN-only by design, hence this lives on Forgejo and not GitHub.
+name: "Deploy TechDocs (Backstage / Garage S3)"
+
+on:
+  workflow_call:
+    inputs:
+      entity:
+        type: string
+        description: 'Catalog entity ref the docs publish under, as <namespace>/<kind>/<name> (e.g. default/component/homelab-cluster)'
+        required: true
+    secrets:
+      TECHDOCS_S3_ACCESS_KEY_ID:
+        description: 'Garage techdocs-publish access key id (OpenBao garage/techdocs)'
+        required: true
+      TECHDOCS_S3_SECRET_ACCESS_KEY:
+        description: 'Garage techdocs-publish secret key (OpenBao garage/techdocs)'
+        required: true
+
+jobs:
+  deploy-backstage-s3:
+    name: "Publish to Garage S3"
+    runs-on: docker
+    # Same first-party build image as techdocs-generate (Harbor ghcr pull-through, DinD-pullable);
+    # it ships @techdocs/cli, which is all this job needs.
+    container: harbor.webgrip.dev/ghcr/webgrip/techdocs-builder:latest
+    steps:
+      # forgejo/* fork, NOT actions/*: download-artifact@v4 ships @actions/artifact v2, which refuses
+      # to run against anything that is not github.com (Forgejo reads as GHES). Must stay in step
+      # with the upload side in techdocs-generate.yml.
+      - name: Get TechDocs artifact
+        uses: forgejo/download-artifact@v4
+        with:
+          name: techdocs-site
+          path: ./techdocs-site
+
+      - name: Publish to Garage S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.TECHDOCS_S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.TECHDOCS_S3_SECRET_ACCESS_KEY }}
+          AWS_REGION: ${{ vars.TECHDOCS_S3_REGION }}
+        run: |
+          techdocs-cli publish --publisher-type awsS3 \
+            --storage-name "${{ vars.TECHDOCS_S3_BUCKET }}" \
+            --awsEndpoint "${{ vars.TECHDOCS_S3_ENDPOINT }}" \
+            --awsS3ForcePathStyle \
+            --entity "${{ inputs.entity }}" \
+            --directory ./techdocs-site
