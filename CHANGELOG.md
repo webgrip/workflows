@@ -1,3 +1,7 @@
+## 1.3.0 (2026-08-09)
+
+* feat(techdocs): add Backstage/Garage-S3 deploy reusable (homelab ADR-0039) ([7495a4f](https://forgejo.webgrip.dev/webgrip/workflows/commit/7495a4f))
+
 ## <small>1.2.1 (2026-08-09)</small>
 
 * Merge pull request 'fix(semrel): a release dropped to the behind-remote race must not exit green' (# ([6ce6e3e](https://forgejo.webgrip.dev/webgrip/workflows/commit/6ce6e3e)), closes [#45](https://forgejo.webgrip.dev/webgrip/workflows/issues/45)
