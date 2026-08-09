@@ -1,5 +1,13 @@
-name: "[Action] Semantic Release"
-description: "Automate versioning & changelog for Rust crates and/or JS packages via semantic‑release"
+name: "[Action] Semantic Release (Rust)"
+description: >-
+  Cut a Rust crate's release with semantic-release (optionally alongside a JS package). Expects to
+  run in the rust toolchain image (harbor.webgrip.dev/webgrip/semantic-release-rust:0.1.0 — see
+  docs/adrs/0005-semantic-release-toolchain-image.md), which bakes in cargo, node, git, yq,
+  semantic-release 25, @webgrip/semantic-release-config and semantic-release-cargo, so this action
+  installs nothing. Release mechanics are identical to the plain semantic-release composite:
+  Forgejo is the sole release authority and changelog links point at the public host. Output
+  contract: the resolved config must include an @semantic-release/exec successCmd that writes
+  `version=${nextRelease.version}` (and optionally `tag=${nextRelease.gitTag}`) to $GITHUB_OUTPUT.
 
 inputs:
   release-type:
@@ -8,11 +16,34 @@ inputs:
   token:
     description: "Forgejo token to use for checkout/push and releases"
     required: false
+  config-version:
+    description: "Pin of @webgrip/semantic-release-config for the no-image fallback only; inside the toolchain image the image tag IS the version"
+    required: false
+    default: "1"
+  forge-url:
+    description: "Public Forgejo base URL used for user-facing changelog/release links (not for API traffic)"
+    required: false
+    default: "https://forgejo.webgrip.dev"
+  git-user-name:
+    description: "Account name matching the token, used for push auth against the public host and for release commit-backs"
+    required: false
+    default: "webgrip-ci"
+  git-user-email:
+    description: "Git email for release commit-backs (@semantic-release/git)"
+    required: false
+    default: "ci@webgrip.nl"
+  dry-run:
+    description: "Run semantic-release with --dry-run (no tags, releases, or commits)"
+    required: false
+    default: "false"
 
 outputs:
   version:
-    description: "The new version number"
-    value: ${{ steps.set-version.outputs.version }}
+    description: "Bare semver of the release (empty if none)"
+    value: ${{ steps.semantic-release.outputs.version }}
+  tag:
+    description: "Full git tag of the release, e.g. v1.2.3 (empty if none)"
+    value: ${{ steps.semantic-release.outputs.tag }}
 
 runs:
   using: "composite"
@@ -20,107 +51,115 @@ runs:
     - name: Checkout repository
       uses: actions/checkout@v5
       with:
-        fetch-depth: 0         # semantic-release needs the full history
+        fetch-depth: 0 # semantic-release needs the full history
         token: ${{ inputs.token || github.token }}
 
-    - id: detect
-      shell: bash
-      run: |
-        if [[ -f Cargo.toml ]];     then echo "is_rust=true" >>"$GITHUB_OUTPUT"; fi
-        if [[ -f package.json ]];   then echo "is_node=true" >>"$GITHUB_OUTPUT"; fi
-
-    - name: Set up Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 22
-        # Only enable the npm cache when we actually have a lock-file
-        cache: ${{ steps.detect.outputs.is_node == 'true' && 'npm' || '' }}
-
+    # Only the consumer's own JS deps, and only when they exist — the release toolchain itself is
+    # in the image.
     - name: Install npm dependencies
-      if: steps.detect.outputs.is_node == 'true'
-      shell: bash
-      run: npm ci --ignore-scripts
-
-    - name: Build (npm)
-      if: steps.detect.outputs.is_node == 'true'
-      shell: bash
-      run: npm run build --if-present
-
-    - name: Install build essentials
-      if: steps.detect.outputs.is_rust == 'true'
       shell: bash
       run: |
-        if command -v apt-get &>/dev/null; then
-          sudo apt-get update -yq
-          sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libssl-dev ca-certificates
-        elif command -v apk &>/dev/null; then
-          sudo apk add --no-cache build-base pkgconf openssl-dev
+        set -euo pipefail
+        if [[ -f package.json && ( -f package-lock.json || -f npm-shrinkwrap.json ) ]]; then
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm run build --if-present
         fi
 
-    - name: Set up Rust
-      if: steps.detect.outputs.is_rust == 'true'
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        profile: minimal
-        override: true
-
-    - name: Install cargo-release & git-cliff
-      if: steps.detect.outputs.is_rust == 'true'
-      uses: cargo-bins/cargo-binstall@v1.12.7
-      with:
-        binary: "cargo-release git-cliff"
-
-    - name: Set semantic-release config file
-      id: set-config
+    # Start every repo from 0.0.0 (semantic-release otherwise hardcodes the first release to 1.0.0).
+    # Idempotent: skipped once any v* tag exists. Needs the fetch-depth: 0 checkout above.
+    - name: Seed baseline version tag (0.0.0)
+      if: inputs.dry-run != 'true'
       shell: bash
       run: |
-        CONFIG_FLAG=""
-
-        if [[ -n "${{ inputs.release-type }}" ]]; then
-          if [[ -f ".releaserc.${{ inputs.release-type }}.js" ]]; then
-            CONFIG_FLAG="--extends=./.releaserc.${{ inputs.release-type }}.js"
-          elif [[ -f ".releaserc.${{ inputs.release-type }}.json" ]]; then
-            CONFIG_FLAG="--extends=./.releaserc.${{ inputs.release-type }}.json"
-          fi
-        else
-          if [[ -f ".releaserc.js" ]]; then
-            CONFIG_FLAG="--config=./.releaserc.js"
-          elif [[ -f ".releaserc.json" ]]; then
-            CONFIG_FLAG="--config=./.releaserc.json"
-          fi
+        set -euo pipefail
+        if [ -n "$(git tag -l 'v[0-9]*')" ]; then
+          echo "Release tags already exist (v*); skipping baseline seed."
+          exit 0
         fi
-
-        echo "release_config=${CONFIG_FLAG}" >> "$GITHUB_OUTPUT"
-
-    - name: Install semantic-release & plugins
-      shell: bash
-      run: |
-        npm install --no-save \
-          semantic-release \
-          @semantic-release/changelog \
-          @semantic-release/commit-analyzer \
-          @semantic-release/exec \
-          @semantic-release/git \
-          @saithodev/semantic-release-gitea \
-          @semantic-release/release-notes-generator \
-          semantic-release-cargo \
-          semantic-release-helm3
-        # Forgejo: dropped semantic-release-github-actions-tags (GitHub-Actions-specific, no analog)
+        root="$(git rev-list --max-parents=0 HEAD | tail -1)"
+        echo "No v* tag yet; seeding v0.0.0 at root commit ${root}."
+        git tag "v0.0.0" "${root}"
+        git push origin "v0.0.0"
 
     - name: Run semantic-release
       id: semantic-release
       shell: bash
       env:
-        GITHUB_OUTPUT: $GITHUB_OUTPUT
-        # Forgejo: @saithodev/semantic-release-gitea targets the runner's Forgejo instance (github.server_url).
+        SEMANTIC_RELEASE_GITEA: "true"
         GITEA_URL: ${{ github.server_url }}
         GITEA_TOKEN: ${{ inputs.token || github.token }}
+        GIT_CREDENTIALS: ${{ inputs.git-user-name }}:${{ inputs.token || github.token }}
+        GIT_AUTHOR_NAME: ${{ inputs.git-user-name }}
+        GIT_AUTHOR_EMAIL: ${{ inputs.git-user-email }}
+        GIT_COMMITTER_NAME: ${{ inputs.git-user-name }}
+        GIT_COMMITTER_EMAIL: ${{ inputs.git-user-email }}
+        FORCE_LEVEL: ${{ inputs.release-type }}
       run: |
-        npx semantic-release ${{ steps.set-config.outputs.release_config }}
+        set -euo pipefail
+        forge_url="${{ inputs.forge-url }}"
 
-    - id: set-version
+        # The checkout's auth header only covers the in-cluster host; semantic-release talks to the
+        # PUBLIC host via --repository-url, where a private repo's ls-remote would 401 anonymously.
+        auth_b64="$(printf '%s:%s' "x-access-token" "${GITEA_TOKEN}" | base64 -w0)"
+        git config "http.${forge_url}/.extraheader" "AUTHORIZATION: basic ${auth_b64}"
+        trap 'git config --unset-all "http.'"${forge_url}"'/.extraheader" || true' EXIT
+
+        # Probe rather than test for the file: pre-ADR-0005 ci-runners also export SEMREL_PREBAKED,
+        # at an sr24 tree with no shared config. It also handles a ci-runner baking the MONOREPO
+        # toolchain, which has no semantic-release-cargo — rust correctly falls through there.
+        sr="${SEMREL_PREBAKED:-/nonexistent}/.bin/semantic-release"
+        if [[ -x "$sr" ]] && ! NODE_PATH="${SEMREL_PREBAKED:-}" node -e '
+              const v = require("semantic-release/package.json").version;
+              if (v.split(".")[0] !== "25") throw new Error("semantic-release " + v);
+              require.resolve("@webgrip/semantic-release-config");
+              require.resolve("semantic-release-cargo");
+            ' 2>/dev/null; then
+          echo "::warning::SEMREL_PREBAKED (${SEMREL_PREBAKED:-}) is not the ADR-0005 rust toolchain; ignoring it."
+          sr=""
+        fi
+        if [[ ! -x "$sr" ]]; then
+          echo "::warning::no usable prebaked toolchain; installing an UNLOCKED one. Run in harbor.webgrip.dev/webgrip/semantic-release-rust:0.1.0 (ADR 0005)."
+          npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
+          npm install --no-save --no-package-lock --no-audit --no-fund \
+            "@webgrip/semantic-release-config@${{ inputs.config-version }}" semantic-release-cargo@2.4.2
+          sr="./node_modules/.bin/semantic-release"
+        fi
+
+        args=(--repository-url "${forge_url}/${{ github.repository }}.git")
+        [[ "${{ inputs.dry-run }}" == "true" ]] && args+=(--dry-run)
+        rt="${{ inputs.release-type }}"
+        if [[ -n "$rt" ]]; then
+          for f in ".releaserc.${rt}.cjs" ".releaserc.${rt}.js" ".releaserc.${rt}.json"; do
+            [[ -f "$f" ]] && { args+=("--extends=./${f}"); break; }
+          done
+        else
+          for f in .releaserc.cjs .releaserc.js .releaserc.json; do
+            [[ -f "$f" ]] && { args+=("--config=./${f}"); break; }
+          done
+        fi
+
+        "$sr" "${args[@]}"
+
+    - name: Release summary
       if: always()
       shell: bash
-      run: echo "version=${{ steps.semantic-release.outputs.nextRelease.version }}" >> "$GITHUB_OUTPUT"
+      env:
+        VERSION: ${{ steps.semantic-release.outputs.version }}
+        TAG: ${{ steps.semantic-release.outputs.tag }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        FORGE_URL: ${{ inputs.forge-url }}
+      run: |
+        set -euo pipefail
+        {
+          echo "### Semantic Release (Rust)"
+          echo
+          if [[ "$DRY_RUN" == "true" ]]; then
+            echo "Dry run — no tag, release or commit was pushed."
+          elif [[ -n "$VERSION" ]]; then
+            echo "- **version**: \`${VERSION}\`"
+            [[ -n "$TAG" ]] && echo "- **tag**: [\`${TAG}\`](${FORGE_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG})"
+          else
+            echo "No release cut for this run (no releasable commits, or the config emitted no"
+            echo "\`version=\` to \`\$GITHUB_OUTPUT\` from its exec successCmd)."
+          fi
+        } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"

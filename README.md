@@ -463,20 +463,44 @@ Detects changed directories for monorepo workflows.
 ### Release Management
 
 #### `semantic-release.yml`
-Automated semantic versioning and releases using conventional commits.
+Automated semantic versioning and releases using conventional commits — one release train for the
+whole repository. (For per-package trains in a monorepo, use `semantic-release-monorepo.yml`.)
 
 **Features:**
-- GitHub App authentication support
-- Conventional commit parsing
-- Automated changelog generation
-- Tag and release creation
+- Conventional commit parsing, changelog generation, tag + release creation
+- **Installs nothing.** The job runs in `harbor.webgrip.dev/webgrip/semantic-release`, which bakes
+  in node, git, yq, semantic-release 25, `@webgrip/semantic-release-config` and the plugin set from
+  a committed lockfile ([ADR 0005](docs/adrs/0005-semantic-release-toolchain-image.md); the image is
+  built in `webgrip/infrastructure`). Release setup is ~0 instead of ~3m45s, and the same commit
+  releases the same way next month.
+- Resolves the repo's `.releaserc.cjs|js|json` (or `--extends` a `release-type` variant)
+- Serialized per ref (`concurrency`, no cancel-in-progress) and realigned to the remote branch tip,
+  so two runs cannot race for the same tag or die "behind remote" and silently release nothing.
 
 **Inputs:**
 - `release-type` (optional) - Type of release
-- `use-bot-to-commit` - Use GitHub App for commits
+- `use-bot-to-commit` - Use the CI bot for commits
+- `toolchain-image` (default `harbor.webgrip.dev/webgrip/semantic-release:<version>`) - The image
+  the release runs in, pinned to a released version and Renovate-watched. Override with an image
+  built `FROM` it if your `prepareCmd` needs helm/php/docker
+- `config-version` (default `1`) - Pin of `@webgrip/semantic-release-config`, for the no-image
+  fallback only; inside the toolchain image the image tag *is* the version
+- `dry-run` (default `false`) - `--dry-run`: no tags, releases, or commits
+- `install-dependencies` (default `auto`) - Install the *consumer's* npm deps before releasing.
+  `auto` only does so when a lockfile / build script actually exists and never fails the release;
+  `true` is the same but fatal on failure; `false` skips both. A Go/PHP/Rust repo that merely
+  carries a `package.json` wants `auto` or `false`.
+- `enabled`, `only-refs`, `skip-refs` - Gating from inside the reusable (Forgejo v15 evaluates a
+  caller's `with:` at flatten time with an empty `github` context, so branch gating must happen here)
+- `align-to-remote-tip` (default `true`)
 
 **Outputs:**
-- `version` - Generated version number
+- `version` - Bare semver of the release (empty if none)
+- `tag` - Full git tag, e.g. `v1.2.3` — the checkout ref for tag-pinned follow-up jobs
+
+**Output contract:** the resolved config must include an `@semantic-release/exec` `successCmd`
+that writes `version=`/`tag=` to `$GITHUB_OUTPUT`; without it the outputs stay empty even when a
+release is cut.
 
 **WordPress packaging (optional):**
 This workflow/composite action also supports `@semantic-release/wordpress` (https://github.com/semantic-release/wordpress) for packaging WordPress plugins/themes during `semantic-release`.
@@ -515,9 +539,12 @@ plugin; config is resolved by cosmiconfig from the package dir upward (a package
 `.releaserc.cjs` wins, else the repo root `.releaserc.js`). The consumer config **must** write
 `version=`/`tag=` to `$GITHUB_OUTPUT` via an `@semantic-release/exec` `successCmd` for the
 outputs to be populated. `@semantic-release/git` + `changelog` are pre-installed for configs
-that commit release artifacts back (CHANGELOG.md, Chart.yaml, …). When the runner image prebakes
-the toolchain at `/opt/semrel` (env `SEMREL_PREBAKED`), the npm install is skipped entirely
-(~4 min saved per release job).
+that commit release artifacts back (CHANGELOG.md, Chart.yaml, …). Like the single-package train it
+**installs nothing**: the job runs in `harbor.webgrip.dev/webgrip/semantic-release-monorepo`,
+which additionally bakes in `semantic-release-monorepo` — so the `monorepo` input is now a no-op,
+kept only for caller compatibility. See
+[ADR 0005](docs/adrs/0005-semantic-release-toolchain-image.md); the images themselves are built in
+`webgrip/infrastructure` (`ops/docker/semantic-release/`).
 
 **Inputs:** `package-path` (`.` for a root-scoped train), `package-name`, `dry-run`.
 **Secrets:** `FORGEJO_TOKEN`. **Outputs:** `version` (bare semver, normalized), `tag`.

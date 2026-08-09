@@ -1,3 +1,26 @@
 {
-  "$schema": "https://docs.renovatebot.com/renovate-schema.json"
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "The release toolchain images (built in webgrip/infrastructure, ADR 0005) are named in workflow input DEFAULTS. Renovate's workflow manager pins `uses:` refs but is blind to an image tag handed to a job via an input default, so nothing would watch the toolchain a release actually runs in. Same annotated-default pattern infrastructure uses for tool versions passed to composite actions. Only the tag is captured; the repository comes from depName.",
+      "managerFilePatterns": [
+        "/^\\.forgejo/workflows/.+\\.ya?ml$/",
+        "/(^|/)action\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s*\\n\\s*default: '[^']*:(?<currentValue>[^']+)'"
+      ],
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
+    }
+  ],
+  "packageRules": [
+    {
+      "description": "The toolchain image tag is a bare version reused as part of a composed image ref; appending an @sha256 digest would corrupt it.",
+      "matchManagers": [
+        "custom.regex"
+      ],
+      "pinDigests": false
+    }
+  ]
 }
