@@ -1,3 +1,7 @@
+## <small>1.3.1 (2026-08-09)</small>
+
+* fix(techdocs): pin first-party Harbor techdocs-builder:1.3.0 — ghcr fan-out froze again ([62c5c36](https://forgejo.webgrip.dev/webgrip/workflows/commit/62c5c36))
+
 ## 1.3.0 (2026-08-09)
 
 * feat(techdocs): add Backstage/Garage-S3 deploy reusable (homelab ADR-0039) ([7495a4f](https://forgejo.webgrip.dev/webgrip/workflows/commit/7495a4f))
