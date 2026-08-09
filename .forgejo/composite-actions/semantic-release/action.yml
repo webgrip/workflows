@@ -39,8 +39,9 @@ inputs:
       Before releasing a branch push, move the checkout onto the remote branch tip. A push landing
       after this run was queued leaves the detached checkout BEHIND origin, and semantic-release
       then aborts with "The local branch is behind the remote one" and cuts nothing — a silent
-      no-op that does not self-heal, because the commit that overtook it is a `[skip ci]` release
-      commit.
+      no-op, and one nothing else recovers from when the commit that overtook it is a `[skip ci]`
+      release commit. This closes the wide window (queued-then-overtaken); the run step catches
+      what is left, since a push can still land in the seconds between this step and that one.
     required: false
     default: "true"
   install-dependencies:
@@ -185,7 +186,44 @@ runs:
           done
         fi
 
-        "$sr" "${args[@]}"
+        # A push landing between "Align to remote branch tip" and this command leaves the checkout
+        # behind origin, and semantic-release then aborts with "The local branch is behind the
+        # remote one" — EXIT 0, nothing published. Aligning first narrows that window but cannot
+        # close it: ploeg run 159 lost a release to a push that landed 19s after the align step and
+        # 29s before this check, and the job went green. So detect the drop and re-run on the new
+        # tip. Same guard the monorepo composite carries, where sibling package jobs race by
+        # design; here the racer is an ordinary second push — rarer, and just as silent.
+        #
+        # Both symptoms lose before the tag exists, so reset-and-rerun is safe. The log grep is
+        # what catches the behind-remote case, since rc alone cannot distinguish it from success.
+        dry_run="${{ inputs.dry-run }}"
+        # Only a branch push can be reset onto a moved tip — on a tag or PR ref, origin/$REF_NAME is
+        # not a branch. Such a run cannot hit this race either, since nothing pushes to that ref.
+        on_branch=false
+        [[ "${GITHUB_REF:-}" == refs/heads/* ]] && on_branch=true
+
+        for attempt in 1 2 3; do
+          set +e
+          "$sr" "${args[@]}" 2>&1 | tee /tmp/semrel.log
+          rc=${PIPESTATUS[0]}
+          set -e
+          # A dry run publishes nothing, so a dropped release is not a dropped release: report the
+          # analysis and leave the validation gate green rather than failing it on a race.
+          if [ "$rc" -eq 0 ] && { [ "$dry_run" == "true" ] || ! grep -q 'is behind the remote one' /tmp/semrel.log; }; then
+            break
+          fi
+          if [ "$attempt" -lt 3 ] && [ "$on_branch" == true ] && [ "$dry_run" != "true" ] \
+             && grep -Eq 'fetch first|non-fast-forward|is behind the remote one' /tmp/semrel.log; then
+            echo "::warning::a concurrent push moved ${GITHUB_REF_NAME} mid-run (attempt ${attempt}); resetting onto the updated branch and retrying"
+            git -C "$GITHUB_WORKSPACE" fetch --tags origin "$GITHUB_REF_NAME"
+            git -C "$GITHUB_WORKSPACE" reset --hard "origin/$GITHUB_REF_NAME"
+            continue
+          fi
+          # Retries exhausted, or a non-retryable error. rc can still be 0 here (behind-remote on
+          # the final attempt) — that is a DROPPED release, not a success. Fail loudly.
+          [ "$rc" -eq 0 ] && rc=1
+          exit "$rc"
+        done
 
     - name: Release summary
       if: always()
