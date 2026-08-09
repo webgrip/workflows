@@ -1,3 +1,8 @@
+## <small>1.2.1 (2026-08-09)</small>
+
+* Merge pull request 'fix(semrel): a release dropped to the behind-remote race must not exit green' (# ([6ce6e3e](https://forgejo.webgrip.dev/webgrip/workflows/commit/6ce6e3e)), closes [#45](https://forgejo.webgrip.dev/webgrip/workflows/issues/45)
+* fix(semrel): a release dropped to the behind-remote race must not exit green ([5728850](https://forgejo.webgrip.dev/webgrip/workflows/commit/5728850))
+
 ## 1.2.0 (2026-08-09)
 
 * Merge pull request 'fix/semrel-parity-and-hardening' (#40) from fix/semrel-parity-and-hardening into ([b40b790](https://forgejo.webgrip.dev/webgrip/workflows/commit/b40b790)), closes [#40](https://forgejo.webgrip.dev/webgrip/workflows/issues/40)
