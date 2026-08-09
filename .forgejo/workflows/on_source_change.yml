@@ -1,0 +1,51 @@
+---
+# SELF-CI. Every other file under .forgejo/workflows/ in this repo is `on: workflow_call`
+# — a library consumed by other repos. This is the only workflow that runs FOR this
+# repo, and it exists so the repo that automates everyone else's releases finally
+# releases itself.
+#
+# History: the library shipped 45 reusable workflows for months with zero tags. Because
+# Renovate resolves these refs through the forgejo-tags datasource (which looks refs up
+# as TAGS), every consumer's @main pin returned 404 and failed that consumer's ENTIRE
+# Renovate run. v1.0.0 was cut by hand on 2026-08-09 to unblock them; this workflow is
+# what stops the next one being manual too.
+#
+# The composite is referenced by REMOTE PINNED REF, not `./.forgejo/composite-actions/...`.
+# It performs its own `actions/checkout` as its first step, so at the moment the runner
+# resolves `uses:` the workspace is still empty and a local path cannot resolve.
+# Renovate keeps this pin current once tags exist.
+#
+# TOKEN: WEBGRIP_CI_TOKEN, never FORGEJO_TOKEN. The composite's own docs warn that a
+# caller-mapped secret named FORGEJO_TOKEN can resolve to the built-in per-job token of
+# the same name, producing ghost releases with no native release event and no org
+# package writes.
+name: On Source Change
+
+on:
+  push:
+    branches:
+      - main
+
+# Serialise: two releases racing would compute the same next version off the same tag.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Semantic Release
+    runs-on: docker
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      statuses: write
+    outputs:
+      version: ${{ steps.semrel.outputs.version }}
+      tag: ${{ steps.semrel.outputs.tag }}
+    steps:
+      - name: Semantic Release
+        id: semrel
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/semantic-release@v1.0.0
+        with:
+          token: ${{ secrets.WEBGRIP_CI_TOKEN }}
