@@ -1,0 +1,119 @@
+# Forgejo-only: build the HUMAN docs site with Zensical and sync it into the Garage
+# `docs-site` bucket, which Garage's web endpoint serves at docs.<domain> via the
+# homelab HTTPRoute (homelab-cluster ADR-0052; replaces the dropped Codeberg leg).
+#
+# Zensical reads mkdocs.yml natively but does not run Python MkDocs plugins, so two
+# things are grafted in from the mkdocs-built `techdocs-site` artifact (same run,
+# no rebuild): the llms.txt / llms-full.txt / per-page raw-.md agent affordances
+# (mkdocs-llms-source), and — generated here from mkdocs.yml — redirect stubs for
+# the legacy-URL map (mkdocs-redirects), so old links keep resolving.
+#
+# Credentials/config are the SAME webgrip org secrets/vars as the S3 artifact leg
+# (the techdocs-publish key is granted RW on both buckets by the garage provisioner).
+name: "Deploy TechDocs (docs-site / Garage web)"
+
+on:
+  workflow_call:
+    inputs:
+      source-dir:
+        type: string
+        description: 'The directory containing the techdocs files (mkdocs.yml lives here)'
+        required: false
+        default: 'docs/techdocs'
+      bucket:
+        type: string
+        description: 'Garage bucket serving the site (website-enabled)'
+        required: false
+        default: 'docs-site'
+    secrets:
+      TECHDOCS_S3_ACCESS_KEY_ID:
+        description: 'Garage techdocs-publish access key id (OpenBao garage/techdocs)'
+        required: true
+      TECHDOCS_S3_SECRET_ACCESS_KEY:
+        description: 'Garage techdocs-publish secret key (OpenBao garage/techdocs)'
+        required: true
+
+jobs:
+  deploy-docs-site:
+    name: "Build (Zensical) + sync to Garage web"
+    runs-on: docker
+    # First-party Harbor image, version-pinned (the ghcr fan-out freezes — see
+    # techdocs-generate.yml). 1.4.0 ships zensical + rclone.
+    container: harbor.webgrip.dev/webgrip/techdocs-builder:1.4.0
+    steps:
+      - uses: actions/checkout@v4
+
+      # forgejo/* fork, NOT actions/*: v4 refuses non-github.com hosts (GHES error).
+      - name: Get TechDocs artifact (llms + raw-md graft source)
+        uses: forgejo/download-artifact@v4
+        with:
+          name: techdocs-site
+          path: ./techdocs-site
+
+      - name: Build site with Zensical
+        run: |
+          cd ${{ inputs.source-dir }}
+          zensical build
+          test -f site/index.html
+
+      - name: Graft agent affordances + legacy-URL redirect stubs
+        # Pure python (busybox tar lacks -T/--null; python3 is guaranteed in the
+        # image). Grafts llms.txt / llms-full.txt / per-page raw .md from the
+        # mkdocs artifact (its tree mirrors the site URL tree), then writes
+        # redirect stubs from mkdocs.yml's redirect_maps — mkdocs-redirects is a
+        # Python plugin Zensical does not run. use_directory_urls semantics.
+        run: |
+          python3 - "${{ inputs.source-dir }}" <<'EOF'
+          import shutil, sys, pathlib, yaml
+          src = pathlib.Path(sys.argv[1])
+          site = src / 'site'
+          artifact = pathlib.Path('techdocs-site')
+
+          grafted = 0
+          for f in artifact.rglob('*'):
+              if f.is_file() and (f.suffix == '.md' or f.name in ('llms.txt', 'llms-full.txt')):
+                  dest = site / f.relative_to(artifact)
+                  dest.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copy2(f, dest)
+                  grafted += 1
+          print(f'{grafted} llms/markdown files grafted')
+
+          cfg = yaml.safe_load((src / 'mkdocs.yml').read_text())
+          maps = {}
+          for p in cfg.get('plugins', []):
+              if isinstance(p, dict) and 'redirects' in p:
+                  maps = p['redirects'].get('redirect_maps', {})
+          def url(page):
+              page = page[:-3] if page.endswith('.md') else page
+              if page == 'index': return ''
+              if page.endswith('/index'): page = page[:-6]
+              return page + '/'
+          stubs = 0
+          for old, new in maps.items():
+              stub_dir = site / url(old)
+              if (stub_dir / 'index.html').exists() and url(old) != url(new):
+                  continue  # a real page shadows this legacy URL; leave it
+              stub_dir.mkdir(parents=True, exist_ok=True)
+              target = '/' + url(new)
+              (stub_dir / 'index.html').write_text(
+                  '<!doctype html><meta charset="utf-8">'
+                  f'<meta http-equiv="refresh" content="0; url={target}">'
+                  f'<link rel="canonical" href="{target}">'
+                  f'<title>Redirecting…</title><a href="{target}">Moved here</a>')
+              stubs += 1
+          print(f'{stubs} redirect stubs written')
+          EOF
+
+      - name: Sync to Garage
+        env:
+          RCLONE_CONFIG_GARAGE_TYPE: s3
+          RCLONE_CONFIG_GARAGE_PROVIDER: Other
+          RCLONE_CONFIG_GARAGE_ENDPOINT: ${{ vars.TECHDOCS_S3_ENDPOINT }}
+          RCLONE_CONFIG_GARAGE_REGION: ${{ vars.TECHDOCS_S3_REGION }}
+          RCLONE_CONFIG_GARAGE_ACCESS_KEY_ID: ${{ secrets.TECHDOCS_S3_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_GARAGE_SECRET_ACCESS_KEY: ${{ secrets.TECHDOCS_S3_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_GARAGE_FORCE_PATH_STYLE: "true"
+        run: |
+          rclone sync "${{ inputs.source-dir }}/site" "garage:${{ inputs.bucket }}" \
+            --checksum --fast-list --transfers 8 --stats-one-line
+          echo "synced $(find "${{ inputs.source-dir }}/site" -type f | wc -l) files to ${{ inputs.bucket }}"
