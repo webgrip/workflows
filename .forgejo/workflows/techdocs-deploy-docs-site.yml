@@ -25,6 +25,16 @@ on:
         description: 'Garage bucket serving the site (website-enabled)'
         required: false
         default: 'docs-site'
+      dest-prefix:
+        type: string
+        description: 'Path prefix inside the bucket (estate rollout: the repo name; empty = bucket root). Sync deletion is scoped to the prefix, so repos cannot clobber each other.'
+        required: false
+        default: ''
+      strict:
+        type: string
+        description: 'Run zensical build --strict (broken links fail the build). Flip on once a repo''s links are clean.'
+        required: false
+        default: 'false'
     secrets:
       TECHDOCS_S3_ACCESS_KEY_ID:
         description: 'Garage techdocs-publish access key id (OpenBao garage/techdocs)'
@@ -39,7 +49,7 @@ jobs:
     runs-on: docker
     # First-party Harbor image, version-pinned (the ghcr fan-out freezes — see
     # techdocs-generate.yml). 1.4.0 ships zensical + rclone.
-    container: harbor.webgrip.dev/webgrip/techdocs-builder:1.4.0
+    container: harbor.webgrip.dev/webgrip/techdocs-builder:1.5.0
     steps:
       - uses: actions/checkout@v4
 
@@ -51,9 +61,11 @@ jobs:
           path: ./techdocs-site
 
       - name: Build site with Zensical
+        # --clean every run: upstream recommends against CI caches while the
+        # caching layer is in flux; --strict (opt-in) aborts on broken links.
         run: |
           cd ${{ inputs.source-dir }}
-          zensical build
+          zensical build --clean ${{ inputs.strict == 'true' && '--strict' || '' }}
           test -f site/index.html
 
       - name: Graft agent affordances + legacy-URL redirect stubs
@@ -104,6 +116,15 @@ jobs:
           print(f'{stubs} redirect stubs written')
           EOF
 
+      - name: Secret gate (gitleaks)
+        # Blocks the publish when the BUILT site contains a secret-shaped string.
+        # Estate config baked into the image (narrow allowlists — runbook paths +
+        # explicit example markers; mutation-tested both directions 2026-08-11).
+        # Runs AFTER the graft so the raw-markdown copies are scanned too.
+        run: |
+          gitleaks dir "${{ inputs.source-dir }}/site" \
+            --config /etc/gitleaks/docs.toml --no-banner --redact
+
       - name: Sync to Garage
         env:
           RCLONE_CONFIG_GARAGE_TYPE: s3
@@ -114,6 +135,9 @@ jobs:
           RCLONE_CONFIG_GARAGE_SECRET_ACCESS_KEY: ${{ secrets.TECHDOCS_S3_SECRET_ACCESS_KEY }}
           RCLONE_CONFIG_GARAGE_FORCE_PATH_STYLE: "true"
         run: |
-          rclone sync "${{ inputs.source-dir }}/site" "garage:${{ inputs.bucket }}" \
+          dest="${{ inputs.bucket }}"
+          prefix="${{ inputs.dest-prefix }}"
+          [ -n "$prefix" ] && dest="$dest/$prefix"
+          rclone sync "${{ inputs.source-dir }}/site" "garage:$dest" \
             --checksum --fast-list --transfers 8 --stats-one-line
-          echo "synced $(find "${{ inputs.source-dir }}/site" -type f | wc -l) files to ${{ inputs.bucket }}"
+          echo "synced $(find "${{ inputs.source-dir }}/site" -type f | wc -l) files to $dest"
