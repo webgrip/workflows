@@ -1,3 +1,7 @@
+## <small>1.4.2 (2026-08-11)</small>
+
+* fix(techdocs): redirect stubs must stay inside dest-prefix — absolute targets escaped to the domain  ([77bd6c0](https://forgejo.webgrip.dev/webgrip/workflows/commit/77bd6c0))
+
 ## <small>1.4.1 (2026-08-11)</small>
 
 * fix(techdocs): tag-tolerant yaml loader in the graft step — !!python/name broke onboarding ([d531c75](https://forgejo.webgrip.dev/webgrip/workflows/commit/d531c75))
