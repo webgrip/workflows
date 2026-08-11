@@ -1,3 +1,7 @@
+## 1.6.0 (2026-08-11)
+
+* feat(techdocs): estate items #1/#4/#12 plumbing — trash-net backup-dir, pagefind index pass, builder ([abf3c95](https://forgejo.webgrip.dev/webgrip/workflows/commit/abf3c95)), closes [4/#12](https://forgejo.webgrip.dev/webgrip/workflows/issues/12)
+
 ## <small>1.5.1 (2026-08-11)</small>
 
 * fix(techdocs): root sync must not delete foreign prefixes — it wiped the whole estate ([fd6771a](https://forgejo.webgrip.dev/webgrip/workflows/commit/fd6771a))
