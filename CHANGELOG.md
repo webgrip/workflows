@@ -1,3 +1,7 @@
+## <small>1.4.1 (2026-08-11)</small>
+
+* fix(techdocs): tag-tolerant yaml loader in the graft step — !!python/name broke onboarding ([d531c75](https://forgejo.webgrip.dev/webgrip/workflows/commit/d531c75))
+
 ## 1.4.0 (2026-08-11)
 
 * feat(techdocs): docs-site deploy reusable — Zensical build + llms/redirect graft + rclone to Garage  ([5a7edb1](https://forgejo.webgrip.dev/webgrip/workflows/commit/5a7edb1))
