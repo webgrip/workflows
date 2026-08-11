@@ -77,6 +77,12 @@ jobs:
         run: |
           python3 - "${{ inputs.source-dir }}" <<'EOF'
           import shutil, sys, pathlib, yaml
+          # Tag-tolerant loader: Material configs routinely carry `!!python/name:`
+          # (superfences) and `!ENV` tags that yaml.safe_load rejects — it broke
+          # infrastructure's onboarding (2026-08-11). Unknown tags load as None;
+          # we only read the plugins list, so nothing of value is lost.
+          class TagTolerantLoader(yaml.SafeLoader): pass
+          TagTolerantLoader.add_multi_constructor('', lambda loader, tag, node: None)
           src = pathlib.Path(sys.argv[1])
           site = src / 'site'
           artifact = pathlib.Path('techdocs-site')
@@ -90,7 +96,7 @@ jobs:
                   grafted += 1
           print(f'{grafted} llms/markdown files grafted')
 
-          cfg = yaml.safe_load((src / 'mkdocs.yml').read_text())
+          cfg = yaml.load((src / 'mkdocs.yml').read_text(), Loader=TagTolerantLoader)
           maps = {}
           for p in cfg.get('plugins', []):
               if isinstance(p, dict) and 'redirects' in p:
