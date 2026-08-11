@@ -1,3 +1,8 @@
+## <small>1.5.1 (2026-08-11)</small>
+
+* fix(techdocs): root sync must not delete foreign prefixes — it wiped the whole estate ([fd6771a](https://forgejo.webgrip.dev/webgrip/workflows/commit/fd6771a))
+* chore(docs): retire GitHub-side techdocs workflows — Forgejo publishes to docs.webgrip.dev (ADR-0052 ([0f9bf25](https://forgejo.webgrip.dev/webgrip/workflows/commit/0f9bf25))
+
 ## 1.5.0 (2026-08-11)
 
 * feat(docs): publish to docs.webgrip.dev/workflows/ — estate rollout (ADR-0052) ([4569314](https://forgejo.webgrip.dev/webgrip/workflows/commit/4569314))
