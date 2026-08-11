@@ -75,7 +75,7 @@ jobs:
         # redirect stubs from mkdocs.yml's redirect_maps — mkdocs-redirects is a
         # Python plugin Zensical does not run. use_directory_urls semantics.
         run: |
-          python3 - "${{ inputs.source-dir }}" <<'EOF'
+          python3 - "${{ inputs.source-dir }}" "${{ inputs.dest-prefix }}" <<'EOF'
           import shutil, sys, pathlib, yaml
           # Tag-tolerant loader: Material configs routinely carry `!!python/name:`
           # (superfences) and `!ENV` tags that yaml.safe_load rejects — it broke
@@ -84,6 +84,10 @@ jobs:
           class TagTolerantLoader(yaml.SafeLoader): pass
           TagTolerantLoader.add_multi_constructor('', lambda loader, tag, node: None)
           src = pathlib.Path(sys.argv[1])
+          # Stub targets must stay INSIDE the repo's prefix: '/adr/' at the domain
+          # root is another repo's page (infrastructure's stubs escaped to the
+          # homelab site, 2026-08-11).
+          prefix = ('/' + sys.argv[2].strip('/')) if len(sys.argv) > 2 and sys.argv[2].strip('/') else ''
           site = src / 'site'
           artifact = pathlib.Path('techdocs-site')
 
@@ -112,7 +116,7 @@ jobs:
               if (stub_dir / 'index.html').exists() and url(old) != url(new):
                   continue  # a real page shadows this legacy URL; leave it
               stub_dir.mkdir(parents=True, exist_ok=True)
-              target = '/' + url(new)
+              target = prefix + '/' + url(new)
               (stub_dir / 'index.html').write_text(
                   '<!doctype html><meta charset="utf-8">'
                   f'<meta http-equiv="refresh" content="0; url={target}">'
