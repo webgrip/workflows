@@ -31,6 +31,9 @@ nav:
 
 # https://www.mkdocs.org/user-guide/configuration
 plugins:
+  # Agent affordances (homelab rfc-docs-platform-2026): /llms.txt + /llms-full.txt
+  # + per-page raw .md, grafted into the Zensical site by the deploy leg.
+  - llms-source
   - techdocs-core:
       use_material_search: true
   - search:
