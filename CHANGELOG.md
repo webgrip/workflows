@@ -1,3 +1,8 @@
+## 1.4.0 (2026-08-11)
+
+* feat(techdocs): docs-site deploy reusable — Zensical build + llms/redirect graft + rclone to Garage  ([5a7edb1](https://forgejo.webgrip.dev/webgrip/workflows/commit/5a7edb1))
+* feat(techdocs): estate rollout plumbing — dest-prefix, strict, gitleaks gate; builder 1.5.0 everywhe ([c7a05bc](https://forgejo.webgrip.dev/webgrip/workflows/commit/c7a05bc))
+
 ## <small>1.3.1 (2026-08-09)</small>
 
 * fix(techdocs): pin first-party Harbor techdocs-builder:1.3.0 — ghcr fan-out froze again ([62c5c36](https://forgejo.webgrip.dev/webgrip/workflows/commit/62c5c36))
