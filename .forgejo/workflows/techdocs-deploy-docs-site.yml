@@ -147,7 +147,23 @@ jobs:
         run: |
           dest="${{ inputs.bucket }}"
           prefix="${{ inputs.dest-prefix }}"
-          [ -n "$prefix" ] && dest="$dest/$prefix"
-          rclone sync "${{ inputs.source-dir }}/site" "garage:$dest" \
+          site="${{ inputs.source-dir }}/site"
+          excludes=""
+          if [ -n "$prefix" ]; then
+            dest="$dest/$prefix"
+          else
+            # ROOT sync: rclone sync's deletion scope is the WHOLE bucket, which
+            # wiped every other repo's prefix on 2026-08-11. Exclude every
+            # top-level remote directory the source tree does not contain —
+            # foreign prefixes are untouchable by construction, and the list is
+            # logged so nothing is silently skipped.
+            for d in $(rclone lsd "garage:$dest" 2>/dev/null | awk '{print $NF}'); do
+              if [ ! -d "$site/$d" ]; then
+                excludes="$excludes --exclude /$d/**"
+              fi
+            done
+            echo "root sync: excluding foreign prefixes:${excludes:- (none)}"
+          fi
+          rclone sync "$site" "garage:$dest" $excludes \
             --checksum --fast-list --transfers 8 --stats-one-line
-          echo "synced $(find "${{ inputs.source-dir }}/site" -type f | wc -l) files to $dest"
+          echo "synced $(find "$site" -type f | wc -l) files to $dest"
