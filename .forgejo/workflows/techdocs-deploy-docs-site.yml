@@ -49,7 +49,7 @@ jobs:
     runs-on: docker
     # First-party Harbor image, version-pinned (the ghcr fan-out freezes — see
     # techdocs-generate.yml). 1.4.0 ships zensical + rclone.
-    container: harbor.webgrip.dev/webgrip/techdocs-builder:1.5.0
+    container: harbor.webgrip.dev/webgrip/techdocs-builder:1.6.0
     steps:
       - uses: actions/checkout@v4
 
@@ -126,6 +126,12 @@ jobs:
           print(f'{stubs} redirect stubs written')
           EOF
 
+      - name: Pagefind index (estate multisite search)
+        # Writes site/pagefind/ — the per-prefix index the estate landing page
+        # merges browser-side (pagefind.app/docs/multisite; same-domain, no CORS).
+        run: |
+          pagefind --site "${{ inputs.source-dir }}/site"
+
       - name: Secret gate (gitleaks)
         # Blocks the publish when the BUILT site contains a secret-shaped string.
         # Estate config baked into the image (narrow allowlists — runbook paths +
@@ -164,6 +170,11 @@ jobs:
             done
             echo "root sync: excluding foreign prefixes:${excludes:- (none)}"
           fi
+          # --backup-dir: every delete/overwrite lands in the trash bucket
+          # instead of vanishing (the 2026-08-11 estate-wipe lesson). Restore =
+          # rclone copy from the dated dir; prune old dirs manually.
+          trash="garage:${{ inputs.bucket }}-trash/${prefix:-root}/$(date -u +%Y%m%dT%H%M%SZ)"
           rclone sync "$site" "garage:$dest" $excludes \
+            --backup-dir "$trash" \
             --checksum --fast-list --transfers 8 --stats-one-line
           echo "synced $(find "$site" -type f | wc -l) files to $dest"
