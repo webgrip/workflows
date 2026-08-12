@@ -1,3 +1,7 @@
+## 1.8.0 (2026-08-12)
+
+* feat(docs): publish to own docs-workflows bucket (estate #2) ([1d40681](https://forgejo.webgrip.dev/webgrip/workflows/commit/1d40681)), closes [#2](https://forgejo.webgrip.dev/webgrip/workflows/issues/2)
+
 ## 1.7.0 (2026-08-12)
 
 * feat(docs): flip strict link validation on — links verified clean (estate item #17) ([b3705fc](https://forgejo.webgrip.dev/webgrip/workflows/commit/b3705fc)), closes [#17](https://forgejo.webgrip.dev/webgrip/workflows/issues/17)
