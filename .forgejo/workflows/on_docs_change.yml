@@ -33,7 +33,9 @@ jobs:
     needs: generate-documentation
     if: github.ref == 'refs/heads/main'
     with:
-      dest-prefix: workflows
+      # Own bucket (estate #2): this repo's key can touch nothing but
+      # docs-workflows(-trash), so a bad sync can never clobber the estate.
+      bucket: docs-workflows
       # strict:false until this repo's links are cleaned; flip like homelab did.
       strict: 'true'
     secrets:
