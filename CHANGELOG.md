@@ -1,3 +1,8 @@
+## 1.7.0 (2026-08-12)
+
+* feat(docs): flip strict link validation on — links verified clean (estate item #17) ([b3705fc](https://forgejo.webgrip.dev/webgrip/workflows/commit/b3705fc)), closes [#17](https://forgejo.webgrip.dev/webgrip/workflows/issues/17)
+* chore(docs): bump reusables — backup-dir trash-net + pagefind estate-search index (estate items 1+4) ([f2e235e](https://forgejo.webgrip.dev/webgrip/workflows/commit/f2e235e))
+
 ## 1.6.0 (2026-08-11)
 
 * feat(techdocs): estate items #1/#4/#12 plumbing — trash-net backup-dir, pagefind index pass, builder ([abf3c95](https://forgejo.webgrip.dev/webgrip/workflows/commit/abf3c95)), closes [4/#12](https://forgejo.webgrip.dev/webgrip/workflows/issues/12)
