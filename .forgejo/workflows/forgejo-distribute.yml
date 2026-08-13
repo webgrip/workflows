@@ -130,10 +130,24 @@ jobs:
           docker-tags: |
             ${{ inputs.owner }}/${{ inputs.image-name }}:${{ inputs.version }}
             ${{ inputs.push-latest && format('{0}/{1}:latest', inputs.owner, inputs.image-name) || '' }}
-      # setup-buildx guarantees the buildx CLI plugin for imagetools; no builder is used.
-      - name: Set up buildx (mirror mode)
+      # ASSERT the buildx CLI plugin; do NOT run setup-buildx-action here.
+      # This step only needs `imagetools` (a registry-side operation) and the
+      # comment below used to say "no builder is used" — but setup-buildx-action
+      # BUILDS one regardless: it starts a `buildx_buildkit_builder-<uuid>`
+      # container (default image moby/buildkit:buildx-stable-1) on the shared
+      # per-node dind daemon. Those containers live OUTSIDE kubepods cgroups, so
+      # Kubernetes cannot see or bound their memory; one leaked here on
+      # 2026-07-30, grew for 12 days and took fringe-workstation NotReady on
+      # 2026-08-11 (homelab-cluster rfc-ci-isolation-talos). The ci-runner image
+      # ships the plugin at /usr/local/lib/docker/cli-plugins/docker-buildx, so
+      # asserting it is both sufficient and free.
+      - name: Assert buildx CLI plugin (mirror mode)
         if: inputs.mirror-from-registry != ''
-        uses: docker/setup-buildx-action@v3
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx version >/dev/null 2>&1 \
+            || { echo "::error::docker buildx plugin missing. The ci-runner image is expected to ship it at /usr/local/lib/docker/cli-plugins/docker-buildx."; exit 1; }
       - name: Copy image from source registry (mirror mode)
         if: inputs.mirror-from-registry != ''
         shell: bash
