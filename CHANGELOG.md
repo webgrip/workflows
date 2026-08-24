@@ -1,3 +1,8 @@
+## 1.9.0 (2026-08-24)
+
+* Merge pull request 'feat(github): github-distribute reusable — repo mirror, GitHub Release, GHCR dig ([a1b8b76](https://forgejo.webgrip.dev/webgrip/workflows/commit/a1b8b76)), closes [#48](https://forgejo.webgrip.dev/webgrip/workflows/issues/48)
+* feat(github): github-distribute reusable — repo mirror, GitHub Release, GHCR digest-copy ([773726f](https://forgejo.webgrip.dev/webgrip/workflows/commit/773726f))
+
 ## 1.8.0 (2026-08-12)
 
 * feat(docs): publish to own docs-workflows bucket (estate #2) ([1d40681](https://forgejo.webgrip.dev/webgrip/workflows/commit/1d40681)), closes [#2](https://forgejo.webgrip.dev/webgrip/workflows/issues/2)
