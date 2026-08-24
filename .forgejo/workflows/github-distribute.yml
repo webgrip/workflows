@@ -1,0 +1,179 @@
+name: '[Call] GitHub Distribute'
+
+# Mirrors a release out to GitHub: force-pushes the repo's branches and tags to the
+# github.com twin, creates the GitHub Release for the tag (notes copied from the Forgejo
+# release via the API, so the workflow_dispatch backfill path gets them too), and
+# digest-copies the container image to GHCR. Sibling of forgejo-distribute.yml — same
+# proven shapes: normal jobs inside a job-level reusable, imagetools for the image copy.
+# First caller: webgrip/ploeg on_release_published (inlined there first, extracted here).
+#
+# Direction is one-way BY DESIGN: the Forgejo repo is the source of truth and every
+# branch push here is --force. Never commit on the GitHub side — the next release
+# overwrites it without ceremony.
+#
+# Identity: one GitHub account drives all three concerns — git push, the Releases API,
+# and the GHCR docker login. Callers pass GH_USERNAME + GH_TOKEN, where the token is a
+# CLASSIC PAT with `repo` + `write:packages`: fine-grained PATs cannot push to GHCR.
+# (Secret names deliberately avoid the GITHUB_ prefix — reserved on both forges.)
+#
+# GHCR mirror mode mirrors forgejo-distribute's: the image is built ONCE elsewhere
+# (e.g. Harbor) and copied with `docker buildx imagetools create`, which clones the
+# whole multi-arch manifest list by digest — both registries serve byte-identical
+# images, and a pull/tag/push loop (which would flatten to the runner's arch) is
+# avoided. Callers should `needs:` the job that builds the source image. cosign
+# accessories are NOT copied (imagetools moves just the image manifest list); signature
+# verification stays against the source registry. NB: the first push creates the GHCR
+# package PRIVATE — flip it public once in the package settings, or anonymous pulls 401.
+
+on:
+  workflow_call:
+    secrets:
+      GH_USERNAME:
+        description: 'GitHub username the mirror acts as (git push, Releases API, GHCR login).'
+        required: true
+      GH_TOKEN:
+        description: 'Classic PAT for that user, scopes `repo` + `write:packages` — fine-grained PATs cannot write GHCR.'
+        required: true
+      SOURCE_REGISTRY_USER:
+        description: 'Image mirror only: pull user for mirror-from-registry (e.g. secrets.HARBOR_ROBOT_USER).'
+        required: false
+      SOURCE_REGISTRY_TOKEN:
+        description: 'Image mirror only: pull token for mirror-from-registry.'
+        required: false
+    inputs:
+      enabled:
+        description: 'Gate the jobs from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass conditions (e.g. a non-empty release version) here instead.'
+        type: boolean
+        required: false
+        default: true
+      version:
+        description: 'Bare semver of the release, e.g. 1.2.3 or 0.1.0-rc.4. A hyphen marks the GitHub Release as a prerelease.'
+        type: string
+        required: true
+      repo:
+        description: 'OWNER/REPO, identical on both forges (e.g. webgrip/ploeg). Explicit because github.repository is unreliable on Forgejo workflow_dispatch.'
+        type: string
+        required: true
+      branches:
+        description: 'Space-separated branch names to force-push to GitHub. Tags are always mirrored, all of them.'
+        type: string
+        required: false
+        default: 'main'
+      create-release:
+        description: 'Create the GitHub Release for v<version> after the ref mirror. Idempotent: an existing release is left untouched.'
+        type: boolean
+        required: false
+        default: true
+      owner:
+        description: 'Image owner (org) on both registries. Hardcoded default because github.repository_owner is EMPTY on Forgejo workflow_dispatch.'
+        type: string
+        required: false
+        default: 'webgrip'
+      image-name:
+        description: 'Container image name (e.g. ploegd). Empty skips the GHCR job.'
+        type: string
+        required: false
+        default: ''
+      mirror-from-registry:
+        description: 'Registry the already-built image is copied from. Assumes the same <owner>/<image-name> path on both sides.'
+        type: string
+        required: false
+        default: 'harbor.webgrip.dev'
+      push-latest:
+        description: 'Also move <image>:latest on GHCR. Callers should pass false for prereleases.'
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  github-publish:
+    name: 'Mirror & Release (GitHub)'
+    if: inputs.enabled
+    runs-on: docker
+    env:
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      GH_HOST: github.com # explicit: gh must not resolve against the Forgejo host vars
+      TAG: v${{ inputs.version }}
+    steps:
+      # fetch-depth 0 = all branches and tags, so one push refreshes the whole mirror.
+      # Explicit repository: inputs.repo, not the github.repository dispatch trap above.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          fetch-depth: 0
+      - name: Mirror refs to GitHub
+        shell: bash
+        env:
+          GH_USER: ${{ secrets.GH_USERNAME }}
+          REPO: ${{ inputs.repo }}
+          BRANCHES: ${{ inputs.branches }}
+        # Token via GIT_CONFIG_* env (git ≥2.31), not the URL or -c argv: keeps it out
+        # of the process list. Force: Forgejo is authoritative, the mirror never is.
+        run: |
+          set -euo pipefail
+          export GIT_CONFIG_COUNT=1 \
+                 GIT_CONFIG_KEY_0='http.https://github.com/.extraheader' \
+                 GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf '%s:%s' "$GH_USER" "$GH_TOKEN" | base64 -w0)"
+          refspecs=('+refs/tags/*:refs/tags/*')
+          for b in $BRANCHES; do
+            refspecs+=("+refs/remotes/origin/${b}:refs/heads/${b}")
+          done
+          git push --force "https://github.com/${REPO}.git" "${refspecs[@]}"
+      - name: Create GitHub release
+        if: inputs.create-release
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          REPO: ${{ inputs.repo }}
+          # Per-job token; read-only use — fetches the Forgejo release body so notes
+          # survive the workflow_dispatch backfill path (event.release.body is empty there).
+          FORGEJO_API_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists on github.com/${REPO} — nothing to do."
+            exit 0
+          fi
+          body="$(curl -fsS -H "Authorization: token ${FORGEJO_API_TOKEN}" \
+            "${GITHUB_SERVER_URL}/api/v1/repos/${REPO}/releases/tags/${TAG}" \
+            | jq -r '.body // ""')"
+          args=(--repo "$REPO" --title "$TAG" --verify-tag)
+          [[ "$VERSION" == *-* ]] && args+=(--prerelease)
+          if [[ -n "$body" ]]; then
+            printf '%s' "$body" > /tmp/release-notes.md
+            args+=(--notes-file /tmp/release-notes.md)
+          else
+            args+=(--generate-notes)
+          fi
+          gh release create "$TAG" "${args[@]}"
+
+  github-distribute-image:
+    name: 'Distribute image (GHCR)'
+    if: inputs.enabled && inputs.image-name != ''
+    runs-on: docker
+    steps:
+      # setup-buildx guarantees the buildx CLI plugin for imagetools; no builder is used.
+      - uses: docker/setup-buildx-action@v3
+      - name: Copy image from source registry
+        shell: bash
+        env:
+          # Env, not `${{ }}` shell interpolation: Harbor robot usernames contain `$`.
+          SOURCE_REGISTRY: ${{ inputs.mirror-from-registry }}
+          SOURCE_USER: ${{ secrets.SOURCE_REGISTRY_USER }}
+          SOURCE_TOKEN: ${{ secrets.SOURCE_REGISTRY_TOKEN }}
+          GHCR_USER: ${{ secrets.GH_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GH_TOKEN }}
+          OWNER: ${{ inputs.owner }}
+          IMAGE: ${{ inputs.image-name }}
+          VERSION: ${{ inputs.version }}
+          PUSH_LATEST: ${{ inputs.push-latest }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$SOURCE_TOKEN" | docker login "$SOURCE_REGISTRY" -u "$SOURCE_USER" --password-stdin
+          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          src="${SOURCE_REGISTRY}/${OWNER}/${IMAGE}:${VERSION}"
+          docker buildx imagetools create -t "ghcr.io/${OWNER}/${IMAGE}:${VERSION}" "$src"
+          if [ "$PUSH_LATEST" = "true" ]; then
+            docker buildx imagetools create -t "ghcr.io/${OWNER}/${IMAGE}:latest" "$src"
+          fi
+          docker buildx imagetools inspect "ghcr.io/${OWNER}/${IMAGE}:${VERSION}"
