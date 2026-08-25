@@ -84,6 +84,26 @@ on:
         type: boolean
         required: false
         default: false
+      ref:
+        description: 'Git ref to check out for the chart job. Defaults to v<version>.'
+        type: string
+        required: false
+        default: ''
+      chart-path:
+        description: 'Path to the Helm chart (e.g. ops/helm/mychart). Empty skips the chart job. Chart.yaml version must equal <version> at <ref>.'
+        type: string
+        required: false
+        default: ''
+      chart-name:
+        description: 'Chart name — the .tgz basename `helm package` produces.'
+        type: string
+        required: false
+        default: ''
+      chart-oci-path:
+        description: 'OCI repo path under ghcr.io for the chart. Defaults to <owner>/charts, mirroring the Harbor layout and keeping charts out of the image namespace.'
+        type: string
+        required: false
+        default: ''
 
 jobs:
   github-publish:
@@ -308,3 +328,58 @@ jobs:
             docker buildx imagetools create -t "ghcr.io/${OWNER}/${IMAGE}:latest" "$src"
           fi
           docker buildx imagetools inspect "ghcr.io/${OWNER}/${IMAGE}:${VERSION}"
+
+  # The chart is BUILT from source here rather than copied from Harbor, matching
+  # forgejo-distribute's publish-chart: `helm package` is deterministic from the tagged
+  # tree, and copying an OCI artifact by digest needs tooling the runner does not carry
+  # (imagetools understands image manifest lists, not Helm's config media type).
+  # Independent of the image and ref jobs — nothing to wait for.
+  github-publish-chart:
+    name: 'Publish chart (GHCR)'
+    if: inputs.enabled && inputs.chart-path != ''
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repo }}
+          ref: ${{ inputs.ref || format('v{0}', inputs.version) }}
+      # helm is baked into the ci-runner host image; setup-helm remains as fallback for
+      # runners without it. Absolute URL + pinned version: data.forgejo.org has an
+      # incomplete mirror set, and 'latest' resolution rate-limits via api.github.com.
+      - name: Check for preinstalled helm
+        id: helm-check
+        shell: bash
+        run: |
+          if command -v helm >/dev/null 2>&1; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: https://github.com/azure/setup-helm@v4
+        if: steps.helm-check.outputs.present != 'true'
+        with:
+          version: v3.18.4
+      - name: Push chart (OCI)
+        shell: bash
+        env:
+          GHCR_USER: ${{ secrets.GH_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GH_TOKEN }}
+          OWNER: ${{ inputs.owner }}
+          VERSION: ${{ inputs.version }}
+          CHART_PATH: ${{ inputs.chart-path }}
+          CHART_NAME: ${{ inputs.chart-name }}
+          CHART_OCI_PATH: ${{ inputs.chart-oci-path }}
+        run: |
+          set -euo pipefail
+          oci="${CHART_OCI_PATH:-${OWNER}/charts}"
+          printf '%s' "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GHCR_USER" --password-stdin
+          # Idempotent for the same reason the Harbor chart push is: a version that is
+          # already published is the desired end state, and re-pushing it is what breaks
+          # the backfill path.
+          if helm show chart "oci://ghcr.io/${oci}/${CHART_NAME}" --version "$VERSION" >/dev/null 2>&1; then
+            echo "ghcr.io/${oci}/${CHART_NAME}:${VERSION} is already published — nothing to do."
+            exit 0
+          fi
+          helm package "$CHART_PATH"
+          helm push "./${CHART_NAME}-${VERSION}.tgz" "oci://ghcr.io/${oci}"
+          echo "Pushed ghcr.io/${oci}/${CHART_NAME}:${VERSION}"
