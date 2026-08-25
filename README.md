@@ -87,6 +87,25 @@ jobs:
 > [Conditional (ref-gated) jobs on Forgejo](#conditional-ref-gated-jobs-on-forgejo) and
 > [ADR 0003](docs/adrs/0003-hard-gate-quality-workflows.md).
 
+> ⚠️ **Diagnostics differ too: `::error::` / `::warning::` / `::notice::` are GitHub-only.** They create
+> annotations on GitHub — a red banner on the run page, an entry in the job's Annotations panel, an inline
+> comment on the PR diff. Forgejo has **no annotations surface**: `act_runner` re-emits the line with a `❗`
+> marker but keeps the raw `::error::` text, and the job API exposes no field for it, so all you get is an
+> uglier log line. `$GITHUB_STEP_SUMMARY` is not a surface either — Forgejo dumps it into the log as a single
+> line with literal `\n` sequences.
+>
+> So the **`.forgejo/` tree uses plain `ERROR:` / `WARN:` / `NOTE:` prefixes** on stdout, and puts the
+> operator-actionable remediation on the last lines before `exit 1` — the log tail is what you land on when
+> you expand a failed step. The **`.github/` tree keeps the workflow commands**, where they do real work.
+>
+> What Forgejo *does* surface is the **step list**: each step's name and pass/fail state are structured data
+> in the job view. That makes a short, well-named precondition step (`Verify GHCR credentials`) worth far
+> more than any log formatting — you see which check failed without opening anything. Prefer splitting
+> preconditions into named steps over burying them in a long one.
+>
+> `::add-mask::` **is** functional on Forgejo (it is what produces `AUTHORIZATION: basic ***` in checkout
+> logs) — keep it.
+
 > **Requires Forgejo v15.0+** (cross-repository `workflow_call`). The `webgrip/workflows` repo must be
 > **public** on the Forgejo instance. The Forgejo port is being rolled out tier by tier — consult
 > `.forgejo/workflows/` for the workflows ported so far.

@@ -110,9 +110,9 @@ runs:
       run: |
         set -euo pipefail
         command -v docker >/dev/null \
-          || { echo "::error::docker CLI not on PATH. This action drives the CLI directly; runs-on must provide it."; exit 1; }
+          || { echo "ERROR: docker CLI not on PATH. This action drives the CLI directly; runs-on must provide it."; exit 1; }
         docker buildx version >/dev/null 2>&1 \
-          || { echo "::error::docker buildx plugin missing. The ci-runner image is expected to ship it at /usr/local/lib/docker/cli-plugins/docker-buildx."; exit 1; }
+          || { echo "ERROR: docker buildx plugin missing. The ci-runner image is expected to ship it at /usr/local/lib/docker/cli-plugins/docker-buildx."; exit 1; }
 
     - name: Log in to registries
       shell: bash
@@ -133,7 +133,7 @@ runs:
         fi
 
         if [[ -z "${REGISTRY_USERNAME:-}" || -z "${REGISTRY_TOKEN:-}" ]]; then
-          echo "::error::REGISTRY_USERNAME/REGISTRY_TOKEN are empty; cannot push to ${REGISTRY}."
+          echo "ERROR: REGISTRY_USERNAME/REGISTRY_TOKEN are empty; cannot push to ${REGISTRY}."
           exit 1
         fi
         printf '%s' "$REGISTRY_TOKEN" | docker login "$REGISTRY" --username "$REGISTRY_USERNAME" --password-stdin
@@ -201,10 +201,10 @@ runs:
               # Reachable but unusable. Remove the half-made client entry before falling back,
               # otherwise the name is taken and the docker-container create below fails too.
               docker buildx rm --force "$name" >/dev/null 2>&1 || true
-              echo "::warning::${BUILDKITD_ENDPOINT} answered but the remote builder did not come up; falling back to docker-container."
+              echo "WARN:  ${BUILDKITD_ENDPOINT} answered but the remote builder did not come up; falling back to docker-container."
             fi
           else
-            echo "::warning::${BUILDKITD_ENDPOINT} is not reachable; falling back to docker-container. Builds still work, with a cold local cache."
+            echo "WARN:  ${BUILDKITD_ENDPOINT} is not reachable; falling back to docker-container. Builds still work, with a cold local cache."
           fi
         fi
 
