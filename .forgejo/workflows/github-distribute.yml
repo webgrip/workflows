@@ -95,6 +95,34 @@ jobs:
       GH_HOST: github.com # explicit: gh must not resolve against the Forgejo host vars
       TAG: v${{ inputs.version }}
     steps:
+      # Preflight, because a bad GH_TOKEN does not fail loudly downstream: the git push
+      # below gets a 401 from github.com, git falls back to the credential subsystem,
+      # finds no helper, and blocks on a terminal prompt that never comes — the job hangs
+      # until the runner-level timeout (ploeg run 170: 20+ minutes, holding a runner slot
+      # while the caller job sat `blocked`). One API call turns that into a named failure
+      # in seconds, and names the secret that has to be rotated.
+      - name: Verify GitHub credentials
+        shell: bash
+        env:
+          GH_USER: ${{ secrets.GH_USERNAME }}
+        run: |
+          set -euo pipefail
+          [[ -n "$GH_USER"  ]] || { echo "::error::GH_USERNAME secret is empty."; exit 1; }
+          [[ -n "$GH_TOKEN" ]] || { echo "::error::GH_TOKEN secret is empty."; exit 1; }
+          code="$(curl -sS -o /tmp/gh-user.json -D /tmp/gh-user.headers -w '%{http_code}' \
+            -H "Authorization: token ${GH_TOKEN}" https://api.github.com/user)"
+          if [[ "$code" != 200 ]]; then
+            echo "::error::GH_TOKEN rejected by api.github.com (HTTP ${code}) — the secret is invalid, expired or revoked. Replace it with a CLASSIC PAT carrying 'repo' + 'write:packages'."
+            exit 1
+          fi
+          echo "github.com login: $(jq -r .login /tmp/gh-user.json)"
+          # Classic PATs report their scopes in this header; fine-grained PATs send it empty.
+          scopes="$(tr -d '\r' < /tmp/gh-user.headers | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes: //p')"
+          echo "token scopes: ${scopes:-<none — fine-grained PAT>}"
+          case ",${scopes// /}," in
+            *,repo,*) ;;
+            *) echo "::warning::GH_TOKEN does not carry the classic 'repo' scope — the branch/tag push may be refused." ;;
+          esac
       # fetch-depth 0 = all branches and tags, so one push refreshes the whole mirror.
       # Explicit repository: inputs.repo, not the github.repository dispatch trap above.
       - uses: actions/checkout@v4
@@ -111,14 +139,32 @@ jobs:
         # of the process list. Force: Forgejo is authoritative, the mirror never is.
         run: |
           set -euo pipefail
-          export GIT_CONFIG_COUNT=1 \
+          # Never let git fall back to an interactive credential prompt on a 401: with no
+          # tty behind it that blocks forever. Prompts off + an empty helper list means a
+          # rejected token surfaces as `Authentication failed`, immediately.
+          export GIT_TERMINAL_PROMPT=0
+          unset GIT_ASKPASS SSH_ASKPASS
+          export GIT_CONFIG_COUNT=3 \
                  GIT_CONFIG_KEY_0='http.https://github.com/.extraheader' \
-                 GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf '%s:%s' "$GH_USER" "$GH_TOKEN" | base64 -w0)"
+                 GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf '%s:%s' "$GH_USER" "$GH_TOKEN" | base64 -w0)" \
+                 GIT_CONFIG_KEY_1='credential.helper' \
+                 GIT_CONFIG_VALUE_1='' \
+                 GIT_CONFIG_KEY_2='core.askPass' \
+                 GIT_CONFIG_VALUE_2=''
           refspecs=('+refs/tags/*:refs/tags/*')
           for b in $BRANCHES; do
             refspecs+=("+refs/remotes/origin/${b}:refs/heads/${b}")
           done
-          git push --force "https://github.com/${REPO}.git" "${refspecs[@]}"
+          # Backstop for anything that still blocks (egress drop, a git build that ignores
+          # GIT_TERMINAL_PROMPT): a mirror push of this size is seconds, never minutes.
+          set +e
+          timeout 300 git push --force "https://github.com/${REPO}.git" "${refspecs[@]}"
+          rc=$?
+          set -e
+          if [[ $rc == 124 ]]; then
+            echo "::error::git push to github.com timed out after 5m — read this as an auth or egress failure, never as a slow push."
+          fi
+          exit "$rc"
       - name: Create GitHub release
         if: inputs.create-release
         shell: bash
@@ -152,6 +198,30 @@ jobs:
     if: inputs.enabled && inputs.image-name != ''
     runs-on: docker
     steps:
+      # Same preflight as the mirror job, ahead of the builder boot: an unusable token
+      # reaches `docker login ghcr.io` as the opaque `denied: denied` (ploeg run 170),
+      # which reads like a permissions problem on the package rather than a dead secret.
+      - name: Verify GHCR credentials
+        shell: bash
+        env:
+          GHCR_USER: ${{ secrets.GH_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          set -euo pipefail
+          [[ -n "$GHCR_USER"  ]] || { echo "::error::GH_USERNAME secret is empty."; exit 1; }
+          [[ -n "$GHCR_TOKEN" ]] || { echo "::error::GH_TOKEN secret is empty."; exit 1; }
+          code="$(curl -sS -o /dev/null -D /tmp/gh-user.headers -w '%{http_code}' \
+            -H "Authorization: token ${GHCR_TOKEN}" https://api.github.com/user)"
+          if [[ "$code" != 200 ]]; then
+            echo "::error::GH_TOKEN rejected by api.github.com (HTTP ${code}) — the secret is invalid, expired or revoked. GHCR needs a CLASSIC PAT with 'repo' + 'write:packages'."
+            exit 1
+          fi
+          scopes="$(tr -d '\r' < /tmp/gh-user.headers | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes: //p')"
+          echo "token scopes: ${scopes:-<none — fine-grained PAT>}"
+          case ",${scopes// /}," in
+            *,write:packages,*) ;;
+            *) echo "::error::GH_TOKEN lacks the 'write:packages' scope — GHCR refuses it. Fine-grained PATs cannot write GHCR at all; use a classic PAT."; exit 1 ;;
+          esac
       # setup-buildx guarantees the buildx CLI plugin for imagetools; no builder is used.
       - uses: docker/setup-buildx-action@v3
       - name: Copy image from source registry
@@ -170,7 +240,10 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s' "$SOURCE_TOKEN" | docker login "$SOURCE_REGISTRY" -u "$SOURCE_USER" --password-stdin
-          printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+          if ! printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin; then
+            echo "::error::docker login ghcr.io failed as ${GHCR_USER}. 'denied: denied' from GHCR means the token itself is not accepted — rotate GH_TOKEN to a classic PAT with 'repo' + 'write:packages'."
+            exit 1
+          fi
           src="${SOURCE_REGISTRY}/${OWNER}/${IMAGE}:${VERSION}"
           docker buildx imagetools create -t "ghcr.io/${OWNER}/${IMAGE}:${VERSION}" "$src"
           if [ "$PUSH_LATEST" = "true" ]; then
