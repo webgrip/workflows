@@ -1,3 +1,8 @@
+## <small>1.9.1 (2026-08-25)</small>
+
+* Merge pull request 'fix(github): fail fast on a dead GH_TOKEN instead of hanging the mirror' (#50) f ([14b5825](https://forgejo.webgrip.dev/webgrip/workflows/commit/14b5825)), closes [#50](https://forgejo.webgrip.dev/webgrip/workflows/issues/50)
+* fix(github): fail fast on a dead GH_TOKEN instead of hanging the mirror ([2e2d49e](https://forgejo.webgrip.dev/webgrip/workflows/commit/2e2d49e))
+
 ## 1.9.0 (2026-08-24)
 
 * Merge pull request 'feat(github): github-distribute reusable — repo mirror, GitHub Release, GHCR dig ([a1b8b76](https://forgejo.webgrip.dev/webgrip/workflows/commit/a1b8b76)), closes [#48](https://forgejo.webgrip.dev/webgrip/workflows/issues/48)
