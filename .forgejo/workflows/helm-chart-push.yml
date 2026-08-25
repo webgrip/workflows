@@ -87,7 +87,33 @@ jobs:
           printf '%s' "$REGISTRY_TOKEN" | helm registry login "$REGISTRY" --username "$REGISTRY_USERNAME" --password-stdin
       - run: |
           export HELM_EXPERIMENTAL_OCI=1
-      - run: |
+      # Harbor tags are immutable, so re-publishing a version that is already there fails
+      # the job outright instead of no-opping — ploeg run 183 died with HTTP 412,
+      # "'charts/ploeg:0.2.0-rc.23' configured as immutable", on a backfill of a release
+      # whose chart was already published. An already-published chart is the desired end
+      # state, so probe and skip. Runs after the login because the probe needs the same
+      # credentials. Fail-open: anything but a clean hit falls through and pushes, which
+      # is the behaviour every first publish already has.
+      - name: Probe the registry for this chart version
+        id: chart-probe
+        shell: bash
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          OCI_PATH: ${{ inputs.oci-path || github.repository }}
+          CHART_NAME: ${{ inputs.name }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -uo pipefail
+          if helm show chart "oci://${REGISTRY}/${OCI_PATH}/${CHART_NAME}" --version "${VERSION}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "${OCI_PATH}/${CHART_NAME}:${VERSION} is already published on ${REGISTRY} — skipping the push."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "${OCI_PATH}/${CHART_NAME}:${VERSION} not found on ${REGISTRY} — packaging and pushing."
+          fi
+      - name: Package and push the chart
+        if: steps.chart-probe.outputs.exists != 'true'
+        run: |
           helm package ${{ inputs.path }}
           helm push ./${{ inputs.name }}-${{ inputs.version }}.tgz oci://${{ inputs.registry }}/${{ inputs.oci-path || github.repository }}
       # Forgejo-only: an OCI-pushed chart lands in the CONTAINER registry (type
