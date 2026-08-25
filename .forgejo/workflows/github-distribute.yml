@@ -92,7 +92,6 @@ jobs:
     runs-on: docker
     env:
       GH_TOKEN: ${{ secrets.GH_TOKEN }}
-      GH_HOST: github.com # explicit: gh must not resolve against the Forgejo host vars
       TAG: v${{ inputs.version }}
     steps:
       # Preflight, because a bad GH_TOKEN does not fail loudly downstream: the git push
@@ -179,24 +178,66 @@ jobs:
           # Per-job token; read-only use — fetches the Forgejo release body so notes
           # survive the workflow_dispatch backfill path (event.release.body is empty there).
           FORGEJO_API_TOKEN: ${{ github.token }}
+        # REST API, not the gh CLI: the Forgejo ci-runner image does not ship gh, so the
+        # step died with `gh: command not found` after the ref mirror had already
+        # succeeded (ploeg run 181). Installing gh would mean one more github.com download
+        # on the release path, which is exactly the dependency that keeps flaking (the
+        # syft installer took the signing job out twice). curl and jq are already here.
         run: |
           set -euo pipefail
-          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-            echo "Release $TAG already exists on github.com/${REPO} — nothing to do."
+
+          gh_api() {
+            curl -sS -H "Authorization: token ${GH_TOKEN}" \
+                 -H 'Accept: application/vnd.github+json' \
+                 -H 'X-GitHub-Api-Version: 2022-11-28' \
+                 -H 'Content-Type: application/json' "$@"
+          }
+
+          # Idempotent: an existing release is left exactly as it is.
+          code="$(gh_api -o /tmp/rel.json -w '%{http_code}' \
+            "https://api.github.com/repos/${REPO}/releases/tags/${TAG}")"
+          if [ "$code" = "200" ]; then
+            echo "Release ${TAG} already exists on github.com/${REPO} — nothing to do."
             exit 0
           fi
-          body="$(curl -fsS -H "Authorization: token ${FORGEJO_API_TOKEN}" \
-            "${GITHUB_SERVER_URL}/api/v1/repos/${REPO}/releases/tags/${TAG}" \
-            | jq -r '.body // ""')"
-          args=(--repo "$REPO" --title "$TAG" --verify-tag)
-          [[ "$VERSION" == *-* ]] && args+=(--prerelease)
-          if [[ -n "$body" ]]; then
-            printf '%s' "$body" > /tmp/release-notes.md
-            args+=(--notes-file /tmp/release-notes.md)
-          else
-            args+=(--generate-notes)
+
+          # What `gh release create --verify-tag` bought us: POST /releases will happily
+          # CREATE the tag as a side effect, and a release pointing at a tag the mirror
+          # never pushed would be a silent lie.
+          tag_code="$(gh_api -o /dev/null -w '%{http_code}' \
+            "https://api.github.com/repos/${REPO}/git/ref/tags/${TAG}")"
+          if [ "$tag_code" != "200" ]; then
+            echo "ERROR: tag ${TAG} is not on github.com/${REPO} (HTTP ${tag_code})."
+            echo "       The ref mirror has to land before a release can point at it."
+            exit 1
           fi
-          gh release create "$TAG" "${args[@]}"
+
+          # Notes come from the Forgejo release so the workflow_dispatch backfill path
+          # keeps them (github.event.release.body is empty there). Fail-soft: with no body
+          # we ask GitHub to generate the notes instead.
+          body="$(curl -sS -H "Authorization: token ${FORGEJO_API_TOKEN}" \
+            "${GITHUB_SERVER_URL}/api/v1/repos/${REPO}/releases/tags/${TAG}" \
+            | jq -r '.body // ""' 2>/dev/null || true)"
+
+          prerelease=false
+          case "$VERSION" in *-*) prerelease=true ;; esac
+
+          if [ -n "$body" ]; then
+            payload="$(jq -n --arg tag "$TAG" --arg body "$body" --argjson pre "$prerelease" \
+              '{tag_name:$tag, name:$tag, body:$body, prerelease:$pre, draft:false}')"
+          else
+            payload="$(jq -n --arg tag "$TAG" --argjson pre "$prerelease" \
+              '{tag_name:$tag, name:$tag, prerelease:$pre, draft:false, generate_release_notes:true}')"
+          fi
+
+          code="$(gh_api -o /tmp/created.json -w '%{http_code}' -X POST -d "$payload" \
+            "https://api.github.com/repos/${REPO}/releases")"
+          if [ "$code" != "201" ]; then
+            echo "ERROR: creating release ${TAG} failed (HTTP ${code})."
+            jq -r '.message // tostring' /tmp/created.json 2>/dev/null || cat /tmp/created.json
+            exit 1
+          fi
+          echo "Created $(jq -r .html_url /tmp/created.json)"
 
   github-distribute-image:
     name: 'Distribute image (GHCR)'
