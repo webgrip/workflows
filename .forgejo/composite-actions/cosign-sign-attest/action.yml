@@ -118,7 +118,7 @@ runs:
         set -euo pipefail
         # Always sign/attest by digest, never by tag (prevents tag-mutation attacks).
         DIGEST="$(docker buildx imagetools inspect "$IMAGE_REF" --format '{{.Manifest.Digest}}')"
-        [[ "$DIGEST" == sha256:* ]] || { echo "::error::could not resolve digest for $IMAGE_REF"; exit 1; }
+        [[ "$DIGEST" == sha256:* ]] || { echo "ERROR: could not resolve digest for $IMAGE_REF"; exit 1; }
         echo "image-with-digest=${IMAGE_NAME}@${DIGEST}" >> "$GITHUB_OUTPUT"
 
     - name: "Generate SBOM (Syft: CycloneDX)"
@@ -158,16 +158,16 @@ runs:
         #    NB: the Forgejo flow triggers on_release_published via workflow_dispatch on a branch,
         #    NOT a release event on a tag — so the role must bind event_name=workflow_dispatch, not
         #    event_name=release/ref=refs/tags/* (the GitHub-shaped binding). See the printed claims.
-        [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || { echo "::error::no OIDC token endpoint — is enable-openid-connect set on this job?"; exit 1; }
+        [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || { echo "ERROR: no OIDC token endpoint — is enable-openid-connect set on this job?"; exit 1; }
         # GitHub's request URL already has a query string; Forgejo's may not — pick the right separator
         # so the audience param is actually applied (a malformed URL yields the default audience -> 400).
         case "$ACTIONS_ID_TOKEN_REQUEST_URL" in *\?*) sep='&';; *) sep='?';; esac
         oidc_code="$(curl -sS -o /tmp/oidc.json -w '%{http_code}' \
           -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
           "${ACTIONS_ID_TOKEN_REQUEST_URL}${sep}audience=${OIDC_AUDIENCE}" || echo 000)"
-        [ "$oidc_code" = "200" ] || { echo "::error::OIDC token request HTTP ${oidc_code}: $(cat /tmp/oidc.json 2>/dev/null)"; exit 1; }
+        [ "$oidc_code" = "200" ] || { echo "ERROR: OIDC token request HTTP ${oidc_code}: $(cat /tmp/oidc.json 2>/dev/null)"; exit 1; }
         oidc="$(jq -r '.value' /tmp/oidc.json)"
-        [ -n "$oidc" ] && [ "$oidc" != "null" ] || { echo "::error::OIDC token endpoint returned no .value"; exit 1; }
+        [ -n "$oidc" ] && [ "$oidc" != "null" ] || { echo "ERROR: OIDC token endpoint returned no .value"; exit 1; }
         # Diagnostic: decode + print the token's CLAIMS only (never the token itself). These are what
         # the OpenBao role binds against — compare to bound_claims/bound_audiences if the login 400s.
         b64pad() { p="$(printf '%s' "$1" | tr '_-' '/+')"; m=$(( ${#p} % 4 )); [ "$m" -ne 0 ] && p="${p}$(printf '%*s' $((4 - m)) '' | tr ' ' '=')"; printf '%s' "$p"; }
@@ -177,9 +177,9 @@ runs:
         login_code="$(curl -sS -o /tmp/bao.json -w '%{http_code}' --request POST \
           --data "$(jq -nc --arg jwt "$oidc" --arg role "$OPENBAO_ROLE" '{jwt:$jwt, role:$role}')" \
           "${VAULT_ADDR}/v1/auth/forgejo/login" || echo 000)"
-        [ "$login_code" = "200" ] || { echo "::error::OpenBao JWT login HTTP ${login_code}: $(cat /tmp/bao.json 2>/dev/null)"; exit 1; }
+        [ "$login_code" = "200" ] || { echo "ERROR: OpenBao JWT login HTTP ${login_code}: $(cat /tmp/bao.json 2>/dev/null)"; exit 1; }
         VAULT_TOKEN="$(jq -r '.auth.client_token' /tmp/bao.json)"
-        [ -n "$VAULT_TOKEN" ] && [ "$VAULT_TOKEN" != "null" ] || { echo "::error::OpenBao login returned no client_token"; exit 1; }
+        [ -n "$VAULT_TOKEN" ] && [ "$VAULT_TOKEN" != "null" ] || { echo "ERROR: OpenBao login returned no client_token"; exit 1; }
         export VAULT_ADDR VAULT_TOKEN
         # 3) The signing key never leaves OpenBao: cosign calls transit/sign over the API.
         # --tlog-upload=false keeps signing fully in-cluster: with a static OpenBao Transit key we do
@@ -201,10 +201,10 @@ runs:
               echo "DT_API_KEY=${dt_key}" >> "$GITHUB_ENV"
               echo "Dependency-Track API key sourced from OpenBao KV (${DT_KV_PATH})"
             else
-              echo "::warning::${DT_KV_PATH} readable but has no 'api-key' property — DT upload will be skipped"
+              echo "WARN:  ${DT_KV_PATH} readable but has no 'api-key' property — DT upload will be skipped"
             fi
           else
-            echo "::warning::could not read ${DT_KV_PATH} (policy grant pending?) — DT upload will be skipped"
+            echo "WARN:  could not read ${DT_KV_PATH} (policy grant pending?) — DT upload will be skipped"
           fi
         fi
 
@@ -249,7 +249,7 @@ runs:
           --data '{"scan_type":"sbom"}' || echo 000)"
         case "$code" in
           200|202) echo "Harbor SBOM generation queued for ${project}/${repository}@${digest}" ;;
-          *) echo "::warning::Harbor SBOM generation request returned HTTP ${code} (non-fatal): $(cat /tmp/sbom-gen.json 2>/dev/null)" ;;
+          *) echo "WARN:  Harbor SBOM generation request returned HTTP ${code} (non-fatal): $(cat /tmp/sbom-gen.json 2>/dev/null)" ;;
         esac
 
     - name: Upload SBOM to Dependency-Track (fail-soft)
@@ -275,7 +275,7 @@ runs:
           -F "bom=@sbom.cdx.json;type=application/json" || echo 000)"
         case "$code" in
           200|201) echo "uploaded SBOM to Dependency-Track (${PROJECT}:${VERSION})" ;;
-          *) echo "::warning::Dependency-Track upload returned HTTP ${code} (non-fatal)" ;;
+          *) echo "WARN:  Dependency-Track upload returned HTTP ${code} (non-fatal)" ;;
         esac
 
     - name: Summary

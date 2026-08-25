@@ -107,12 +107,17 @@ jobs:
           GH_USER: ${{ secrets.GH_USERNAME }}
         run: |
           set -euo pipefail
-          [[ -n "$GH_USER"  ]] || { echo "::error::GH_USERNAME secret is empty."; exit 1; }
-          [[ -n "$GH_TOKEN" ]] || { echo "::error::GH_TOKEN secret is empty."; exit 1; }
+          [[ -n "$GH_USER"  ]] || { echo "ERROR: GH_USERNAME secret is empty."; exit 1; }
+          [[ -n "$GH_TOKEN" ]] || { echo "ERROR: GH_TOKEN secret is empty."; exit 1; }
           code="$(curl -sS -o /tmp/gh-user.json -D /tmp/gh-user.headers -w '%{http_code}' \
             -H "Authorization: token ${GH_TOKEN}" https://api.github.com/user)"
           if [[ "$code" != 200 ]]; then
-            echo "::error::GH_TOKEN rejected by api.github.com (HTTP ${code}) — the secret is invalid, expired or revoked. Replace it with a CLASSIC PAT carrying 'repo' + 'write:packages'."
+            echo "ERROR: GH_TOKEN rejected by api.github.com (HTTP ${code})."
+            echo "       The secret is invalid, expired or revoked — this is not a scope"
+            echo "       problem; github.com refused the credential itself."
+            echo "       Fix: rotate the GH_TOKEN secret to a CLASSIC PAT owned by ${GH_USER},"
+            echo "            scopes 'repo' + 'write:packages'."
+            echo "            Fine-grained PATs cannot write GHCR at all."
             exit 1
           fi
           echo "github.com login: $(jq -r .login /tmp/gh-user.json)"
@@ -121,7 +126,7 @@ jobs:
           echo "token scopes: ${scopes:-<none — fine-grained PAT>}"
           case ",${scopes// /}," in
             *,repo,*) ;;
-            *) echo "::warning::GH_TOKEN does not carry the classic 'repo' scope — the branch/tag push may be refused." ;;
+            *) echo "WARN:  GH_TOKEN does not carry the classic 'repo' scope — the branch/tag push may be refused." ;;
           esac
       # fetch-depth 0 = all branches and tags, so one push refreshes the whole mirror.
       # Explicit repository: inputs.repo, not the github.repository dispatch trap above.
@@ -162,7 +167,7 @@ jobs:
           rc=$?
           set -e
           if [[ $rc == 124 ]]; then
-            echo "::error::git push to github.com timed out after 5m — read this as an auth or egress failure, never as a slow push."
+            echo "ERROR: git push to github.com timed out after 5m — read this as an auth or egress failure, never as a slow push."
           fi
           exit "$rc"
       - name: Create GitHub release
@@ -208,19 +213,28 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GH_TOKEN }}
         run: |
           set -euo pipefail
-          [[ -n "$GHCR_USER"  ]] || { echo "::error::GH_USERNAME secret is empty."; exit 1; }
-          [[ -n "$GHCR_TOKEN" ]] || { echo "::error::GH_TOKEN secret is empty."; exit 1; }
+          [[ -n "$GHCR_USER"  ]] || { echo "ERROR: GH_USERNAME secret is empty."; exit 1; }
+          [[ -n "$GHCR_TOKEN" ]] || { echo "ERROR: GH_TOKEN secret is empty."; exit 1; }
           code="$(curl -sS -o /dev/null -D /tmp/gh-user.headers -w '%{http_code}' \
             -H "Authorization: token ${GHCR_TOKEN}" https://api.github.com/user)"
           if [[ "$code" != 200 ]]; then
-            echo "::error::GH_TOKEN rejected by api.github.com (HTTP ${code}) — the secret is invalid, expired or revoked. GHCR needs a CLASSIC PAT with 'repo' + 'write:packages'."
+            echo "ERROR: GH_TOKEN rejected by api.github.com (HTTP ${code})."
+            echo "       The secret is invalid, expired or revoked — github.com refused the"
+            echo "       credential itself, so no package permission can help."
+            echo "       Fix: rotate the GH_TOKEN secret to a CLASSIC PAT owned by ${GHCR_USER},"
+            echo "            scopes 'repo' + 'write:packages'."
+            echo "            Fine-grained PATs cannot write GHCR at all."
             exit 1
           fi
           scopes="$(tr -d '\r' < /tmp/gh-user.headers | sed -n 's/^[Xx]-[Oo][Aa]uth-[Ss]copes: //p')"
           echo "token scopes: ${scopes:-<none — fine-grained PAT>}"
           case ",${scopes// /}," in
             *,write:packages,*) ;;
-            *) echo "::error::GH_TOKEN lacks the 'write:packages' scope — GHCR refuses it. Fine-grained PATs cannot write GHCR at all; use a classic PAT."; exit 1 ;;
+            *)
+              echo "ERROR: GH_TOKEN authenticates, but carries no 'write:packages' scope."
+              echo "       GHCR will refuse the push. Fine-grained PATs never carry it — the"
+              echo "       token has to be a CLASSIC PAT with 'repo' + 'write:packages'."
+              exit 1 ;;
           esac
       # setup-buildx guarantees the buildx CLI plugin for imagetools; no builder is used.
       - uses: docker/setup-buildx-action@v3
@@ -241,7 +255,10 @@ jobs:
           set -euo pipefail
           printf '%s' "$SOURCE_TOKEN" | docker login "$SOURCE_REGISTRY" -u "$SOURCE_USER" --password-stdin
           if ! printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin; then
-            echo "::error::docker login ghcr.io failed as ${GHCR_USER}. 'denied: denied' from GHCR means the token itself is not accepted — rotate GH_TOKEN to a classic PAT with 'repo' + 'write:packages'."
+            echo "ERROR: docker login ghcr.io failed as ${GHCR_USER}."
+            echo "       GHCR answers 'denied: denied' when it rejects the token itself, and"
+            echo "       'requested access to the resource is denied' when the password is empty."
+            echo "       Fix: rotate GH_TOKEN to a CLASSIC PAT with 'repo' + 'write:packages'."
             exit 1
           fi
           src="${SOURCE_REGISTRY}/${OWNER}/${IMAGE}:${VERSION}"

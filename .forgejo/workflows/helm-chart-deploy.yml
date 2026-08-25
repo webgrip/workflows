@@ -93,16 +93,16 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${{ inputs.image_tag }}" ] && [ -z "${{ inputs.image_tag_path }}" ]; then
-            echo "::notice::'image_tag' provided with no 'image_tag_path'. Will use default path: application.controllers.main.containers.app.image.tag" >&2
+            echo "NOTE:  'image_tag' provided with no 'image_tag_path'. Will use default path: application.controllers.main.containers.app.image.tag" >&2
           fi
           if [ -z "${{ inputs.image_tag }}" ] && [ -n "${{ inputs.image_tag_path }}" ]; then
-            echo "::notice::'image_tag_path' provided but no 'image_tag' value. No tag injection will occur." >&2
+            echo "NOTE:  'image_tag_path' provided but no 'image_tag' value. No tag injection will occur." >&2
           fi
           if [ -n "${{ inputs.image_repository }}" ] && [ -z "${{ inputs.image_repository_path }}" ]; then
-            echo "::notice::'image_repository' provided with no 'image_repository_path'. Will use default path: application.controllers.main.containers.app.image.repository" >&2
+            echo "NOTE:  'image_repository' provided with no 'image_repository_path'. Will use default path: application.controllers.main.containers.app.image.repository" >&2
           fi
           if [ -z "${{ inputs.image_repository }}" ] && [ -n "${{ inputs.image_repository_path }}" ]; then
-            echo "::notice::'image_repository_path' provided but no 'image_repository' value. No repository injection will occur." >&2
+            echo "NOTE:  'image_repository_path' provided but no 'image_repository' value. No repository injection will occur." >&2
           fi
 
       - name: Init deployment stats placeholder
@@ -136,7 +136,7 @@ jobs:
           echo "::add-mask::${DO_CLUSTER_NAME}"
           tmp_err="$(mktemp)"
           if ! KUBECONFIG="$DO_KUBECONFIG_FILE" doctl kubernetes cluster kubeconfig save "$DO_CLUSTER_NAME" 2>"$tmp_err"; then
-            echo "::error::Failed retrieving kubeconfig for cluster (masked)." >&2
+            echo "ERROR: Failed retrieving kubeconfig for cluster (masked)." >&2
             sed -e 's/'"$DO_CLUSTER_NAME"'/[REDACTED]/g' "$tmp_err" >&2 || true
             exit 1
           fi
@@ -153,7 +153,7 @@ jobs:
           if kubectl get namespace kube-system >/dev/null 2>&1; then
             echo "Cluster reachable ✅"
           else
-            echo "::warning::Cluster not reachable (kube-system ns query failed)"
+            echo "WARN:  Cluster not reachable (kube-system ns query failed)"
           fi
 
       - name: Mask SOPS key (if provided)
@@ -184,7 +184,7 @@ jobs:
                 echo "--- Decrypted values.sops.yaml (redacted preview) ---" >&2
                 head -20 "$TMP_VALUES" | grep -Ei -v '(secret|password|key|token|private)' >&2 || true
               else
-                echo "::warning::Decrypted values file is empty!" >&2
+                echo "WARN:  Decrypted values file is empty!" >&2
               fi
           else
             echo "sops_used=false" >> "$GITHUB_OUTPUT"
@@ -276,7 +276,7 @@ jobs:
           echo "Lint command: helm lint --debug $chartDir ${override_args[*]}"
           helm lint --debug "$chartDir" "${override_args[@]}" > helm-lint-debug.txt 2>&1 || lint_status=$?
           if [ "${lint_status:-0}" -ne 0 ]; then
-            echo "::error::Helm lint failed (exit $lint_status). Skipping diff/deploy." >&2
+            echo "ERROR: Helm lint failed (exit $lint_status). Skipping diff/deploy." >&2
             echo "--- Helm lint debug output ---" >&2
             cat helm-lint-debug.txt >&2 || true
           fi
@@ -626,7 +626,7 @@ jobs:
             images=$(helm get manifest "$release" -n "$ns" 2>/dev/null | grep -E "^[[:space:]]*image:" | awk -F'image:' '{print $2}' | xargs || true)
             echo "Observed images: $images"
             if ! printf '%s' "$images" | grep -q ":$expected_tag\b"; then
-              echo "::warning::Expected tag '$expected_tag' not found among deployed images." >&2
+              echo "WARN:  Expected tag '$expected_tag' not found among deployed images." >&2
             else
               echo "Tag verification passed: $expected_tag present." >&2
             fi
