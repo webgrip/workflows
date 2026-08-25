@@ -1,3 +1,9 @@
+## 1.10.0 (2026-08-25)
+
+* Merge pull request 'feat(github): publish the Helm chart to GHCR; skip immutable re-pushes' (#52) fr ([54de5ed](https://forgejo.webgrip.dev/webgrip/workflows/commit/54de5ed)), closes [#52](https://forgejo.webgrip.dev/webgrip/workflows/issues/52)
+* feat(github): publish the OCI Helm chart to GHCR ([ac958e9](https://forgejo.webgrip.dev/webgrip/workflows/commit/ac958e9))
+* fix(helm): skip the push when the chart version is already published ([0ccd348](https://forgejo.webgrip.dev/webgrip/workflows/commit/0ccd348))
+
 ## <small>1.9.2 (2026-08-25)</small>
 
 * Merge pull request 'fix(github): create the release over the REST API; drop GitHub-only annotations' ([173b598](https://forgejo.webgrip.dev/webgrip/workflows/commit/173b598)), closes [#51](https://forgejo.webgrip.dev/webgrip/workflows/issues/51)
