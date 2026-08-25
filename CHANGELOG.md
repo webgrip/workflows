@@ -1,3 +1,9 @@
+## <small>1.9.2 (2026-08-25)</small>
+
+* Merge pull request 'fix(github): create the release over the REST API; drop GitHub-only annotations' ([173b598](https://forgejo.webgrip.dev/webgrip/workflows/commit/173b598)), closes [#51](https://forgejo.webgrip.dev/webgrip/workflows/issues/51)
+* fix(github): create the release over the REST API, not the gh CLI ([0f2c5a5](https://forgejo.webgrip.dev/webgrip/workflows/commit/0f2c5a5))
+* chore(forgejo): drop GitHub-only annotation commands from the .forgejo tree ([a5c5b5f](https://forgejo.webgrip.dev/webgrip/workflows/commit/a5c5b5f))
+
 ## <small>1.9.1 (2026-08-25)</small>
 
 * Merge pull request 'fix(github): fail fast on a dead GH_TOKEN instead of hanging the mirror' (#50) f ([14b5825](https://forgejo.webgrip.dev/webgrip/workflows/commit/14b5825)), closes [#50](https://forgejo.webgrip.dev/webgrip/workflows/issues/50)
