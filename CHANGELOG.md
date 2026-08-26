@@ -1,3 +1,8 @@
+## <small>1.11.2 (2026-08-26)</small>
+
+* Merge pull request 'fix(cosign): prefer preinstalled cosign and syft over downloading them' (#55) fr ([7bdad7e](https://forgejo.webgrip.dev/webgrip/workflows/commit/7bdad7e)), closes [#55](https://forgejo.webgrip.dev/webgrip/workflows/issues/55)
+* fix(cosign): prefer preinstalled cosign and syft over downloading them ([1102722](https://forgejo.webgrip.dev/webgrip/workflows/commit/1102722))
+
 ## <small>1.11.1 (2026-08-26)</small>
 
 * Merge pull request 'fix(github): reference cosign-installer by absolute URL' (#54) from fix/cosign-i ([d7c2a6a](https://forgejo.webgrip.dev/webgrip/workflows/commit/d7c2a6a)), closes [#54](https://forgejo.webgrip.dev/webgrip/workflows/issues/54)
