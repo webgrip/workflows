@@ -1,3 +1,8 @@
+## <small>1.11.3 (2026-08-26)</small>
+
+* Merge pull request 'fix(forgejo-distribute): mirror cosign's accessories, not just the image' (#56)  ([6e42c28](https://forgejo.webgrip.dev/webgrip/workflows/commit/6e42c28)), closes [#56](https://forgejo.webgrip.dev/webgrip/workflows/issues/56)
+* fix(forgejo-distribute): mirror cosign's accessories, not just the image ([79b1204](https://forgejo.webgrip.dev/webgrip/workflows/commit/79b1204))
+
 ## <small>1.11.2 (2026-08-26)</small>
 
 * Merge pull request 'fix(cosign): prefer preinstalled cosign and syft over downloading them' (#55) fr ([7bdad7e](https://forgejo.webgrip.dev/webgrip/workflows/commit/7bdad7e)), closes [#55](https://forgejo.webgrip.dev/webgrip/workflows/issues/55)
