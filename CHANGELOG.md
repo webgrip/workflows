@@ -1,3 +1,8 @@
+## 1.11.0 (2026-08-26)
+
+* Merge pull request 'feat(oci): index annotations and cosign accessory mirroring' (#53) from feat/oci ([7ddac0f](https://forgejo.webgrip.dev/webgrip/workflows/commit/7ddac0f)), closes [#53](https://forgejo.webgrip.dev/webgrip/workflows/issues/53)
+* feat(oci): index annotations and cosign accessory mirroring ([c1dc50d](https://forgejo.webgrip.dev/webgrip/workflows/commit/c1dc50d))
+
 ## 1.10.0 (2026-08-25)
 
 * Merge pull request 'feat(github): publish the Helm chart to GHCR; skip immutable re-pushes' (#52) fr ([54de5ed](https://forgejo.webgrip.dev/webgrip/workflows/commit/54de5ed)), closes [#52](https://forgejo.webgrip.dev/webgrip/workflows/issues/52)
