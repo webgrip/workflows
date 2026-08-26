@@ -1,3 +1,8 @@
+## <small>1.11.1 (2026-08-26)</small>
+
+* Merge pull request 'fix(github): reference cosign-installer by absolute URL' (#54) from fix/cosign-i ([d7c2a6a](https://forgejo.webgrip.dev/webgrip/workflows/commit/d7c2a6a)), closes [#54](https://forgejo.webgrip.dev/webgrip/workflows/issues/54)
+* fix(github): reference cosign-installer by absolute URL ([d546935](https://forgejo.webgrip.dev/webgrip/workflows/commit/d546935))
+
 ## 1.11.0 (2026-08-26)
 
 * Merge pull request 'feat(oci): index annotations and cosign accessory mirroring' (#53) from feat/oci ([7ddac0f](https://forgejo.webgrip.dev/webgrip/workflows/commit/7ddac0f)), closes [#53](https://forgejo.webgrip.dev/webgrip/workflows/issues/53)
