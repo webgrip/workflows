@@ -343,9 +343,12 @@ jobs:
           fi
           docker buildx imagetools inspect "ghcr.io/${OWNER}/${IMAGE}:${VERSION}"
 
-      # Pinned by digest like every other action here; the installer is the same one the
-      # signing composite uses, so the two paths cannot drift to different cosign majors.
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v3.10.0
+      # Absolute github.com URL, not a bare `owner/action`: a bare ref resolves against the
+      # Forgejo instance first, which mirrors actions/* and docker/* but not this one, so
+      # the bare form 404s the clone and fails the job before any step runs (ploeg run 209).
+      # Same pin and same comment as cosign-sign-attest, so the two paths cannot drift to
+      # different cosign majors.
+      - uses: https://github.com/sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         if: inputs.copy-accessories
         with:
           cosign-release: v2.4.3
