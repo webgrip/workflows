@@ -59,6 +59,18 @@ inputs:
     description: "Docker build args (newline-separated KEY=VALUE entries)"
     required: false
     default: ""
+  annotations:
+    description: >-
+      OCI annotations, newline-separated, in buildx's own `LEVEL:key=value` form —
+      e.g. `index:org.opencontainers.image.source=https://github.com/o/r`. Prefer the
+      `index:` level for anything a registry reads about the artifact as a whole: a
+      Dockerfile LABEL lands in the per-platform image CONFIG, which GHCR does not
+      consult when linking a package to a repository, so a multi-arch image labelled
+      but not annotated publishes orphaned (webgrip/ploeg, 2026-08-25). Annotations
+      set here survive `buildx imagetools create`, so mirrors inherit them and every
+      registry keeps the identical index digest (verified 2026-08-26).
+    required: false
+    default: ""
   compression:
     description: "Layer compression for the pushed image: 'gzip' (default) or 'zstd'. zstd layers decompress ~2x faster on pull; opt-in because very old dockerd cannot pull zstd."
     required: false
@@ -325,6 +337,7 @@ runs:
         CACHE_TAG: ${{ steps.cache-tag.outputs.cache_tag }}
         TAGS: ${{ steps.normalized-tags.outputs.tags }}
         RAW_BUILD_ARGS: ${{ inputs.docker-build-args }}
+        RAW_ANNOTATIONS: ${{ inputs.annotations }}
         SBOM_GENERATOR: ${{ inputs.sbom-generator }}
       run: |
         set -euo pipefail
@@ -389,6 +402,17 @@ runs:
           [[ "${arg#"${arg%%[![:space:]]*}"}" == \#* ]] && continue
           args+=(--build-arg "$arg")
         done <<< "$RAW_BUILD_ARGS"
+
+        # Annotations arrive in the same newline-separated shape as build-args, and are
+        # handled identically — one argv element per line, blanks and comment lines
+        # dropped. The comment rule matters for the same reason it does above: buildx
+        # would otherwise write a caller's prose into the artifact's own metadata.
+        while IFS= read -r line; do
+          ann="${line//$'\r'/}"
+          [[ -z "${ann//[[:space:]]/}" ]] && continue
+          [[ "${ann#"${ann%%[![:space:]]*}"}" == \#* ]] && continue
+          args+=(--annotation "$ann")
+        done <<< "$RAW_ANNOTATIONS"
 
         [[ -n "${TARGET//[[:space:]]/}" ]] && args+=(--target "$TARGET")
 
