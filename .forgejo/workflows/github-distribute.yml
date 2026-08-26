@@ -84,6 +84,20 @@ on:
         type: boolean
         required: false
         default: false
+      copy-accessories:
+        description: >-
+          Also mirror the source image's cosign signature and attestations to GHCR.
+          `imagetools create` copies the manifest list only, so BuildKit's SLSA
+          provenance and SBOM ride along inside the index for free, but cosign's
+          accessories do NOT — they live as separate `sha256-<digest>.sig`/`.att` tags
+          and are simply left behind, publishing an unsigned mirror of a signed image.
+          Verified 2026-08-26 that a copied signature still verifies at the mirror, since
+          cosign checks the digest; the payload keeps the ORIGIN reference, so a policy
+          pinning `docker-reference` would reject a mirror and must verify against the
+          source registry instead.
+        type: boolean
+        required: false
+        default: false
       ref:
         description: 'Git ref to check out for the chart job. Defaults to v<version>.'
         type: string
@@ -328,6 +342,42 @@ jobs:
             docker buildx imagetools create -t "ghcr.io/${OWNER}/${IMAGE}:latest" "$src"
           fi
           docker buildx imagetools inspect "ghcr.io/${OWNER}/${IMAGE}:${VERSION}"
+
+      # Pinned by digest like every other action here; the installer is the same one the
+      # signing composite uses, so the two paths cannot drift to different cosign majors.
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v3.10.0
+        if: inputs.copy-accessories
+        with:
+          cosign-release: v2.4.3
+      - name: Copy cosign accessories to GHCR
+        if: inputs.copy-accessories
+        shell: bash
+        env:
+          SOURCE_REGISTRY: ${{ inputs.mirror-from-registry }}
+          OWNER: ${{ inputs.owner }}
+          IMAGE: ${{ inputs.image-name }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # --only=sig,att,sbom: the image itself was already copied above by imagetools,
+          # which is the proven path for a multi-arch index. This adds ONLY the cosign
+          # accessories, so the image is not pushed twice.
+          #
+          # Both registries are already logged in by the step above; cosign reuses the
+          # docker config, so no credential is handled here.
+          src="${SOURCE_REGISTRY}/${OWNER}/${IMAGE}:${VERSION}"
+          dst="ghcr.io/${OWNER}/${IMAGE}:${VERSION}"
+          # Fail-soft: an unsigned source is a legitimate state (the signing job is
+          # independent and may not have run for this tag), and failing the mirror over a
+          # missing signature would make the image unavailable rather than merely
+          # unverifiable. It is logged loudly instead.
+          if cosign copy --only=sig,att,sbom "$src" "$dst"; then
+            echo "cosign accessories mirrored: ${src} -> ${dst}"
+          else
+            echo "WARN:  no cosign accessories copied for ${src}."
+            echo "       The image on GHCR is a faithful copy but carries no signature."
+            echo "       Expected when the signing job has not run for this tag; investigate otherwise."
+          fi
 
   # The chart is BUILT from source here rather than copied from Harbor, matching
   # forgejo-distribute's publish-chart: `helm package` is deterministic from the tagged
