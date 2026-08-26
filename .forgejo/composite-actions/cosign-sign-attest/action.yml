@@ -82,14 +82,34 @@ inputs:
 runs:
   using: composite
   steps:
+    # Both installers reach out to github.com and then to sigstore to verify what they
+    # fetched, and both have taken this job down on a transient network fault — syft twice
+    # (ploeg runs 172, 175: `received HTTP status=000`) and cosign once (run 212:
+    # `searching log query: connection reset by peer`, from the installer's own
+    # verify-blob against Rekor, not from any cosign command this composite runs).
+    #
+    # Prefer a binary already on the runner, exactly as the helm-using workflows do. This
+    # is a no-op until cosign and syft are baked into the ci-runner image, at which point
+    # the signing path stops depending on the public internet without another edit here.
+    # That image change is the real fix; this is the seam it needs.
+    - name: Check for preinstalled cosign and syft
+      id: tools
+      shell: bash
+      run: |
+        command -v cosign >/dev/null 2>&1 && echo "cosign=true"  >> "$GITHUB_OUTPUT" || echo "cosign=false" >> "$GITHUB_OUTPUT"
+        command -v syft   >/dev/null 2>&1 && echo "syft=true"    >> "$GITHUB_OUTPUT" || echo "syft=false"   >> "$GITHUB_OUTPUT"
+        echo "preinstalled: cosign=$(command -v cosign || echo none) syft=$(command -v syft || echo none)"
+
     # Absolute github.com URLs: Forgejo's default action host (data.forgejo.org) is an incomplete
     # mirror and 404s on these (as it does on actions/github-script). Pin to the canonical source.
     - name: Install cosign
+      if: steps.tools.outputs.cosign != 'true'
       uses: https://github.com/sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       with:
         cosign-release: ${{ inputs.cosign-version }}
 
     - name: Install Syft (SBOM generator)
+      if: steps.tools.outputs.syft != 'true'
       uses: https://github.com/anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
       with:
         syft-version: ${{ inputs.syft-version }}
