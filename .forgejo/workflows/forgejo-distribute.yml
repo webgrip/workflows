@@ -96,6 +96,19 @@ on:
         type: boolean
         required: false
         default: false
+      copy-accessories:
+        description: >-
+          Mirror mode only: also copy the source image's cosign signature and
+          attestations. `imagetools create` copies the manifest list, so BuildKit's SLSA
+          provenance and SBOM ride along inside the index for free, but cosign's live as
+          separate `sha256-<digest>.sig`/`.att` tags and are otherwise left behind —
+          publishing an unsigned mirror of a signed image. A copied signature verifies at
+          the mirror because cosign checks the digest; its payload keeps the SOURCE
+          reference, so a policy pinning `docker-reference` must verify against the source
+          registry.
+        type: boolean
+        required: false
+        default: false
       chart-path:
         description: 'Path to the Helm chart (e.g. ops/helm/mychart). Empty skips the chart job. Chart.yaml version must equal <version> at <ref> (semantic-release-helm3 lockstep).'
         type: string
@@ -157,6 +170,43 @@ jobs:
             docker buildx imagetools create -t "${TARGET_REGISTRY}/${OWNER}/${IMAGE}:latest" "$src"
           fi
           docker buildx imagetools inspect "${TARGET_REGISTRY}/${OWNER}/${IMAGE}:${VERSION}"
+
+      # Absolute github.com URL, not a bare `owner/action`: a bare ref resolves against the
+      # Forgejo instance first, which does not mirror this one, and the clone 404s the job
+      # before any step runs (ploeg run 209). Same pin as cosign-sign-attest so the cosign
+      # versions on the signing and mirroring paths cannot drift apart.
+      - uses: https://github.com/sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        if: inputs.mirror-from-registry != '' && inputs.copy-accessories
+        with:
+          cosign-release: v2.4.3
+      - name: Copy cosign accessories (mirror mode)
+        if: inputs.mirror-from-registry != '' && inputs.copy-accessories
+        shell: bash
+        env:
+          SOURCE_REGISTRY: ${{ inputs.mirror-from-registry }}
+          TARGET_REGISTRY: ${{ inputs.registry }}
+          OWNER: ${{ inputs.owner }}
+          IMAGE: ${{ inputs.image-name }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          # --only=sig,att,sbom: the image itself was copied by imagetools above, which is
+          # the proven path for a multi-arch index. This adds only the cosign accessories,
+          # so the image is not pushed twice. Both registries are already logged in by the
+          # step above and cosign reuses the docker config, so no credential is handled here.
+          src="${SOURCE_REGISTRY}/${OWNER}/${IMAGE}:${VERSION}"
+          dst="${TARGET_REGISTRY}/${OWNER}/${IMAGE}:${VERSION}"
+          # Fail-soft: an unsigned source is a legitimate state — the signing job is
+          # independent and may not have run for this tag — and failing the mirror over a
+          # missing signature would make the image unavailable rather than merely
+          # unverifiable. Logged loudly instead.
+          if cosign copy --only=sig,att,sbom "$src" "$dst"; then
+            echo "cosign accessories mirrored: ${src} -> ${dst}"
+          else
+            echo "WARN:  no cosign accessories copied for ${src}."
+            echo "       The mirrored image is a faithful copy but carries no signature."
+            echo "       Expected when the signing job has not run for this tag; investigate otherwise."
+          fi
       - name: Link package to repo
         if: inputs.link-repo != ''
         shell: bash
