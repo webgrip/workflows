@@ -38,7 +38,7 @@ on:
           needs extra tooling (helm, php, docker CLI).
         required: false
         # renovate: datasource=docker depName=harbor.webgrip.dev/webgrip/semantic-release-monorepo
-        default: 'harbor.webgrip.dev/webgrip/semantic-release-monorepo:0.3.2'
+        default: 'harbor.webgrip.dev/webgrip/semantic-release-monorepo:0.3.3'
         type: string
       enabled:
         description: 'Gate the job from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass needs-based conditions here (needs.* survives flattening; github.* does NOT — use only-refs for branch gating).'
