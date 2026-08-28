@@ -40,11 +40,6 @@ on:
         # renovate: datasource=docker depName=harbor.webgrip.dev/webgrip/semantic-release-monorepo
         default: 'harbor.webgrip.dev/webgrip/semantic-release-monorepo:0.1.0'
         type: string
-      config-version:
-        description: 'Pin of @webgrip/semantic-release-config for the no-image fallback only; inside the toolchain image the image tag IS the version.'
-        required: false
-        default: '1'
-        type: string
       enabled:
         description: 'Gate the job from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass needs-based conditions here (needs.* survives flattening; github.* does NOT — use only-refs for branch gating).'
         required: false
@@ -146,7 +141,6 @@ jobs:
           token: ${{ secrets.CI_TOKEN || secrets.FORGEJO_TOKEN }}
           dry-run: ${{ inputs.dry-run }}
           monorepo: ${{ inputs.monorepo }}
-          config-version: ${{ inputs.config-version }}
 
       - id: normalize
         shell: bash

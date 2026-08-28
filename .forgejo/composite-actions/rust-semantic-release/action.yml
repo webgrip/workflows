@@ -16,10 +16,6 @@ inputs:
   token:
     description: "Forgejo token to use for checkout/push and releases"
     required: false
-  config-version:
-    description: "Pin of @webgrip/semantic-release-config for the no-image fallback only; inside the toolchain image the image tag IS the version"
-    required: false
-    default: "1"
   forge-url:
     description: "Public Forgejo base URL used for user-facing changelog/release links (not for API traffic)"
     required: false
@@ -104,25 +100,28 @@ runs:
         git config "http.${forge_url}/.extraheader" "AUTHORIZATION: basic ${auth_b64}"
         trap 'git config --unset-all "http.'"${forge_url}"'/.extraheader" || true' EXIT
 
+        # The toolchain IS the image (ADR 0005): every dep prebaked flat from a committed lockfile,
+        # the shared config's npm overrides applied at the install root. This action installs
+        # NOTHING at runtime — an install here cannot apply a dependency's overrides (npm honors
+        # them only at the install root), which nests plugin versions semantic-release's loader
+        # prefers over the pinned pair; that is exactly how releases from 2026-07-31 to 2026-08-27
+        # shipped heading-only notes without one red job. No usable toolchain → no release.
         # Probe rather than test for the file: pre-ADR-0005 ci-runners also export SEMREL_PREBAKED,
-        # at an sr24 tree with no shared config. It also handles a ci-runner baking the MONOREPO
-        # toolchain, which has no semantic-release-cargo — rust correctly falls through there.
+        # at an sr24 tree with no shared config. A ci-runner baking the MONOREPO toolchain (no
+        # semantic-release-cargo) also fails the probe — run in the rust image, it is not optional.
         sr="${SEMREL_PREBAKED:-/nonexistent}/.bin/semantic-release"
-        if [[ -x "$sr" ]] && ! NODE_PATH="${SEMREL_PREBAKED:-}" node -e '
+        if [[ ! -x "$sr" ]] || ! NODE_PATH="${SEMREL_PREBAKED:-}" node -e '
               const v = require("semantic-release/package.json").version;
               if (v.split(".")[0] !== "25") throw new Error("semantic-release " + v);
               require.resolve("@webgrip/semantic-release-config");
               require.resolve("semantic-release-cargo");
-            ' 2>/dev/null; then
-          echo "::warning::SEMREL_PREBAKED (${SEMREL_PREBAKED:-}) is not the ADR-0005 rust toolchain; ignoring it."
-          sr=""
-        fi
-        if [[ ! -x "$sr" ]]; then
-          echo "::warning::no usable prebaked toolchain; installing an UNLOCKED one. Run in harbor.webgrip.dev/webgrip/semantic-release-rust:0.1.0 (ADR 0005)."
-          npm config set "@webgrip:registry" "${forge_url}/api/packages/webgrip/npm/"
-          npm install --no-save --no-package-lock --no-audit --no-fund \
-            "@webgrip/semantic-release-config@${{ inputs.config-version }}" semantic-release-cargo@2.4.2
-          sr="./node_modules/.bin/semantic-release"
+            '; then
+          echo "::error::No usable prebaked release toolchain (SEMREL_PREBAKED='${SEMREL_PREBAKED:-}')."
+          echo "::error::Run this job in the toolchain image — add to the release job:"
+          echo "::error::  container:"
+          echo "::error::    image: harbor.webgrip.dev/webgrip/semantic-release-rust:0.1.0"
+          echo "::error::or use a ci-runner that bakes the ADR-0005 rust toolchain."
+          exit 1
         fi
 
         args=(--repository-url "${forge_url}/${{ github.repository }}.git")
