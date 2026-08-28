@@ -51,6 +51,10 @@ jobs:
     steps:
       - name: Semantic Release
         id: semrel
-        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/semantic-release@v1.0.0
+        # @main, deliberately: this repo releases itself with its OWN current composite — the
+        # v1.0.0 pin kept alive the legacy path (workspace npm installs) that both predates and
+        # defeats the toolchain image, and a version pin here can never name the release it is
+        # itself about to cut. Everyone else pins a tag; the source repo eats its main.
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/semantic-release@main
         with:
           token: ${{ secrets.WEBGRIP_CI_TOKEN }}
