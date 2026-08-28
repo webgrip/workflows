@@ -1,3 +1,24 @@
+## [2.0.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v1.11.3...v2.0.0) (2026-08-28)
+
+### ⚠ BREAKING CHANGES
+
+* **semrel:** the semantic-release, semantic-release-monorepo and
+  rust-semantic-release composites no longer install a toolchain when
+  SEMREL_PREBAKED is missing or unusable — the job fails with instructions.
+  Release jobs must run in the matching toolchain image (container: image:
+  harbor.webgrip.dev/webgrip/semantic-release[-monorepo|-rust]:<tag>) or on a
+  ci-runner that bakes the toolchain. The config-version input is removed from
+  the composites and the reusable workflows; it only ever fed the fallback.
+
+### Fixed
+
+* **semrel:** the toolchain is the image — composites install nothing at runtime ([f78d7a2](https://forgejo.webgrip.dev/webgrip/workflows/commit/f78d7a2e5fc40d0d41e79d9e17633571e0bd8aeb)), references [#131](https://forgejo.webgrip.dev/webgrip/workflows/issues/131) [#10](https://forgejo.webgrip.dev/webgrip/workflows/issues/10)
+
+### CI
+
+* **release:** self-release in the toolchain image; reusable defaults to the bash-fixed images ([e74fced](https://forgejo.webgrip.dev/webgrip/workflows/commit/e74fcede021fbf6c58b6cbae026d990254093dd7)), references [#132](https://forgejo.webgrip.dev/webgrip/workflows/issues/132)
+* **release:** self-release with the current composite, not the v1.0.0 relic ([af75cbf](https://forgejo.webgrip.dev/webgrip/workflows/commit/af75cbf592f87cfe590a4cc8728ecb4beadb42f8))
+
 ## <small>1.11.3 (2026-08-26)</small>
 
 * Merge pull request 'fix(forgejo-distribute): mirror cosign's accessories, not just the image' (#56)  ([6e42c28](https://forgejo.webgrip.dev/webgrip/workflows/commit/6e42c28)), closes [#56](https://forgejo.webgrip.dev/webgrip/workflows/issues/56)
