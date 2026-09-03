@@ -315,6 +315,63 @@ flag lives inside the workflow because caller jobs with `uses:` cannot set `cont
 
 **Secrets:** `SOURCE_REGISTRY_USER`, `SOURCE_REGISTRY_TOKEN`, `TARGET_REGISTRY_TOKEN`.
 
+### Static Site Workflows (Forgejo-only)
+
+The deploy-and-verify family for assets-only Cloudflare Workers sites (static Astro builds),
+extracted from twente.dev and webgrip.nl, whose CI jobs were hand-synced copies of each other.
+Same conditional rules as the hard-gate family above: gate from inside via inputs
+(`environment`, `production-refs`, `enabled`), never with a caller `if:`. Forgejo-only —
+consume from `.forgejo/workflows/`. Known ADR-0005 deviation, declared in each file header:
+toolchains install at job time (lift-and-shift of the proven consumer jobs); the follow-up is
+a `static-site-ci-runner` Harbor image in webgrip/infrastructure.
+
+#### `cloudflare-deploy.yml`
+Preview (`wrangler versions upload` + step summary + marker-idempotent PR comment) or
+production (`wrangler deploy`, poll-the-edge, 200-assert of `smoke-paths`, and a status check
+for **every** rule in the consumer's `public/_redirects` — a redirect cannot ship unguarded).
+Pass `environment` as a literal; ref routing happens inside against `production-refs`.
+`pnpm exec wrangler`, never `dlx` (the allowBuilds hang).
+
+**Secrets:** `CLOUDFLARE_API_TOKEN` (Workers Scripts:Edit + Account:Read + zone Workers
+Routes:Edit — the zone scope is the one people forget), `CLOUDFLARE_ACCOUNT_ID`.
+
+**Example:**
+```yaml
+deploy-production:
+  needs: [build, lighthouse, accessibility]
+  uses: webgrip/workflows/.forgejo/workflows/cloudflare-deploy.yml@<tag>
+  with:
+    environment: production
+    apex-url: 'https://twente.dev'
+    edge-probe-path: /nl
+    smoke-paths: |
+      /nl
+      /en
+      /robots.txt
+  secrets:
+    CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+```
+
+#### `lighthouse-budgets.yml`
+Enforces the consumer's `lighthouserc.json` budgets in a Chrome-equipped sibling container
+(`docker cp`, never bind mounts — they resolve on the host daemon and audit an empty
+directory). `extra-cp` carries anything `startServerCommand` needs (e.g. `scripts`);
+`lhci-version` keeps CI on the same scorer as `just lhci`.
+
+#### `axe-scan.yml`
+The real axe-core rule set over the built pages (Lighthouse's accessibility score is a
+sampling heuristic; this catches the ARIA and focus-order defects it misses). Runs the
+consumer's `scripts/axe-scan.ts`, with `@axe-core/playwright`/`playwright-core` versions read
+from the consumer's package.json so the container cannot drift from local runs.
+
+#### `link-check-static-site.yml`
+Internal links blocking (with a vacuous-run guard and clean-URL `--fallback-extensions`),
+external links best-effort, plus two opt-ins: `blocking-urls-command` prints critical URLs
+that may never rot silently (print nothing while the URL is unconfigured — an honest
+pre-launch state skips the check), and `dns-hosts-source` resolves data-file hosts on three
+public resolvers (a single-resolver check misses SERVFAIL splits).
+
 ### Docker & Containerization
 
 #### `docker-build-and-push.yml`

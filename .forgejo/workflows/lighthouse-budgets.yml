@@ -1,0 +1,113 @@
+name: '[Call] Lighthouse Budgets'
+
+# Enforces the consumer's lighthouserc.json budgets against a fresh build — without a
+# job like this they are documentation, not gates. Lighthouse needs Chrome, which the
+# runner image may not carry, so lhci runs inside a Chrome-equipped sibling container.
+# Extracted from twente.dev and webgrip.nl, whose lighthouse jobs were byte-similar
+# hand-synced copies.
+#
+# The sibling-docker rule (why `docker cp`, never a bind mount): this job itself runs
+# in a container, so a -v "$PWD:..." mount resolves $PWD on the HOST daemon, where
+# the checkout does not exist, and lhci sees an empty directory and passes vacuously.
+#
+# ADR-0005 deviation, declared: lhci is fetched with npx at job time and the browsers
+# image defaults to Docker Hub's cypress/browsers, exactly as the consumer jobs did.
+# Follow-up: bake a static-site-ci-runner image in webgrip/infrastructure and pin it
+# here with a renovate annotation.
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to install'
+        type: string
+        required: false
+        default: '24'
+      build-command:
+        description: 'Build command producing dist/ (lighthouserc.json points at it)'
+        type: string
+        required: false
+        default: 'pnpm build'
+      working-directory:
+        description: 'Directory containing package.json and lighthouserc.json'
+        type: string
+        required: false
+        default: '.'
+      extra-cp:
+        description: >-
+          Newline-separated extra repo paths to docker-cp into the container, e.g.
+          'scripts' when lighthouserc.json starts a server via startServerCommand.
+        type: string
+        required: false
+        default: ''
+      lhci-version:
+        description: 'Pinned @lhci/cli version spec — keep consumers on the same scorer as their local `just lhci`'
+        type: string
+        required: false
+        default: '0.15.x'
+      browsers-image:
+        description: 'Chrome-equipped container image the audit runs in'
+        type: string
+        required: false
+        default: 'cypress/browsers:latest'
+      enabled:
+        description: 'Gate the job from INSIDE the reusable (Forgejo v15 flattening drops caller if-conditions on uses jobs)'
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  lhgate:
+    name: 'Lighthouse budgets'
+    if: inputs.enabled
+    runs-on: docker
+    permissions:
+      contents: read
+    steps:
+      # v5, not v6 — v6 is broken on non-GitHub runners (ADR 0002).
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Enable pnpm
+        shell: bash
+        run: corepack enable
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.build-command }}
+
+      - name: Run Lighthouse CI
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          EXTRA_CP: ${{ inputs.extra-cp }}
+          IMAGE: ${{ inputs.browsers-image }}
+          LHCI_VERSION: ${{ inputs.lhci-version }}
+        run: |
+          set -euo pipefail
+          # Container name carries the run id: the runner's docker daemon is shared
+          # between repos, so a fixed name collides when two consumers audit at once.
+          name="lhci-${GITHUB_RUN_ID:-local}"
+          docker rm -f "${name}" >/dev/null 2>&1 || true
+          docker run -d --name "${name}" -w /repo "${IMAGE}" sleep 1800
+          docker cp dist "${name}:/repo/dist"
+          docker cp lighthouserc.json "${name}:/repo/lighthouserc.json"
+          while IFS= read -r p; do
+            [ -n "${p}" ] || continue
+            docker cp "${p}" "${name}:/repo/${p}"
+          done <<< "${EXTRA_CP}"
+          docker exec -w /repo "${name}" bash -c "npx --yes @lhci/cli@${LHCI_VERSION} autorun"
+
+      - name: Clean up Lighthouse container
+        if: always()
+        shell: bash
+        run: docker rm -f "lhci-${GITHUB_RUN_ID:-local}" || true

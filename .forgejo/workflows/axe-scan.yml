@@ -1,0 +1,125 @@
+name: '[Call] Axe Accessibility Gate'
+
+# Runs the real axe-core rule set over the consumer's built pages. Lighthouse already
+# asserts categories:accessibility, but that score is a sampling heuristic — it
+# misses most ARIA and focus-order defects, which is why this gate exists alongside
+# the budgets, not instead of them. Extracted from twente.dev and webgrip.nl, whose
+# axe jobs were byte-similar hand-synced copies.
+#
+# Same sibling-docker rule as the Lighthouse gate: everything goes in by `docker cp`
+# because bind mounts resolve on the HOST daemon, where the checkout does not exist.
+#
+# ADR-0005 deviation, declared: axe + playwright-core install with npm at job time
+# and the browsers image defaults to Docker Hub, exactly as the consumer jobs did.
+# Follow-up: bake a static-site-ci-runner image in webgrip/infrastructure.
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to install'
+        type: string
+        required: false
+        default: '24'
+      build-command:
+        description: 'Build command producing dist/'
+        type: string
+        required: false
+        default: 'pnpm build'
+      working-directory:
+        description: 'Directory containing package.json, lighthouserc.json and the scan script'
+        type: string
+        required: false
+        default: '.'
+      scan-script:
+        description: 'Repo-relative TypeScript entrypoint that runs the scan (reads its page list from lighthouserc.json)'
+        type: string
+        required: false
+        default: 'scripts/axe-scan.ts'
+      extra-cp:
+        description: 'Newline-separated extra repo paths to docker-cp into the container'
+        type: string
+        required: false
+        default: ''
+      browsers-image:
+        description: 'Chrome-equipped container image the scan runs in'
+        type: string
+        required: false
+        default: 'cypress/browsers:latest'
+      enabled:
+        description: 'Gate the job from INSIDE the reusable (Forgejo v15 flattening drops caller if-conditions on uses jobs)'
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  axegate:
+    name: 'Accessibility (axe-core)'
+    if: inputs.enabled
+    runs-on: docker
+    permissions:
+      contents: read
+    steps:
+      # v5, not v6 — v6 is broken on non-GitHub runners (ADR 0002).
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Enable pnpm
+        shell: bash
+        run: corepack enable
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.build-command }}
+
+      - name: Run axe scan
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          EXTRA_CP: ${{ inputs.extra-cp }}
+          IMAGE: ${{ inputs.browsers-image }}
+          SCAN_SCRIPT: ${{ inputs.scan-script }}
+        run: |
+          set -euo pipefail
+          # Versions come from the consumer's package.json so the container cannot
+          # drift from the versions a developer gets locally. playwright-core, not
+          # playwright: core skips the ~150MB browser download, and the image already
+          # ships Chrome — which the scan script targets via CHROME_PATH.
+          AXE=$(node -p "require('./package.json').devDependencies['@axe-core/playwright']")
+          PWC=$(node -p "require('./package.json').devDependencies['playwright-core']")
+
+          # Run-id in the name: the runner's docker daemon is shared between repos.
+          name="axe-${GITHUB_RUN_ID:-local}"
+          docker rm -f "${name}" >/dev/null 2>&1 || true
+          docker run -d --name "${name}" -w /repo "${IMAGE}" sleep 1800
+          docker cp dist "${name}:/repo/dist"
+          docker cp lighthouserc.json "${name}:/repo/lighthouserc.json"
+          docker cp scripts "${name}:/repo/scripts"
+          while IFS= read -r p; do
+            [ -n "${p}" ] || continue
+            docker cp "${p}" "${name}:/repo/${p}"
+          done <<< "${EXTRA_CP}"
+          # A MINIMAL package.json, not the repo's. The script is ESM so the
+          # container needs "type": "module" to load a .ts entrypoint at all — but
+          # copying the real one would make `npm i` resolve every devDependency
+          # (astro, eslint, wrangler, …) before installing the two packages actually
+          # wanted, which is minutes of nothing useful.
+          docker exec -w /repo "${name}" bash -c 'echo "{\"type\":\"module\"}" > package.json'
+          docker exec -w /repo "${name}" bash -c \
+            "npm i --no-save --silent '@axe-core/playwright@${AXE}' 'playwright-core@${PWC}'"
+          docker exec -w /repo "${name}" bash -c \
+            "node --experimental-strip-types ${SCAN_SCRIPT}"
+
+      - name: Clean up axe container
+        if: always()
+        shell: bash
+        run: docker rm -f "axe-${GITHUB_RUN_ID:-local}" || true

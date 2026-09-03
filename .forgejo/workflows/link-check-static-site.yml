@@ -1,0 +1,204 @@
+name: '[Call] Static Site Link Check'
+
+# Sweeps a static site's built output (and optionally its source data files) for
+# broken links. Internal breakage is the consumer's fault and blocks; the outside
+# world flaps, so external checks are best-effort by default — with an optional
+# blocking exception for the one link that may never rot silently (a booking or
+# registration URL every CTA points at: "a guardrail that only warns guards
+# nothing"). Merged from twente.dev and webgrip.nl, each of which had half of this.
+#
+# lychee is installed as a release binary, NOT run via `docker run -v "$PWD/dist"`:
+# this job itself runs in a container, so a bind mount resolves $PWD on the HOST
+# daemon — where the checkout does not exist — and lychee then happily checks an
+# empty directory and reports green (the "vacuous groen" failure, measured
+# 2026-09-03).
+#
+# ADR-0005 deviation, declared: lychee is curl-installed at job time, as both
+# consumer jobs did. Follow-up: bake it into a static-site-ci-runner image in
+# webgrip/infrastructure.
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to install'
+        type: string
+        required: false
+        default: '24'
+      build-command:
+        description: 'Build command producing dist/'
+        type: string
+        required: false
+        default: 'pnpm build'
+      working-directory:
+        description: 'Directory containing package.json'
+        type: string
+        required: false
+        default: '.'
+      exclude-pattern:
+        description: "Regex of the site's own origin, excluded from the external sweep (e.g. '^https://twente\\.dev')"
+        type: string
+        required: true
+      extra-sources:
+        description: >-
+          Newline-separated source files checked DIRECTLY in the external sweep, not
+          via dist/. Exists because data-file URLs that no page renders yet are
+          otherwise checked by nobody (twente.dev's getCommunities was defined and
+          never called; two of twelve community URLs had rotted before anyone looked).
+        type: string
+        required: false
+        default: ''
+      blocking-urls-command:
+        description: >-
+          Shell command printing zero or more URLs (one per line) that are checked
+          BLOCKING. A command rather than a static list so consumers can derive the
+          URLs from config (twente.dev reads REGISTRATION_URL from site.ts and prints
+          nothing while it is null — an honest pre-launch state skips the check).
+          Empty command = no blocking externals.
+        type: string
+        required: false
+        default: ''
+      dns-hosts-source:
+        description: >-
+          File whose 'url: https://…' lines are resolved on 1.1.1.1, 8.8.8.8 and
+          9.9.9.9 (warn-only). A single-resolver HTTP check can see a healthy site
+          while half the internet gets SERVFAIL (the tkkrlab.nl case). Empty = skip.
+        type: string
+        required: false
+        default: ''
+      external-best-effort:
+        description: 'When true (default), the external sweep and DNS sweep warn instead of failing the run'
+        type: boolean
+        required: false
+        default: true
+      enabled:
+        description: 'Gate the job from INSIDE the reusable (Forgejo v15 flattening drops caller if-conditions on uses jobs)'
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  linksweep:
+    name: 'Check links in built output'
+    if: inputs.enabled
+    runs-on: docker
+    permissions:
+      contents: read
+    steps:
+      # v5, not v6 — v6 is broken on non-GitHub runners (ADR 0002).
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Enable pnpm
+        shell: bash
+        run: corepack enable
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.build-command }}
+
+      - name: Install lychee
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sSfL https://github.com/lycheeverse/lychee/releases/latest/download/lychee-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz -C /usr/local/bin lychee
+          lychee --version
+
+      - name: Check internal links (blocking)
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        # `--fallback-extensions html` because build.format 'file' emits page.html
+        # while pages link to /page (clean URLs) — without it, clean-URL links go
+        # under-checked. The sanity guard exists because this job's predecessor was
+        # green for weeks while checking zero files.
+        run: |
+          set -euo pipefail
+          count="$(find dist -name '*.html' | wc -l)"
+          echo "checking ${count} html file(s)"
+          [ "${count}" -gt 0 ] || { echo "FAIL: dist contains no html — vacuous run"; exit 1; }
+          lychee --offline --include-fragments --fallback-extensions html \
+            --root-dir "$(pwd)/dist" --no-progress 'dist/**/*.html'
+
+      - name: Check critical external links (blocking)
+        if: inputs.blocking-urls-command != ''
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          URLS_COMMAND: ${{ inputs.blocking-urls-command }}
+        run: |
+          set -euo pipefail
+          urls="$(bash -c "${URLS_COMMAND}")"
+          if [ -z "${urls}" ]; then
+            echo "blocking-urls-command printed nothing — no critical externals to guard"
+            exit 0
+          fi
+          while IFS= read -r url; do
+            [ -n "${url}" ] || continue
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "${url}" || echo 000)"
+            echo "${url} -> ${code}"
+            # Bot-fronted targets (Meetup, Cal.com behind protection) may serve 403
+            # to curl while alive; what must fail is gone-ness: NXDOMAIN/timeout
+            # (000), 404/410, or a 5xx.
+            case "${code}" in
+              000|404|410|5*) echo "FAIL: critical link target is gone or broken (${code})"; exit 1 ;;
+            esac
+          done <<< "${urls}"
+
+      - name: Check external links
+        continue-on-error: ${{ inputs.external-best-effort }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          EXCLUDE: ${{ inputs.exclude-pattern }}
+          EXTRA_SOURCES: ${{ inputs.extra-sources }}
+        run: |
+          set -euo pipefail
+          extra=()
+          while IFS= read -r f; do
+            [ -n "${f}" ] || continue
+            extra+=("${f}")
+          done <<< "${EXTRA_SOURCES}"
+          lychee --no-progress --max-concurrency 4 --timeout 20 \
+            --accept 200,206,301,302,403,429 \
+            --fallback-extensions html --root-dir "$(pwd)/dist" \
+            --exclude "${EXCLUDE}" \
+            'dist/**/*.html' ${extra[@]+"${extra[@]}"}
+
+      - name: Resolve hosts on multiple public resolvers
+        if: inputs.dns-hosts-source != ''
+        continue-on-error: ${{ inputs.external-best-effort }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          HOSTS_SOURCE: ${{ inputs.dns-hosts-source }}
+        run: |
+          set -uo pipefail
+          apk add --no-cache bind-tools 2>/dev/null || apt-get -qq update && apt-get -qq install -y dnsutils || true
+          grep -oE 'url: https?://[^/]+' "${HOSTS_SOURCE}" \
+            | sed -E 's#url: https?://##' | sort -u > /tmp/hosts.txt
+          echo "checking $(wc -l < /tmp/hosts.txt) hosts against 1.1.1.1, 8.8.8.8, 9.9.9.9"
+          bad=0
+          # read-loop, not `for h in $hosts` — the latter relies on the shell
+          # word-splitting an unquoted variable, which zsh does not do, so the same
+          # script silently checked one giant concatenated "host" locally.
+          while IFS= read -r h; do
+            [ -n "$h" ] || continue
+            for r in 1.1.1.1 8.8.8.8 9.9.9.9; do
+              if ! dig +short +time=5 +tries=2 "@$r" "$h" A | grep -qE '^[0-9]'; then
+                echo "::warning::$h does not resolve on $r"
+                bad=$((bad + 1))
+              fi
+            done
+          done < /tmp/hosts.txt
+          echo "resolver failures: $bad"
+          [ "$bad" -eq 0 ] || echo "::warning::a host is unreachable from at least one major resolver — visitors on it get nothing"
