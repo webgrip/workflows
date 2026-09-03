@@ -49,6 +49,14 @@ on:
         type: string
         required: false
         default: ''
+      not-found-path:
+        description: >-
+          A path that must answer 404 after a production deploy — proves
+          wrangler.toml's not_found_handling actually serves the 404 page with a
+          404 status instead of a soft-404. Empty = skip.
+        type: string
+        required: false
+        default: ''
       production-refs:
         description: 'Space-separated full refs that deploy to production; every other ref is preview-only'
         type: string
@@ -242,6 +250,7 @@ jobs:
           APEX: ${{ inputs.apex-url }}
           PROBE: ${{ inputs.edge-probe-path }}
           SMOKE_PATHS: ${{ inputs.smoke-paths }}
+          NOT_FOUND_PATH: ${{ inputs.not-found-path }}
         run: |
           set -euo pipefail
 
@@ -264,6 +273,12 @@ jobs:
             echo "${path} -> ${code}"
             [ "${code}" = "200" ] || { echo "FAIL ${path} (expected 200)"; exit 1; }
           done <<< "${SMOKE_PATHS}"
+
+          if [ -n "${NOT_FOUND_PATH}" ]; then
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${NOT_FOUND_PATH}")"
+            echo "${NOT_FOUND_PATH} -> ${code} (expected 404)"
+            [ "${code}" = "404" ] || { echo "FAIL: soft-404 — the error page is being served with ${code}"; exit 1; }
+          fi
 
       - name: Check every redirect rule against the live edge
         shell: bash
