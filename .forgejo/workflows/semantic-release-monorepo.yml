@@ -84,6 +84,13 @@ on:
       FORGEJO_TOKEN:
         description: 'Forgejo CI bot token used for checkout/push and releases'
         required: false
+      NPM_TOKEN:
+        description: >-
+          Token for publishing npm packages to the Forgejo registry (configs with
+          makeConfig({ manifest: 'npm', npmPublish: true })). Needs write:package — pass
+          secrets.WEBGRIP_CI_TOKEN; the built-in per-run token 401s with reqPackageAccess.
+          Omit for tag/changelog-only trains.
+        required: false
     outputs:
       version:
         description: 'Bare semver of the release cut this run (empty if none)'
@@ -139,6 +146,7 @@ jobs:
           package-path: ${{ inputs.package-path }}
           package-name: ${{ inputs.package-name }}
           token: ${{ secrets.CI_TOKEN || secrets.FORGEJO_TOKEN }}
+          npm-token: ${{ secrets.NPM_TOKEN }}
           dry-run: ${{ inputs.dry-run }}
           monorepo: ${{ inputs.monorepo }}
 

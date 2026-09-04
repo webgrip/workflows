@@ -623,7 +623,12 @@ kept only for caller compatibility. See
 `webgrip/infrastructure` (`ops/docker/semantic-release/`).
 
 **Inputs:** `package-path` (`.` for a root-scoped train), `package-name`, `dry-run`.
-**Secrets:** `FORGEJO_TOKEN`. **Outputs:** `version` (bare semver, normalized), `tag`.
+**Secrets:** `CI_TOKEN` (preferred; pass `secrets.WEBGRIP_CI_TOKEN`) or `FORGEJO_TOKEN`;
+`NPM_TOKEN` for trains that publish npm packages to the Forgejo registry
+(`makeConfig({ manifest: 'npm', npmPublish: true })` — the token needs `write:package`, so
+pass `secrets.WEBGRIP_CI_TOKEN` there too). **Outputs:** `version` (bare semver, normalized),
+`tag`. Every package train starts from a seeded `<package-name>-v0.0.0` at the root commit,
+so a first `feat` releases **0.1.0**, not 1.0.0.
 
 ```yaml
 jobs:
