@@ -21,6 +21,16 @@ inputs:
   token:
     description: "Forgejo token to use for pushing tags/releases"
     required: false
+  npm-token:
+    description: >-
+      Token for publishing npm packages to the Forgejo registry, for configs built with
+      makeConfig({ manifest: 'npm', npmPublish: true }). Needs write:package — the org
+      webgrip-ci bot token qualifies; the built-in per-run token 401s with reqPackageAccess.
+      @semantic-release/npm writes its own .npmrc from the package's publishConfig.registry
+      plus this token, so no npm config commands are needed here. Empty (the default) is fine
+      for tag/changelog-only configs: the npm plugin is not in their chain, so nothing reads it.
+    required: false
+    default: ""
   monorepo:
     description: >-
       Retained for caller compatibility and now a no-op: semantic-release-monorepo is baked into the
@@ -69,6 +79,8 @@ runs:
         # links use the public host (forge-url) via --repository-url below.
         GITEA_URL: ${{ github.server_url }}
         GITEA_TOKEN: ${{ inputs.token || github.token }}
+        # Read by @semantic-release/npm (when the resolved config publishes npm); inert otherwise.
+        NPM_TOKEN: ${{ inputs.npm-token }}
         # GIT_CREDENTIALS is what semantic-release core reads to build an authenticated push URL
         # for --repository-url. Components must be URL-encoded if they contain reserved characters.
         GIT_CREDENTIALS: ${{ inputs.git-user-name }}:${{ inputs.token || github.token }}
