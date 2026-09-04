@@ -1,3 +1,18 @@
+## [2.1.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.0.0...v2.1.0) (2026-09-04)
+
+### Added
+
+* **static-sites:** 404 probe in the production smoke test ([7220db0](https://forgejo.webgrip.dev/webgrip/workflows/commit/7220db0acd93e1e76a67ef4d2457edcda5d9b9d8))
+* **static-sites:** reusable deploy + quality gates for Cloudflare static sites ([7ad8337](https://forgejo.webgrip.dev/webgrip/workflows/commit/7ad8337a44b53c2e36c20952151886fbe24c26e7))
+
+### Fixed
+
+* **parity:** bring FORGEJO_ONLY up to date so the check can run green ([f295782](https://forgejo.webgrip.dev/webgrip/workflows/commit/f2957825301caa2f01d373ab2896ca89d3cefa11))
+
+### CI
+
+* **release:** toolchain images 0.3.3 — complete override set baked (publish-path got 11) ([e7a5189](https://forgejo.webgrip.dev/webgrip/workflows/commit/e7a51892a45bcc8215bda4582d6bdb050557b25f))
+
 ## [2.0.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v1.11.3...v2.0.0) (2026-08-28)
 
 ### ⚠ BREAKING CHANGES
