@@ -1,3 +1,14 @@
+## [2.3.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.3.0...v2.3.1) (2026-09-04)
+
+### Fixed
+
+* **sync:** de sync-lijst duwde de self-CI van deze repo naar elke consumer ([21e45c9](https://forgejo.webgrip.dev/webgrip/workflows/commit/21e45c9d14127786ce8bba2da64253dd1cb9da03))
+
+### Docs
+
+* **adr-0006:** geen commentaar in code, estate-breed ([cc6d2a5](https://forgejo.webgrip.dev/webgrip/workflows/commit/cc6d2a5598fa91286f68bb79866cbcc83fe7eb40))
+* **agents:** AGENTS.md for the two-tree contract and the release traps ([58cebfc](https://forgejo.webgrip.dev/webgrip/workflows/commit/58cebfc21f6903d3637efcc8eae703c047d3b109))
+
 ## [2.3.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.2.0...v2.3.0) (2026-09-04)
 
 ### Added
