@@ -157,9 +157,6 @@ jobs:
             [".gitignore"]=".gitignore"
             [".releaserc.json"]=".releaserc.json"
             [".vscode/settings.json"]=".vscode/settings.json"
-            [".forgejo/workflows/on_docs_change.yml"]=".forgejo/workflows/on_docs_change.yml"
-            [".forgejo/workflows/on_source_change.yml"]=".forgejo/workflows/on_source_change.yml"
-            [".forgejo/workflows/on_workflow_files_change.yml"]=".forgejo/workflows/on_workflow_files_change.yml"
           )
 
           for SOURCE_FILE in "${!FILES_TO_SYNC[@]}"; do

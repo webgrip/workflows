@@ -81,9 +81,6 @@ jobs:
             [".gitignore"]=".gitignore"
             [".releaserc.json"]=".releaserc.json"
             [".vscode/settings.json"]=".vscode/settings.json"
-            [".github/workflows/on_docs_change.yml"]=".github/workflows/on_docs_change.yml"
-            [".github/workflows/on_source_change.yml"]=".github/workflows/on_source_change.yml"
-            [".github/workflows/on_workflow_files_change.yml"]=".github/workflows/on_workflow_files_change.yml"
           )
 
           # Create sync script
@@ -122,9 +119,6 @@ jobs:
             [".gitignore"]=".gitignore"
             [".releaserc.json"]=".releaserc.json"
             [".vscode/settings.json"]=".vscode/settings.json"
-            [".github/workflows/on_docs_change.yml"]=".github/workflows/on_docs_change.yml"
-            [".github/workflows/on_source_change.yml"]=".github/workflows/on_source_change.yml"
-            [".github/workflows/on_workflow_files_change.yml"]=".github/workflows/on_workflow_files_change.yml"
           )
 
           for SOURCE_FILE in "${!FILES_TO_SYNC[@]}"; do
