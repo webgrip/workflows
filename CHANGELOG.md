@@ -1,3 +1,9 @@
+## [2.3.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.2.0...v2.3.0) (2026-09-04)
+
+### Added
+
+* **static-sites:** lanes op de gebakken static-site-ci-runner-image ([7947036](https://forgejo.webgrip.dev/webgrip/workflows/commit/79470364c0e4e921e1c3b038b538d4998a3dbb54)), closes [#60](https://forgejo.webgrip.dev/webgrip/workflows/issues/60)
+
 ## [2.2.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.1.0...v2.2.0) (2026-09-04)
 
 ### Added
