@@ -1,3 +1,9 @@
+## [2.4.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.3.1...v2.4.0) (2026-09-04)
+
+### Added
+
+* **node-tests:** job-name input labels each call in the caller pipeline ([ef2b7a6](https://forgejo.webgrip.dev/webgrip/workflows/commit/ef2b7a61a56c57efc41a4738009c793d200b20c2))
+
 ## [2.3.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.3.0...v2.3.1) (2026-09-04)
 
 ### Fixed
