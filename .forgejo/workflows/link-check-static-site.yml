@@ -7,24 +7,22 @@ name: '[Call] Static Site Link Check'
 # registration URL every CTA points at: "a guardrail that only warns guards
 # nothing"). Merged from twente.dev and webgrip.nl, each of which had half of this.
 #
-# lychee is installed as a release binary, NOT run via `docker run -v "$PWD/dist"`:
-# this job itself runs in a container, so a bind mount resolves $PWD on the HOST
-# daemon — where the checkout does not exist — and lychee then happily checks an
-# empty directory and reports green (the "vacuous groen" failure, measured
-# 2026-09-03).
-#
-# ADR-0005 deviation, declared: lychee is curl-installed at job time, as both
-# consumer jobs did. Follow-up: bake it into a static-site-ci-runner image in
-# webgrip/infrastructure.
+# lychee, dig and node come baked in the static-site-ci-runner image (ADR-0005:
+# the toolchain is an image, not an install) — no curl-latest at job time, and a
+# pinned lychee instead of whatever GitHub serves that week. The old bind-mount
+# trap stays documented: a -v "$PWD/dist" mount resolves $PWD on the HOST daemon,
+# where the checkout does not exist, and lychee happily checks an empty directory
+# and reports green (the "vacuous groen" failure, measured 2026-09-03).
 
 on:
   workflow_call:
     inputs:
-      node-version:
-        description: 'Node.js version to install'
+      runner-image:
+        description: 'Toolchain image the job runs in (node + lychee + dig baked; built in webgrip/infrastructure)'
         type: string
         required: false
-        default: '24'
+        # renovate: datasource=docker depName=harbor.webgrip.dev/webgrip/static-site-ci-runner
+        default: 'harbor.webgrip.dev/webgrip/static-site-ci-runner:0.1.0'
       build-command:
         description: 'Build command producing dist/'
         type: string
@@ -82,15 +80,12 @@ jobs:
     name: 'Check links in built output'
     if: inputs.enabled
     runs-on: docker
+    container: ${{ inputs.runner-image }}
     permissions:
       contents: read
     steps:
       # v5, not v6 — v6 is broken on non-GitHub runners (ADR 0002).
       - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ inputs.node-version }}
 
       - name: Enable pnpm
         shell: bash
@@ -105,14 +100,6 @@ jobs:
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         run: ${{ inputs.build-command }}
-
-      - name: Install lychee
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -sSfL https://github.com/lycheeverse/lychee/releases/latest/download/lychee-x86_64-unknown-linux-gnu.tar.gz \
-            | tar -xz -C /usr/local/bin lychee
-          lychee --version
 
       - name: Check internal links (blocking)
         shell: bash
@@ -183,7 +170,7 @@ jobs:
           HOSTS_SOURCE: ${{ inputs.dns-hosts-source }}
         run: |
           set -uo pipefail
-          apk add --no-cache bind-tools 2>/dev/null || apt-get -qq update && apt-get -qq install -y dnsutils || true
+          # dig is baked in the runner image — no package install at job time.
           grep -oE 'url: https?://[^/]+' "${HOSTS_SOURCE}" \
             | sed -E 's#url: https?://##' | sort -u > /tmp/hosts.txt
           echo "checking $(wc -l < /tmp/hosts.txt) hosts against 1.1.1.1, 8.8.8.8, 9.9.9.9"
