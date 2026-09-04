@@ -9,9 +9,10 @@ name: '[Call] Axe Accessibility Gate'
 # Same sibling-docker rule as the Lighthouse gate: everything goes in by `docker cp`
 # because bind mounts resolve on the HOST daemon, where the checkout does not exist.
 #
-# ADR-0005 deviation, declared: axe + playwright-core install with npm at job time
-# and the browsers image defaults to Docker Hub, exactly as the consumer jobs did.
-# Follow-up: bake a static-site-ci-runner image in webgrip/infrastructure.
+# The image is the pinned static-site-ci-runner (webgrip/infrastructure). The one
+# remaining runtime install is deliberate: @axe-core/playwright and playwright-core
+# versions come from the CONSUMER's package.json so the gate can never drift from
+# what a developer runs locally — baking them would break that contract.
 
 on:
   workflow_call:
@@ -42,10 +43,11 @@ on:
         required: false
         default: ''
       browsers-image:
-        description: 'Chrome-equipped container image the scan runs in'
+        description: 'Toolchain image the scan runs in (Chrome baked; built in webgrip/infrastructure)'
         type: string
         required: false
-        default: 'cypress/browsers:latest'
+        # renovate: datasource=docker depName=harbor.webgrip.dev/webgrip/static-site-ci-runner
+        default: 'harbor.webgrip.dev/webgrip/static-site-ci-runner:0.1.0'
       enabled:
         description: 'Gate the job from INSIDE the reusable (Forgejo v15 flattening drops caller if-conditions on uses jobs)'
         type: boolean
