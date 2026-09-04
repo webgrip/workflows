@@ -28,13 +28,18 @@ on:
         required: false
         default: 'coverage'
         type: string
+      job-name:
+        description: 'Job name shown in the caller pipeline, so several calls of this workflow stay distinguishable'
+        required: false
+        default: 'Node.js test suite'
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   tests-run:
-    name: 'Node.js test suite'
+    name: ${{ inputs.job-name }}
     runs-on: arc-runner-set
     steps:
       - uses: actions/checkout@v6

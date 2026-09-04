@@ -217,7 +217,7 @@ Runs Maven or Gradle test suites and uploads common test report directories.
 Runs Node.js static analysis with package-manager detection, formatting, linting, type checks, dependency audit, dead dependency checks, and outdated reporting.
 
 #### `node-application-tests.yml`
-Runs Node.js test suites and uploads coverage artifacts when present.
+Runs Node.js test suites and uploads coverage artifacts when present. Pass `job-name` when a pipeline calls it more than once, so each call is labelled by what it runs instead of `Node.js test suite-1`, `-2`, `-3`.
 
 #### `python-application-static-analysis.yml`
 Runs Python static analysis with Ruff, optional MyPy, Bandit, `pip-audit`, and Deptry.
