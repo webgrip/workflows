@@ -105,7 +105,10 @@ jobs:
             [ -n "${p}" ] || continue
             docker cp "${p}" "${name}:/repo/${p}"
           done <<< "${EXTRA_CP}"
-          docker exec -w /repo "${name}" bash -c "npx --yes @lhci/cli@${LHCI_VERSION} autorun"
+          # --loglevel=error: the ad-hoc npx install drags @lhci/cli's legacy tree in
+          # (glob@7, inflight, rimraf@2) and npm's deprecation warnings for THEIR
+          # dependencies are noise no consumer can act on. Real failures still fail.
+          docker exec -w /repo "${name}" bash -c "npx --yes --loglevel=error @lhci/cli@${LHCI_VERSION} autorun"
 
       - name: Clean up Lighthouse container
         if: always()
