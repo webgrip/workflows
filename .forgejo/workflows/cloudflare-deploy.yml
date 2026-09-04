@@ -1,0 +1,304 @@
+name: '[Call] Cloudflare Static Deploy'
+
+# Deploys an assets-only Cloudflare Worker (a static site's dist/) with wrangler from
+# the consumer's own checkout: preview uploads on feature refs, production deploy plus
+# live-edge verification on the release ref. Extracted from twente.dev and webgrip.nl,
+# whose deploy jobs were hand-synced copies of each other (twente.dev ADR-0003 named
+# this extraction as its Phase 2).
+#
+# wrangler runs through `pnpm exec` (it is a devDependency of the consumer, installed
+# by the install step), never `pnpm dlx`: dlx installs into a throwaway project that
+# never sees the consumer's pnpm-workspace.yaml allowBuilds, so pnpm's build-scripts
+# guard prompts interactively for esbuild/workerd and the job hangs forever. This is
+# also why the workflow assumes pnpm rather than taking a package-manager input.
+#
+# Secrets scope note: CLOUDFLARE_API_TOKEN needs Account/Workers Scripts:Edit +
+# Account/Account Settings:Read + Zone/Workers Routes:Edit. The zone scope is the one
+# people forget: a token without it uploads the worker and then dies creating the
+# route binding ("No targets deployed"), which presents as a green-looking deploy and
+# a dead site.
+#
+# ADR-0005 deviation, declared: the toolchain is installed at job time (setup-node +
+# corepack) instead of riding a baked Harbor image. This is a lift-and-shift of two
+# proven consumer jobs; the follow-up is a static-site-ci-runner image built in
+# webgrip/infrastructure, after which this gains a runner-image input.
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: >-
+          Which deploy this call performs: 'preview' (wrangler versions upload) or
+          'production' (wrangler deploy + edge verification). Pass a LITERAL string:
+          Forgejo v15 evaluates a caller's with-expressions at flatten time with an
+          EMPTY github context, so ref-dependent expressions come out wrong there.
+          Ref routing happens inside this workflow instead (production-refs).
+        type: string
+        required: true
+      apex-url:
+        description: "Public origin to verify after a production deploy, no trailing slash (e.g. 'https://twente.dev')"
+        type: string
+        required: true
+      edge-probe-path:
+        description: 'Path polled until the edge serves 200 after a production deploy'
+        type: string
+        required: false
+        default: '/'
+      smoke-paths:
+        description: 'Newline-separated paths that must answer 200 on the apex after a production deploy'
+        type: string
+        required: false
+        default: ''
+      not-found-path:
+        description: >-
+          A path that must answer 404 after a production deploy — proves
+          wrangler.toml's not_found_handling actually serves the 404 page with a
+          404 status instead of a soft-404. Empty = skip.
+        type: string
+        required: false
+        default: ''
+      production-refs:
+        description: 'Space-separated full refs that deploy to production; every other ref is preview-only'
+        type: string
+        required: false
+        default: 'refs/heads/main'
+      node-version:
+        description: 'Node.js version to install'
+        type: string
+        required: false
+        default: '24'
+      build-command:
+        description: 'Build command run before deploying (its output directory is what wrangler.toml points at)'
+        type: string
+        required: false
+        default: 'pnpm build'
+      working-directory:
+        description: 'Directory containing package.json, wrangler.toml and public/_redirects'
+        type: string
+        required: false
+        default: '.'
+      enabled:
+        description: >-
+          Gate the jobs from INSIDE the reusable. Forgejo v15 flattening drops
+          if-conditions on uses-caller jobs, so a caller cannot skip this call with
+          its own if; pass false (or rely on production-refs) instead.
+        type: boolean
+        required: false
+        default: true
+      api-base:
+        description: 'Forgejo API base URL for the preview PR comment'
+        type: string
+        required: false
+        default: 'https://forgejo.webgrip.dev/api/v1'
+      comment-marker:
+        description: 'Hidden marker keeping the preview PR comment idempotent (one comment per PR)'
+        type: string
+        required: false
+        default: 'cloudflare-preview-marker'
+      comment-body:
+        description: 'Preview PR comment text; {url} is replaced with the preview URL. The marker is appended automatically.'
+        type: string
+        required: false
+        default: '🔍 **Deploy preview**: {url} — rendered build of this branch. Updates on every push.'
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: 'Cloudflare token: Account/Workers Scripts:Edit + Account/Account Settings:Read + Zone/Workers Routes:Edit'
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        description: 'Cloudflare account id'
+        required: true
+
+jobs:
+  cfpreview:
+    name: 'Deploy preview'
+    # Space-padding both sides makes the ref match whole-token (refs/heads/main must
+    # not match refs/heads/maintenance). github.ref is trustworthy here: this is a
+    # real job, evaluated on the runner, not at flatten time.
+    if: >-
+      inputs.enabled && inputs.environment == 'preview' &&
+      !contains(format(' {0} ', inputs.production-refs), format(' {0} ', github.ref))
+    runs-on: docker
+    environment: preview
+    permissions:
+      contents: read
+    steps:
+      # v5, not v6 — v6 is broken on non-GitHub runners (ADR 0002).
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Enable pnpm
+        shell: bash
+        run: corepack enable
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.build-command }}
+
+      - name: Upload preview version
+        id: upload
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          # `versions upload` publishes a non-production version and prints a preview
+          # URL. Reviewers see the rendered page, not the YAML diff — the single
+          # highest-value CI feature for a content site.
+          pnpm exec wrangler versions upload | tee upload.log
+          url="$(grep -oE 'https://[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev' upload.log | head -1 || true)"
+          echo "preview-url=${url}" >> "$GITHUB_OUTPUT"
+
+      - name: Report preview URL
+        if: steps.upload.outputs.preview-url != ''
+        shell: bash
+        run: |
+          echo "Preview: ${{ steps.upload.outputs.preview-url }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment the PR (if one exists for this branch)
+        if: steps.upload.outputs.preview-url != ''
+        shell: bash
+        env:
+          COMMENT_BODY: ${{ inputs.comment-body }}
+          COMMENT_MARKER: ${{ inputs.comment-marker }}
+          PREVIEW_URL: ${{ steps.upload.outputs.preview-url }}
+        run: |
+          set -euo pipefail
+          # Marker-idempotent poster (pattern from spa-preview.yml), rewritten from
+          # python3 to node because this job installs node anyway and runs directly
+          # on the runner, where python3 is not guaranteed. Commenting is best-effort
+          # by contract: every curl is -fsS with `|| exit 0`, because a missing PR or
+          # an API hiccup must not fail a deploy that already succeeded.
+          api="${{ inputs.api-base }}/repos/${GITHUB_REPOSITORY}"
+          curl -fsS -H "Authorization: token ${{ github.token }}" \
+            "${api}/pulls?state=open&limit=50" -o /tmp/pulls.json || exit 0
+          PR="$(node -e '
+            const pulls = require("/tmp/pulls.json");
+            const hit = pulls.find((p) => p.head && p.head.ref === process.argv[1]);
+            if (hit) console.log(hit.number);
+          ' "$GITHUB_REF_NAME")"
+          [ -n "$PR" ] || { echo "no open PR for ${GITHUB_REF_NAME} — skipping comment"; exit 0; }
+          # The marker prevents comment spam: only post once per PR.
+          curl -fsS -H "Authorization: token ${{ github.token }}" \
+            "${api}/issues/${PR}/comments" -o /tmp/comments.json || exit 0
+          if grep -q "$COMMENT_MARKER" /tmp/comments.json; then
+            echo "preview comment already present"
+            exit 0
+          fi
+          node -e '
+            const body = process.env.COMMENT_BODY.replace("{url}", process.env.PREVIEW_URL);
+            const marker = process.env.COMMENT_MARKER;
+            process.stdout.write(JSON.stringify({ body: `${body} <!-- ${marker} -->` }));
+          ' > /tmp/preview-comment.json
+          curl -fsS -X POST -H "Authorization: token ${{ github.token }}" \
+            -H 'Content-Type: application/json' \
+            -d @/tmp/preview-comment.json "${api}/issues/${PR}/comments" >/dev/null || exit 0
+          echo "preview comment posted on PR #${PR}"
+
+  cfprod:
+    name: 'Deploy production'
+    if: >-
+      inputs.enabled && inputs.environment == 'production' &&
+      contains(format(' {0} ', inputs.production-refs), format(' {0} ', github.ref))
+    runs-on: docker
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      # v5, not v6 — v6 is broken on non-GitHub runners (ADR 0002).
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Enable pnpm
+        shell: bash
+        run: corepack enable
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.build-command }}
+
+      - name: Deploy
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy
+
+      - name: Smoke test the live edge
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          APEX: ${{ inputs.apex-url }}
+          PROBE: ${{ inputs.edge-probe-path }}
+          SMOKE_PATHS: ${{ inputs.smoke-paths }}
+          NOT_FOUND_PATH: ${{ inputs.not-found-path }}
+        run: |
+          set -euo pipefail
+
+          # Wait for the edge before asserting anything: a route can take up to a
+          # minute to propagate after `wrangler deploy` reports success (twente.dev
+          # run 8 deployed fine and then failed here seconds later on a 522).
+          # Asserting immediately turns a healthy deploy into a red pipeline, which
+          # is how a smoke test stops being believed.
+          for attempt in $(seq 1 12); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${PROBE}" || echo 000)"
+            [ "${code}" = "200" ] && { echo "edge ready after ${attempt} attempt(s)"; break; }
+            echo "waiting for edge (${PROBE} -> ${code}, attempt ${attempt}/12)"
+            [ "${attempt}" = "12" ] && { echo "FAIL: edge never became ready"; exit 1; }
+            sleep 10
+          done
+
+          while IFS= read -r path; do
+            [ -n "${path}" ] || continue
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${path}")"
+            echo "${path} -> ${code}"
+            [ "${code}" = "200" ] || { echo "FAIL ${path} (expected 200)"; exit 1; }
+          done <<< "${SMOKE_PATHS}"
+
+          if [ -n "${NOT_FOUND_PATH}" ]; then
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${NOT_FOUND_PATH}")"
+            echo "${NOT_FOUND_PATH} -> ${code} (expected 404)"
+            [ "${code}" = "404" ] || { echo "FAIL: soft-404 — the error page is being served with ${code}"; exit 1; }
+          fi
+
+      - name: Check every redirect rule against the live edge
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          APEX: ${{ inputs.apex-url }}
+        run: |
+          set -euo pipefail
+          # Generated from the consumer's own public/_redirects, so a new redirect
+          # cannot ship without its check: "a new redirect without its smoke check is
+          # an unguarded promise" — and hand-mirrored lists proved they rot (three
+          # unchecked rules found in the 2026-09-03 audit).
+          if [ ! -f public/_redirects ]; then
+            echo "no public/_redirects — nothing to check"
+            exit 0
+          fi
+          while read -r src target status _rest; do
+            case "${src}" in ''|'#'*) continue ;; esac
+            [ -n "${status}" ] || continue
+            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${src}")"
+            echo "${src} -> ${code} (expected ${status})"
+            [ "${code}" = "${status}" ] || { echo "FAIL ${src}"; exit 1; }
+          done < public/_redirects

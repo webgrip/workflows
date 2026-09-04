@@ -229,7 +229,7 @@ runs:
         fi
 
     - name: "Generate Harbor-native SBOM accessory (fail-soft)"
-      # Harbor-only: this hits Harbor's v2 API (no analog on ghcr.io etc.), so skip it for other
+      # Harbor-only: this hits Harbor's v2 API (no analog on other registries), so skip it for other
       # registries — the cosign attestation + DT upload above already cover GHCR's provenance.
       if: ${{ contains(inputs.registry, 'harbor') }}
       shell: bash

@@ -50,6 +50,20 @@ FORGEJO_ONLY=(
     moon-ci.yml                             # hard-gate family (ADR 0003): Harbor runner images + forgejo artifact forks
     spa-preview.yml                         # in-cluster preview host + Forgejo API, no GitHub analog
     docker-mirror.yml                       # Harbor -> Forgejo registry replication, no GitHub analog
+    cloudflare-deploy.yml                   # static-site family (ADR 0003): Cloudflare sites release from Forgejo only
+    lighthouse-budgets.yml                  # static-site family (ADR 0003): sibling-docker Chrome gate, Forgejo-only consumers
+    axe-scan.yml                            # static-site family (ADR 0003): sibling-docker Chrome gate, Forgejo-only consumers
+    link-check-static-site.yml              # static-site family (ADR 0003): Forgejo-only consumers
+    on_source_change.yml                    # this repo's own push-triggered CI, not part of the mirrored library
+    on_docs_change.yml                      # this repo's own docs publishing, not part of the mirrored library
+    forgejo-distribute.yml                  # Forgejo registry/release replication target, no GitHub analog
+    github-distribute.yml                   # runs ON the Forgejo release authority to push releases TO GitHub mirrors
+    probe-flatten-context.yml               # diagnostic probe for Forgejo v15 reusable-workflow flattening
+    techdocs-generate.yml                   # in-cluster techdocs pipeline, Forgejo-first
+    techdocs-deploy-docs-site.yml           # in-cluster techdocs pipeline, Forgejo-first
+    techdocs-deploy-backstage-s3.yml        # in-cluster techdocs pipeline, Forgejo-first
+    techdocs-deploy-gh-pages.yml            # runs on Forgejo, mirrors docs out to GitHub Pages
+    update_techdocs.yml                     # in-cluster techdocs pipeline, Forgejo-first
 )
 
 is_forgejo_only() {
@@ -95,8 +109,11 @@ if [ -d ".forgejo" ]; then
         desc="${entry#*|}"
         # docker-build-and-push-ghcr.yml is exempt: it intentionally targets ghcr.io so
         # consumers can dual-publish during the Harbor migration (see README).
+        # github-distribute.yml is exempt for the same reason in the other direction:
+        # its whole job is pushing a Forgejo-cut release out to GitHub's registry.
         if matches="$(grep -rnE "$pattern" .forgejo --include='*.yml' --include='*.yaml' \
-            --exclude='docker-build-and-push-ghcr.yml' 2>/dev/null)"; then
+            --exclude='docker-build-and-push-ghcr.yml' \
+            --exclude='github-distribute.yml' 2>/dev/null)"; then
             while IFS= read -r line; do
                 err "$desc"
                 printf '      %s\n' "$line"
