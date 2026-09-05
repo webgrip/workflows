@@ -1,3 +1,9 @@
+## [2.5.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.5.0...v2.5.1) (2026-09-05)
+
+### Fixed
+
+* **semantic-release:** auto-modus laat een mislukte consumer-build de release niet meer breken ([bdeeed8](https://forgejo.webgrip.dev/webgrip/workflows/commit/bdeeed8a3d436eaab21823fa0ac5e68f7f471432))
+
 ## [2.5.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.4.1...v2.5.0) (2026-09-05)
 
 ### Added
