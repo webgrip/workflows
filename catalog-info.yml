@@ -1,0 +1,28 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: workflows
+  namespace: webgrip
+  title: webgrip/workflows
+  description: |
+    The shared CI and release lanes every webgrip repository calls, and the
+    decision records that govern how the estate builds, tests and releases.
+  links:
+    - title: Source
+      url: https://forgejo.webgrip.dev/webgrip/workflows
+    - title: Decision records
+      url: https://forgejo.webgrip.dev/webgrip/workflows/src/branch/main/docs/adrs/README.md
+  tags:
+    - webgrip
+    - ci-cd
+    - forgejo-actions
+  annotations:
+    backstage.io/techdocs-ref: dir:docs/techdocs
+    backstage.io/adr-location: docs/adrs
+    backstage.io/source-location: url:https://forgejo.webgrip.dev/webgrip/workflows
+    simpleicons.org/icon-slug: forgejo
+spec:
+  type: library
+  owner: group:webgrip/ops
+  lifecycle: production
+  system: webgrip-system
