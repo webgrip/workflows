@@ -403,6 +403,37 @@ consumer's `scripts/axe-scan.ts` in a sibling container that holds only `dist/`,
 installed at the version the consumer's package.json declares, so the container cannot drift
 from local runs; names the consumer does not declare are skipped.
 
+#### `dnscontrol.yml`
+A site repository owns its zone: `ops/dns/dnsconfig.js` plus a `creds.json` that reads
+`$CLOUDFLARE_API_TOKEN` / `$CLOUDFLARE_ACCOUNT_ID`. Three modes behind one input: `preview` on
+every push and pull request, `push` on `push-refs` (default `main`) behind the caller's own switch
+(`enabled: ${{ vars.DNS_PUSH == 'on' }}`), `drift` for a nightly run that fails on any correction.
+A push that deletes a record is refused unless HEAD carries `DNS-Allow-Delete: <fqdn>` for it.
+dnscontrol is installed pinned and checksum-verified; the token needs Zone:Read and DNS:Edit on
+the declared zones only. Account-level Cloudflare objects (Zero Trust, R2, tokens) stay in
+`webgrip/cloudflare`.
+
+**Example:**
+```yaml
+dns-preview:
+  uses: webgrip/workflows/.forgejo/workflows/dnscontrol.yml@<tag>
+  with:
+    mode: preview
+  secrets:
+    CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DNS_TOKEN }}
+    CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+dns-push:
+  needs: [dns-preview]
+  uses: webgrip/workflows/.forgejo/workflows/dnscontrol.yml@<tag>
+  with:
+    mode: push
+    enabled: ${{ vars.DNS_PUSH == 'on' }}
+  secrets:
+    CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DNS_TOKEN }}
+    CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+```
+
 #### `link-check-static-site.yml`
 Internal links blocking (with a vacuous-run guard and clean-URL `--fallback-extensions`),
 external links best-effort, plus two opt-ins: `blocking-urls-command` prints critical URLs

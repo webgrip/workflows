@@ -1,0 +1,129 @@
+name: '[Call] DNSControl'
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: "'preview' shows the corrections for the checked-out config; 'push' previews, refuses undeclared deletions and applies; 'drift' fails when the live zone differs from the config"
+        type: string
+        required: true
+      working-directory:
+        description: 'Directory holding dnsconfig.js and the creds file'
+        type: string
+        required: false
+        default: 'ops/dns'
+      creds-file:
+        description: 'DNSControl creds file inside working-directory; its apitoken and accountid read $CLOUDFLARE_API_TOKEN and $CLOUDFLARE_ACCOUNT_ID'
+        type: string
+        required: false
+        default: 'creds.json'
+      dnscontrol-version:
+        description: 'DNSControl release to install, checksum-verified against its checksums.txt'
+        type: string
+        required: false
+        # renovate: datasource=github-releases depName=StackExchange/dnscontrol
+        default: '5.0.3'
+      push-refs:
+        description: "Space-separated full refs on which mode 'push' may apply; any other ref only previews"
+        type: string
+        required: false
+        default: 'refs/heads/main'
+      delete-trailer:
+        description: "Commit trailer that authorises a deletion, one '<trailer>: <fqdn>' line per record; a push that deletes without it is refused"
+        type: string
+        required: false
+        default: 'DNS-Allow-Delete'
+      enabled:
+        description: 'Gate the job from inside the reusable; a caller passes its push switch here, e.g. vars.DNS_PUSH == ''on'''
+        type: boolean
+        required: false
+        default: true
+    secrets:
+      CLOUDFLARE_API_TOKEN:
+        description: 'Cloudflare token with Zone:Read and DNS:Edit on the zones the config declares'
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        description: 'Cloudflare account id'
+        required: true
+
+jobs:
+  dnscontrol:
+    name: 'DNS ${{ inputs.mode }}'
+    if: >-
+      inputs.enabled && (inputs.mode != 'push' ||
+        contains(format(' {0} ', inputs.push-refs), format(' {0} ', github.ref)))
+    runs-on: docker
+    permissions:
+      contents: read
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dnscontrol
+        shell: bash
+        env:
+          VERSION: ${{ inputs.dnscontrol-version }}
+        run: |
+          set -euo pipefail
+          case "$(uname -m)" in
+            x86_64) arch=amd64 ;;
+            aarch64 | arm64) arch=arm64 ;;
+            *) echo "unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+          base="https://github.com/StackExchange/dnscontrol/releases/download/v${VERSION}"
+          archive="dnscontrol_${VERSION}_linux_${arch}.tar.gz"
+          workdir="$(mktemp -d)"
+          curl -fsSL "${base}/${archive}" -o "${workdir}/${archive}"
+          curl -fsSL "${base}/checksums.txt" -o "${workdir}/checksums.txt"
+          (cd "${workdir}" && grep " ${archive}\$" checksums.txt | sha256sum -c -)
+          tar -xzf "${workdir}/${archive}" -C "${workdir}" dnscontrol
+          mkdir -p "${HOME}/.local/bin"
+          install -m 0755 "${workdir}/dnscontrol" "${HOME}/.local/bin/dnscontrol"
+          echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
+          "${HOME}/.local/bin/dnscontrol" version
+
+      - name: Check
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: dnscontrol check
+
+      - name: Preview
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          MODE: ${{ inputs.mode }}
+          CREDS: ${{ inputs.creds-file }}
+        run: |
+          set -uo pipefail
+          expect=""
+          [ "${MODE}" = "drift" ] && expect="--expect-no-changes"
+          dnscontrol preview --creds "${CREDS}" ${expect} > preview.raw 2>&1
+          rc=$?
+          sed 's/\x1b\[[0-9;]*m//g' preview.raw > preview.txt
+          cat preview.txt
+          { echo '```'; cat preview.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "${rc}"
+
+      - name: Refuse deletions without a trailer
+        if: inputs.mode == 'push'
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          TRAILER: ${{ inputs.delete-trailer }}
+        run: |
+          set -euo pipefail
+          deletes="$(sed -nE 's/^#[0-9]+: - DELETE ([^ ]+) .*/\1/p' preview.txt)"
+          allowed="$(git log -1 --pretty=%B | sed -n "s/^${TRAILER}: *//p")"
+          for name in ${deletes}; do
+            echo "${allowed}" | grep -qxF "${name}" || { echo "refusing: the push deletes ${name} and HEAD carries no '${TRAILER}: ${name}' trailer"; exit 1; }
+          done
+
+      - name: Push
+        if: inputs.mode == 'push'
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          CREDS: ${{ inputs.creds-file }}
+        run: dnscontrol push --creds "${CREDS}"

@@ -54,6 +54,7 @@ FORGEJO_ONLY=(
     lighthouse-budgets.yml                  # static-site family (ADR 0003): sibling-docker Chrome gate, Forgejo-only consumers
     axe-scan.yml                            # static-site family (ADR 0003): sibling-docker Chrome gate, Forgejo-only consumers
     link-check-static-site.yml              # static-site family (ADR 0003): Forgejo-only consumers
+    dnscontrol.yml                          # static-site family (ADR 0003): zone records per site repo, Forgejo-only consumers
     on_source_change.yml                    # this repo's own push-triggered CI, not part of the mirrored library
     on_docs_change.yml                      # this repo's own docs publishing, not part of the mirrored library
     forgejo-distribute.yml                  # Forgejo registry/release replication target, no GitHub analog
