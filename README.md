@@ -332,6 +332,13 @@ for **every** rule in the consumer's `public/_redirects` — a redirect cannot s
 Pass `environment` as a literal; ref routing happens inside against `production-refs`.
 `pnpm exec wrangler`, never `dlx` (the allowBuilds hang).
 
+Release-driven deploys: call it from an `on: release: types: [published]` workflow with
+`release-channel: stable` (tag without a prerelease suffix) or `release-channel: prerelease`
+(`v1.2.3-rc.1`), one call per target. `wrangler-env` selects the `[env.<name>]` block in the
+consumer's wrangler.toml, so an rc can land on a staging worker and hostname. Behind Cloudflare
+Access the anonymous edge answers 302, so pass `edge-probe-expect: '302'`, leave `smoke-paths`
+and `not-found-path` empty and set `check-redirects: false` for that target.
+
 **Secrets:** `CLOUDFLARE_API_TOKEN` (Workers Scripts:Edit + Account:Read + zone Workers
 Routes:Edit — the zone scope is the one people forget), `CLOUDFLARE_ACCOUNT_ID`.
 
@@ -348,6 +355,20 @@ deploy-production:
       /nl
       /en
       /robots.txt
+  secrets:
+    CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+    CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+deploy-staging:
+  uses: webgrip/workflows/.forgejo/workflows/cloudflare-deploy.yml@<tag>
+  with:
+    environment: production
+    release-channel: prerelease
+    wrangler-env: staging
+    apex-url: 'https://staging.twente.dev'
+    edge-probe-path: /nl
+    edge-probe-expect: '302'
+    check-redirects: false
   secrets:
     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

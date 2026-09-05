@@ -39,11 +39,6 @@ on:
         description: "Public origin to verify after a production deploy, no trailing slash (e.g. 'https://twente.dev')"
         type: string
         required: true
-      edge-probe-path:
-        description: 'Path polled until the edge serves 200 after a production deploy'
-        type: string
-        required: false
-        default: '/'
       smoke-paths:
         description: 'Newline-separated paths that must answer 200 on the apex after a production deploy'
         type: string
@@ -58,10 +53,38 @@ on:
         required: false
         default: ''
       production-refs:
-        description: 'Space-separated full refs that deploy to production; every other ref is preview-only'
+        description: 'Space-separated full refs that deploy to production; every other ref is preview-only. Ignored when release-channel is set.'
         type: string
         required: false
         default: 'refs/heads/main'
+      release-channel:
+        description: >-
+          Deploy on a Forgejo release event instead of a branch ref: 'stable' runs the production
+          job for a tag without a prerelease suffix (v1.2.3), 'prerelease' for a tag with one
+          (v1.2.3-rc.1). Empty keeps the production-refs branch gating.
+        type: string
+        required: false
+        default: ''
+      wrangler-env:
+        description: "wrangler environment ([env.<name>] in wrangler.toml) passed as --env to the production job's deploy; empty deploys the top-level worker"
+        type: string
+        required: false
+        default: ''
+      edge-probe-path:
+        description: 'Path polled until the edge answers edge-probe-expect after a production deploy'
+        type: string
+        required: false
+        default: '/'
+      edge-probe-expect:
+        description: "HTTP status the edge probe must answer; '302' for a hostname behind Cloudflare Access, where anonymous requests are redirected to the login"
+        type: string
+        required: false
+        default: '200'
+      check-redirects:
+        description: 'Verify every public/_redirects rule against the live edge; disable for a hostname behind Cloudflare Access'
+        type: boolean
+        required: false
+        default: true
       node-version:
         description: 'Node.js version to install'
         type: string
@@ -207,8 +230,14 @@ jobs:
   cfprod:
     name: 'Deploy production'
     if: >-
-      inputs.enabled && inputs.environment == 'production' &&
-      contains(format(' {0} ', inputs.production-refs), format(' {0} ', github.ref))
+      inputs.enabled && inputs.environment == 'production' && (
+        (inputs.release-channel == '' &&
+          contains(format(' {0} ', inputs.production-refs), format(' {0} ', github.ref))) ||
+        (inputs.release-channel == 'stable' && github.event_name == 'release' &&
+          !contains(github.ref, '-')) ||
+        (inputs.release-channel == 'prerelease' && github.event_name == 'release' &&
+          contains(github.ref, '-'))
+      )
     runs-on: docker
     environment: production
     permissions:
@@ -241,7 +270,8 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm exec wrangler deploy
+          WRANGLER_ENV: ${{ inputs.wrangler-env }}
+        run: pnpm exec wrangler deploy ${WRANGLER_ENV:+--env "${WRANGLER_ENV}"}
 
       - name: Smoke test the live edge
         shell: bash
@@ -249,6 +279,7 @@ jobs:
         env:
           APEX: ${{ inputs.apex-url }}
           PROBE: ${{ inputs.edge-probe-path }}
+          PROBE_EXPECT: ${{ inputs.edge-probe-expect }}
           SMOKE_PATHS: ${{ inputs.smoke-paths }}
           NOT_FOUND_PATH: ${{ inputs.not-found-path }}
         run: |
@@ -261,8 +292,8 @@ jobs:
           # is how a smoke test stops being believed.
           for attempt in $(seq 1 12); do
             code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${PROBE}" || echo 000)"
-            [ "${code}" = "200" ] && { echo "edge ready after ${attempt} attempt(s)"; break; }
-            echo "waiting for edge (${PROBE} -> ${code}, attempt ${attempt}/12)"
+            [ "${code}" = "${PROBE_EXPECT}" ] && { echo "edge ready after ${attempt} attempt(s)"; break; }
+            echo "waiting for edge (${PROBE} -> ${code}, expected ${PROBE_EXPECT}, attempt ${attempt}/12)"
             [ "${attempt}" = "12" ] && { echo "FAIL: edge never became ready"; exit 1; }
             sleep 10
           done
@@ -281,6 +312,7 @@ jobs:
           fi
 
       - name: Check every redirect rule against the live edge
+        if: inputs.check-redirects
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         env:
