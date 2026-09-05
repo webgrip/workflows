@@ -59,9 +59,11 @@ on:
         default: 'refs/heads/main'
       release-channel:
         description: >-
-          Deploy on a Forgejo release event instead of a branch ref: 'stable' runs the production
-          job for a tag without a prerelease suffix (v1.2.3), 'prerelease' for a tag with one
-          (v1.2.3-rc.1). Empty keeps the production-refs branch gating.
+          Deploy from a Forgejo release event instead of a branch ref. Any non-empty value
+          ('stable' or 'prerelease', for the run log) disables the production-refs gating and
+          trusts the caller's `enabled`: the caller decides the channel in a plain job that reads
+          github.event.release.tag_name on the runner and passes `enabled` from its needs outputs,
+          because the flattened job's own if sees no release context. Empty keeps branch gating.
         type: string
         required: false
         default: ''
@@ -230,14 +232,9 @@ jobs:
   cfprod:
     name: 'Deploy production'
     if: >-
-      inputs.enabled && inputs.environment == 'production' && (
-        (inputs.release-channel == '' &&
-          contains(format(' {0} ', inputs.production-refs), format(' {0} ', github.ref))) ||
-        (inputs.release-channel == 'stable' && github.event_name == 'release' &&
-          !contains(github.ref, '-')) ||
-        (inputs.release-channel == 'prerelease' && github.event_name == 'release' &&
-          contains(github.ref, '-'))
-      )
+      inputs.enabled && inputs.environment == 'production' &&
+      (inputs.release-channel != '' ||
+        contains(format(' {0} ', inputs.production-refs), format(' {0} ', github.ref)))
     runs-on: docker
     environment: production
     permissions:
