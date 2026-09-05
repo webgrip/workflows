@@ -1,3 +1,13 @@
+## [2.5.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.4.1...v2.5.0) (2026-09-05)
+
+### Added
+
+* **cloudflare-deploy:** release-driven deploys with a wrangler environment per channel ([9033cec](https://forgejo.webgrip.dev/webgrip/workflows/commit/9033cec962bc569006d2c4b3ccc30e9a783c55ba))
+
+### Docs
+
+* **adr:** 0006 points to its new home in ai-skills; catalog-info for Backstage ([0c294cc](https://forgejo.webgrip.dev/webgrip/workflows/commit/0c294cc1512c491a1d00fa091a77937700c8cf7c))
+
 ## [2.4.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.4.0...v2.4.1) (2026-09-05)
 
 ### Fixed
