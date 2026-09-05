@@ -48,6 +48,11 @@ on:
         required: false
         # renovate: datasource=docker depName=harbor.webgrip.dev/webgrip/static-site-ci-runner
         default: 'harbor.webgrip.dev/webgrip/static-site-ci-runner:0.1.0'
+      runtime-packages:
+        description: 'Whitespace-separated npm package names the scan script imports; each is installed in the container at the version the consumer package.json declares, names the consumer does not declare are skipped'
+        type: string
+        required: false
+        default: '@axe-core/playwright playwright-core @webgrip/astro-site-toolkit'
       enabled:
         description: 'Gate the job from INSIDE the reusable (Forgejo v15 flattening drops caller if-conditions on uses jobs)'
         type: boolean
@@ -90,14 +95,18 @@ jobs:
           EXTRA_CP: ${{ inputs.extra-cp }}
           IMAGE: ${{ inputs.browsers-image }}
           SCAN_SCRIPT: ${{ inputs.scan-script }}
+          RUNTIME_PACKAGES: ${{ inputs.runtime-packages }}
         run: |
           set -euo pipefail
-          # Versions come from the consumer's package.json so the container cannot
-          # drift from the versions a developer gets locally. playwright-core, not
-          # playwright: core skips the ~150MB browser download, and the image already
-          # ships Chrome — which the scan script targets via CHROME_PATH.
-          AXE=$(node -p "require('./package.json').devDependencies['@axe-core/playwright']")
-          PWC=$(node -p "require('./package.json').devDependencies['playwright-core']")
+          PACKAGE_SPECS=$(node -p "
+            const pkg = require('./package.json');
+            const declared = { ...pkg.dependencies, ...pkg.devDependencies };
+            process.env.RUNTIME_PACKAGES.split(/\\s+/).filter(Boolean)
+              .filter((name) => declared[name])
+              .map((name) => name + '@' + declared[name])
+              .join(' ')
+          ")
+          echo "runtime packages: ${PACKAGE_SPECS}"
 
           # Run-id in the name: the runner's docker daemon is shared between repos.
           name="axe-${GITHUB_RUN_ID:-local}"
@@ -116,8 +125,7 @@ jobs:
           # (astro, eslint, wrangler, …) before installing the two packages actually
           # wanted, which is minutes of nothing useful.
           docker exec -w /repo "${name}" bash -c 'echo "{\"type\":\"module\"}" > package.json'
-          docker exec -w /repo "${name}" bash -c \
-            "npm i --no-save --silent '@axe-core/playwright@${AXE}' 'playwright-core@${PWC}'"
+          docker exec -w /repo "${name}" npm i --no-save --silent ${PACKAGE_SPECS}
           docker exec -w /repo "${name}" bash -c \
             "node --experimental-strip-types ${SCAN_SCRIPT}"
 

@@ -362,8 +362,11 @@ directory). `extra-cp` carries anything `startServerCommand` needs (e.g. `script
 #### `axe-scan.yml`
 The real axe-core rule set over the built pages (Lighthouse's accessibility score is a
 sampling heuristic; this catches the ARIA and focus-order defects it misses). Runs the
-consumer's `scripts/axe-scan.ts`, with `@axe-core/playwright`/`playwright-core` versions read
-from the consumer's package.json so the container cannot drift from local runs.
+consumer's `scripts/axe-scan.ts` in a sibling container that holds only `dist/`, `scripts/` and
+`lighthouserc.json`, so every package the script imports must be listed in `runtime-packages`
+(default: `@axe-core/playwright`, `playwright-core`, `@webgrip/astro-site-toolkit`). Each is
+installed at the version the consumer's package.json declares, so the container cannot drift
+from local runs; names the consumer does not declare are skipped.
 
 #### `link-check-static-site.yml`
 Internal links blocking (with a vacuous-run guard and clean-URL `--fallback-extensions`),
