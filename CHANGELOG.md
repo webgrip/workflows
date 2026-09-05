@@ -1,3 +1,9 @@
+## [2.4.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.4.0...v2.4.1) (2026-09-05)
+
+### Fixed
+
+* **axe-scan:** install every package the scan script imports, not just the two axe ones ([a3e0e8d](https://forgejo.webgrip.dev/webgrip/workflows/commit/a3e0e8dff4199f592b7596e411f564bcaab67665))
+
 ## [2.4.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.3.1...v2.4.0) (2026-09-04)
 
 ### Added
