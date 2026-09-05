@@ -1,3 +1,9 @@
+## [2.5.2](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.5.1...v2.5.2) (2026-09-05)
+
+### Fixed
+
+* **cloudflare-deploy:** release-channel vertrouwt enabled van de caller, niet de github-context ([9d3da2a](https://forgejo.webgrip.dev/webgrip/workflows/commit/9d3da2af26bda748e13a85ab53fcc3c3ade4744d))
+
 ## [2.5.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.5.0...v2.5.1) (2026-09-05)
 
 ### Fixed
