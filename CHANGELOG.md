@@ -1,3 +1,9 @@
+## [2.5.3](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.5.2...v2.5.3) (2026-09-05)
+
+### Fixed
+
+* **node:** de cache-stap gaat eruit, de runner bewaart de stores per node ([fb0a4eb](https://forgejo.webgrip.dev/webgrip/workflows/commit/fb0a4ebb9faf8fa958af988e6416c9635194cc0a))
+
 ## [2.5.2](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.5.1...v2.5.2) (2026-09-05)
 
 ### Fixed
