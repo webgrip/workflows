@@ -528,7 +528,7 @@ Runs JavaScript/TypeScript test suites.
 Reusable Node.js static analysis workflow with package-manager detection and standardized quality checks.
 
 #### `node-application-tests.yml`
-Reusable Node.js test workflow with cached dependency installation.
+Reusable Node.js test workflow. Dependency stores persist per runner node (homelab ADR-0056), so there is no cache step to configure.
 
 ### Python Development
 

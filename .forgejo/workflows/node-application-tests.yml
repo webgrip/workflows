@@ -79,19 +79,6 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
 
-      - name: Cache package-manager data
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.npm
-            ~/.pnpm-store
-            ${{ inputs.working-directory }}/.yarn/cache
-            ${{ inputs.working-directory }}/.yarn/unplugged
-            ${{ inputs.working-directory }}/.yarn/install-state.gz
-          key: "node-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles(format('{0}/package-lock.json', inputs.working-directory), format('{0}/npm-shrinkwrap.json', inputs.working-directory), format('{0}/pnpm-lock.yaml', inputs.working-directory), format('{0}/yarn.lock', inputs.working-directory)) }}"
-          restore-keys: |
-            node-${{ runner.os }}-${{ inputs.node-version }}-
-
       - name: Enable Corepack
         shell: bash
         run: corepack enable
