@@ -1,3 +1,9 @@
+## [2.6.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.5.3...v2.6.0) (2026-09-05)
+
+### Added
+
+* **dnscontrol:** herbruikbare zone-lane, een site-repo bezit zijn eigen records ([2a5d82e](https://forgejo.webgrip.dev/webgrip/workflows/commit/2a5d82e28fbc4226ff620c0d52a774e292e4ba29))
+
 ## [2.5.3](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.5.2...v2.5.3) (2026-09-05)
 
 ### Fixed
