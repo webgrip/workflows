@@ -1,3 +1,9 @@
+## [2.6.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.6.0...v2.6.1) (2026-09-06)
+
+### Fixed
+
+* **dnscontrol:** de preview-stap brak op de runner-shell voordat dnscontrol draaide ([d6d1ac4](https://forgejo.webgrip.dev/webgrip/workflows/commit/d6d1ac4e9d2920951779fb9bbcdcde25d64ab25f))
+
 ## [2.6.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.5.3...v2.6.0) (2026-09-05)
 
 ### Added
