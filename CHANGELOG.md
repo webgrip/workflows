@@ -1,3 +1,9 @@
+## [2.6.2](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.6.1...v2.6.2) (2026-09-10)
+
+### Fixed
+
+* **distribute:** use the runner's cosign instead of reinstalling it per mirror ([380d404](https://forgejo.webgrip.dev/webgrip/workflows/commit/380d404701843a393c49b6d27d818d15240d4a77))
+
 ## [2.6.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.6.0...v2.6.1) (2026-09-06)
 
 ### Fixed
