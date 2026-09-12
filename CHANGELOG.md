@@ -1,3 +1,9 @@
+## [2.7.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.6.2...v2.7.0) (2026-09-12)
+
+### Added
+
+* **docs:** support assembled sites and guarded publication ([9cddb48](https://forgejo.webgrip.dev/webgrip/workflows/commit/9cddb48e84b33c817dbb79d9a2d51765a0bb1935))
+
 ## [2.6.2](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.6.1...v2.6.2) (2026-09-10)
 
 ### Fixed
