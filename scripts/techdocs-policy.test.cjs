@@ -22,14 +22,14 @@ for (const name of ['techdocs-generate', 'techdocs-deploy-docs-site']) {
     for (const phase of ['prepare', 'finalize']) {
       assert.equal(inputs[`${phase}-command`].default, '');
       const step = steps.find(step => step.env?.[`DOCS_${phase.toUpperCase()}_COMMAND`]);
-      assert.match(step.run, /bash -e -o pipefail -c/);
+      assert.match(step.run, /sh -e -o pipefail -c/);
       for (const command of ['', 'true', 'false; true', 'false | true']) {
-        const result = spawnSync('bash', ['-e', '-o', 'pipefail', '-c', command]);
+        const result = spawnSync('sh', ['-e', '-o', 'pipefail', '-c', command]);
         assert.equal(result.status === 0, ['', 'true'].includes(command));
       }
     }
     for (const step of steps.filter(step => step.run)) {
-      assert.equal(spawnSync('bash', ['-n'], { input: step.run }).status, 0);
+      assert.equal(spawnSync('sh', ['-n'], { input: step.run }).status, 0);
     }
   });
 }

@@ -82,7 +82,7 @@ jobs:
         if: ${{ inputs.enabled == 'true' }}
         env:
           DOCS_PREPARE_COMMAND: ${{ inputs.prepare-command }}
-        run: bash -e -o pipefail -c "$DOCS_PREPARE_COMMAND"
+        run: sh -e -o pipefail -c "$DOCS_PREPARE_COMMAND"
 
       - name: Build site with Zensical
         if: ${{ inputs.enabled == 'true' }}
@@ -156,7 +156,7 @@ jobs:
         if: ${{ inputs.enabled == 'true' }}
         env:
           DOCS_FINALIZE_COMMAND: ${{ inputs.finalize-command }}
-        run: bash -e -o pipefail -c "$DOCS_FINALIZE_COMMAND"
+        run: sh -e -o pipefail -c "$DOCS_FINALIZE_COMMAND"
 
       - name: Pagefind index (estate multisite search)
         if: ${{ inputs.enabled == 'true' }}
