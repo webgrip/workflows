@@ -3,6 +3,18 @@ name: "Update TechDocs"
 on:
   workflow_call:
     inputs:
+      enabled:
+        type: string
+        default: 'true'
+        description: 'Gate every step, including publication, after Forgejo flattens reusable jobs'
+      prepare-command:
+        type: string
+        default: ''
+        description: 'Assemble documentation from the checkout root before building'
+      finalize-command:
+        type: string
+        default: ''
+        description: 'Validate or augment the built output from the checkout root'
       source-dir:
         type: string
         description: 'The directory containing the techdocs files'
@@ -28,18 +40,33 @@ jobs:
     steps:
       # fetch-depth 0: git-revision-date-localized derives per-page "last
       # updated" from git log — a shallow clone would date every page today.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        if: ${{ inputs.enabled == 'true' }}
         with:
           fetch-depth: 0
 
-      - run: |
+      - name: Prepare documentation sources
+        if: ${{ inputs.enabled == 'true' }}
+        env:
+          DOCS_PREPARE_COMMAND: ${{ inputs.prepare-command }}
+        run: bash -e -o pipefail -c "$DOCS_PREPARE_COMMAND"
+
+      - if: ${{ inputs.enabled == 'true' }}
+        run: |
           techdocs-cli generate --no-docker --verbose --source-dir ${{ inputs.source-dir }} --output-dir techdocs-site
 
       # forgejo/* fork, NOT actions/*: upload-artifact@v4 ships @actions/artifact v2, which refuses
       # to run against anything that is not github.com — Forgejo reads as GHES, so the step dies
       # with "GHESNotSupportedError ... not currently supported on GHES" AFTER the docs have already
       # built successfully. Forgejo maintains a patched fork at the same major version.
+      - name: Finalize documentation output
+        if: ${{ inputs.enabled == 'true' }}
+        env:
+          DOCS_FINALIZE_COMMAND: ${{ inputs.finalize-command }}
+        run: bash -e -o pipefail -c "$DOCS_FINALIZE_COMMAND"
+
       - name: Put in artifact
+        if: ${{ inputs.enabled == 'true' }}
         uses: forgejo/upload-artifact@v4
         with:
           name: techdocs-site

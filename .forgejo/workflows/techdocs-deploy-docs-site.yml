@@ -15,11 +15,27 @@ name: "Deploy TechDocs (docs-site / Garage web)"
 on:
   workflow_call:
     inputs:
+      enabled:
+        type: string
+        default: 'true'
+        description: 'Gate every step, including publication, after Forgejo flattens reusable jobs'
+      prepare-command:
+        type: string
+        default: ''
+        description: 'Assemble documentation from the checkout root before building'
+      finalize-command:
+        type: string
+        default: ''
+        description: 'Validate or augment the built output from the checkout root'
       source-dir:
         type: string
         description: 'The directory containing the techdocs files (mkdocs.yml lives here)'
         required: false
         default: 'docs/techdocs'
+      site-dir:
+        type: string
+        default: 'site'
+        description: 'Built site directory relative to source-dir; must match mkdocs.yml'
       bucket:
         type: string
         description: 'Garage bucket serving the site (website-enabled)'
@@ -51,31 +67,41 @@ jobs:
     # techdocs-generate.yml). 1.4.0 ships zensical + rclone.
     container: harbor.webgrip.dev/webgrip/techdocs-builder:1.6.0
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+        if: ${{ inputs.enabled == 'true' }}
 
       # forgejo/* fork, NOT actions/*: v4 refuses non-github.com hosts (GHES error).
       - name: Get TechDocs artifact (llms + raw-md graft source)
+        if: ${{ inputs.enabled == 'true' }}
         uses: forgejo/download-artifact@v4
         with:
           name: techdocs-site
           path: ./techdocs-site
 
+      - name: Prepare documentation sources
+        if: ${{ inputs.enabled == 'true' }}
+        env:
+          DOCS_PREPARE_COMMAND: ${{ inputs.prepare-command }}
+        run: bash -e -o pipefail -c "$DOCS_PREPARE_COMMAND"
+
       - name: Build site with Zensical
+        if: ${{ inputs.enabled == 'true' }}
         # --clean every run: upstream recommends against CI caches while the
         # caching layer is in flux; --strict (opt-in) aborts on broken links.
         run: |
           cd ${{ inputs.source-dir }}
           zensical build --clean ${{ inputs.strict == 'true' && '--strict' || '' }}
-          test -f site/index.html
+          test -f "${{ inputs.site-dir }}/index.html"
 
       - name: Graft agent affordances + legacy-URL redirect stubs
+        if: ${{ inputs.enabled == 'true' }}
         # Pure python (busybox tar lacks -T/--null; python3 is guaranteed in the
         # image). Grafts llms.txt / llms-full.txt / per-page raw .md from the
         # mkdocs artifact (its tree mirrors the site URL tree), then writes
         # redirect stubs from mkdocs.yml's redirect_maps — mkdocs-redirects is a
         # Python plugin Zensical does not run. use_directory_urls semantics.
         run: |
-          python3 - "${{ inputs.source-dir }}" "${{ inputs.dest-prefix }}" <<'EOF'
+          python3 - "${{ inputs.source-dir }}" "${{ inputs.dest-prefix }}" "${{ inputs.site-dir }}" <<'EOF'
           import shutil, sys, pathlib, yaml
           # Tag-tolerant loader: Material configs routinely carry `!!python/name:`
           # (superfences) and `!ENV` tags that yaml.safe_load rejects — it broke
@@ -88,7 +114,7 @@ jobs:
           # root is another repo's page (infrastructure's stubs escaped to the
           # homelab site, 2026-08-11).
           prefix = ('/' + sys.argv[2].strip('/')) if len(sys.argv) > 2 and sys.argv[2].strip('/') else ''
-          site = src / 'site'
+          site = src / sys.argv[3]
           artifact = pathlib.Path('techdocs-site')
 
           grafted = 0
@@ -126,22 +152,31 @@ jobs:
           print(f'{stubs} redirect stubs written')
           EOF
 
+      - name: Finalize documentation output
+        if: ${{ inputs.enabled == 'true' }}
+        env:
+          DOCS_FINALIZE_COMMAND: ${{ inputs.finalize-command }}
+        run: bash -e -o pipefail -c "$DOCS_FINALIZE_COMMAND"
+
       - name: Pagefind index (estate multisite search)
+        if: ${{ inputs.enabled == 'true' }}
         # Writes site/pagefind/ — the per-prefix index the estate landing page
         # merges browser-side (pagefind.app/docs/multisite; same-domain, no CORS).
         run: |
-          pagefind --site "${{ inputs.source-dir }}/site"
+          pagefind --site "${{ inputs.source-dir }}/${{ inputs.site-dir }}"
 
       - name: Secret gate (gitleaks)
+        if: ${{ inputs.enabled == 'true' }}
         # Blocks the publish when the BUILT site contains a secret-shaped string.
         # Estate config baked into the image (narrow allowlists — runbook paths +
         # explicit example markers; mutation-tested both directions 2026-08-11).
         # Runs AFTER the graft so the raw-markdown copies are scanned too.
         run: |
-          gitleaks dir "${{ inputs.source-dir }}/site" \
+          gitleaks dir "${{ inputs.source-dir }}/${{ inputs.site-dir }}" \
             --config /etc/gitleaks/docs.toml --no-banner --redact
 
       - name: Sync to Garage
+        if: ${{ inputs.enabled == 'true' }}
         env:
           RCLONE_CONFIG_GARAGE_TYPE: s3
           RCLONE_CONFIG_GARAGE_PROVIDER: Other
@@ -153,7 +188,7 @@ jobs:
         run: |
           dest="${{ inputs.bucket }}"
           prefix="${{ inputs.dest-prefix }}"
-          site="${{ inputs.source-dir }}/site"
+          site="${{ inputs.source-dir }}/${{ inputs.site-dir }}"
           excludes=""
           if [ -n "$prefix" ]; then
             dest="$dest/$prefix"

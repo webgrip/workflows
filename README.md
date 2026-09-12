@@ -582,6 +582,24 @@ Reusable Go test workflow with coverage artifact upload.
 #### `techdocs-generate.yml`
 Generates documentation using MkDocs and TechDocs.
 
+#### `techdocs-deploy-docs-site.yml` (Forgejo)
+Builds the human site with Zensical, grafts Markdown and LLM indexes from the
+`techdocs-site` artifact, runs Pagefind and gitleaks, then syncs to Garage with a
+trash backup. Use a dedicated `bucket` and repo-scoped `TECHDOCS_S3_*` secrets.
+
+Both documentation workflows accept `prepare-command` and `finalize-command`.
+They run from the checkout root in the pinned builder image, with shell errors
+fatal. Preparation runs before the build; finalization runs before artifact
+upload or before Pagefind and the secret gate. Leave both empty for a normal
+single-tree site. A monorepo can assemble sources during preparation and validate
+its generated Markdown and indexes during finalization.
+
+The deployment workflow's `site-dir` defaults to `site`, relative to `source-dir`.
+Set it to the output directory in `mkdocs.yml` when using a custom layout. Both
+workflows default `enabled` to `'true'`; every step checks that input because
+Forgejo does not preserve caller job conditions when expanding reusable jobs.
+Pass the branch and publication gate through `enabled`.
+
 #### `techdocs-deploy-gh-pages.yml`
 Deploys generated documentation to GitHub Pages.
 

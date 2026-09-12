@@ -32,7 +32,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  docs-policy:
+    runs-on: docker
+    container: harbor.webgrip.dev/webgrip/semantic-release:0.3.3
+    steps:
+      - uses: actions/checkout@v5
+      - run: node --test scripts/techdocs-policy.test.cjs
   release:
+    needs: [docs-policy]
     name: Semantic Release
     runs-on: docker
     # The toolchain is the image (ADR 0005, this repo's own composite enforces it since v2):
