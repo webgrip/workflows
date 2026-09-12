@@ -1,3 +1,9 @@
+## [2.7.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.0...v2.7.1) (2026-09-12)
+
+### Fixed
+
+* **docs:** run hooks with the builder image shell ([18a46e4](https://forgejo.webgrip.dev/webgrip/workflows/commit/18a46e4bcda37c0e0386d4786082e97f980e7a27))
+
 ## [2.7.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.6.2...v2.7.0) (2026-09-12)
 
 ### Added
