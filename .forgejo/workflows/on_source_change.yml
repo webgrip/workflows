@@ -34,7 +34,7 @@ concurrency:
 jobs:
   docs-policy:
     runs-on: docker
-    container: harbor.webgrip.dev/webgrip/semantic-release:0.3.3
+    container: harbor.webgrip.dev/webgrip/semantic-release:0.3.4
     steps:
       - uses: actions/checkout@v5
       - run: node --test scripts/techdocs-policy.test.cjs
@@ -46,7 +46,7 @@ jobs:
     # without this container the composite fails loudly — which is exactly how the release of
     # the v2 commit itself died (the old fallback met config 1.2.3's toolchain guard).
     container:
-      image: harbor.webgrip.dev/webgrip/semantic-release:0.3.3
+      image: harbor.webgrip.dev/webgrip/semantic-release:0.3.4
     permissions:
       contents: write
       issues: write
