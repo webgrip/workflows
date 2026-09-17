@@ -1,3 +1,9 @@
+## [2.7.2](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.1...v2.7.2) (2026-09-17)
+
+### Fixed
+
+* **semrel:** toolchain-image default naar 0.3.4 ([4e186d4](https://forgejo.webgrip.dev/webgrip/workflows/commit/4e186d4ab6e2e782d5ab922d88a98ce3fe94526e))
+
 ## [2.7.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.0...v2.7.1) (2026-09-12)
 
 ### Fixed
