@@ -84,8 +84,11 @@ done < <(find "$src_dir" -maxdepth 1 -name '*.yml' -print0)
 echo "  generated: $generated   hand-owned (skipped): $skipped"
 
 # Assert no forbidden construct slipped into a mechanically-generated file.
+# actions/checkout@v6 was on this list until 2026-09-18, when a canary on the real runner
+# (homelab-cluster run 1710) showed checkout v6/v7 and setup-node v5/v6/v7 all pass. The three
+# that remain have no Forgejo analog at all, which is a different kind of forbidden.
 echo "Verifying generated files contain no GitHub-only constructs..."
-forbidden='actions/checkout@v6|create-github-app-token|@semantic-release/github|ghcr\.io'
+forbidden='create-github-app-token|@semantic-release/github|ghcr\.io'
 bad=0
 while IFS= read -r -d '' f; do
     base="$(basename "$f")"

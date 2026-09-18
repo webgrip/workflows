@@ -125,7 +125,10 @@ workflows. Static GitHub App keys are replaced by a scoped Forgejo token (and OI
 
 * **Related Decisions**: Builds on ADR 001 (standardized language workflows); the `.forgejo/` mirror preserves
   that shared CI shape.
-* **Supersedes / Amends**: None.
+* **Supersedes / Amends**: None. One premise has since been corrected — see the revision log:
+  the `actions/checkout@v6` incompatibility cited in Context was measured on 2026-09-18 and does
+  not reproduce. The decision this ADR makes (a separate `.forgejo/` tree) does not depend on it;
+  the other two examples in that sentence still hold.
 * **Follow-ups / TODOs**: Install Harbor + proxy-cache; provision the Forgejo CI bot user and `FORGEJO_TOKEN`;
   confirm the public-repo requirement; re-publish `ghcr.io/webgrip/php-ci-runner` to Harbor.
 
@@ -136,3 +139,4 @@ workflows. Static GitHub App keys are replaced by a scoped Forgejo token (and OI
 | Version | Date | Author | Change |
 | ------- | ---- | ------ | ------ |
 | 1.0.0 | 2026-06-12 | WebGrip maintainers | Initial creation |
+| 1.0.1 | 2026-09-18 | Ryan Grippeling | Context's `actions/checkout@v6` claim disproven by a canary on the real runner ([homelab-cluster run 1710](https://forgejo.webgrip.dev/webgrip/homelab-cluster/actions/runs/1710)): v6 and v7 both pass. The generator's forbidden-construct assertion dropped it; the decision stands. |
