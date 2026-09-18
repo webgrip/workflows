@@ -97,8 +97,10 @@ fi
 # ---------------------------------------------------------------------------
 echo "[2/3] Forbidden GitHub-only constructs in .forgejo/"
 # pattern|human description
+# actions/checkout@v6 was here until 2026-09-18, when a canary on the real runner
+# (homelab-cluster run 1710) showed v6 and v7 both pass. The three that remain have no
+# Forgejo equivalent at all — a different kind of forbidden from "we think it breaks".
 forbidden=(
-    'actions/checkout@v6|actions/checkout@v6 is broken on non-GitHub runners (pin @v5)'
     'create-github-app-token|GitHub App token minting has no Forgejo equivalent (use FORGEJO_TOKEN)'
     '@semantic-release/github|@semantic-release/github targets the GitHub API (use a Gitea/Forgejo plugin)'
     'ghcr\.io|ghcr.io registry reference (retarget to Harbor / Forgejo registry)'

@@ -147,7 +147,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      # v5, not v6 — v6 is broken on non-GitHub runners (ADR 0002).
+      # Pinned to v5. The "v6 is broken on non-GitHub runners" reason was
+      # disproven 2026-09-18 (homelab-cluster canary run 1710); the pin stays.
       - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v4
@@ -240,7 +241,8 @@ jobs:
     permissions:
       contents: read
     steps:
-      # v5, not v6 — v6 is broken on non-GitHub runners (ADR 0002).
+      # Pinned to v5. The "v6 is broken on non-GitHub runners" reason was
+      # disproven 2026-09-18 (homelab-cluster canary run 1710); the pin stays.
       - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v4
