@@ -1,3 +1,10 @@
+## [2.7.4](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.3...v2.7.4) (2026-09-18)
+
+### Fixed
+
+* **ci:** de generator blokkeert checkout@v6 niet meer, want de aanname is weerlegd ([8f3fb38](https://forgejo.webgrip.dev/webgrip/workflows/commit/8f3fb38bea3c30668c7fbb1fa4f86cdc54683f5d))
+* **ci:** ook de parity-check blokkeerde checkout@v6 niet meer terecht ([b1342ab](https://forgejo.webgrip.dev/webgrip/workflows/commit/b1342ab7d2dc07427f98d484ee6f303514fc5977))
+
 ## [2.7.3](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.2...v2.7.3) (2026-09-18)
 
 ### Performance
