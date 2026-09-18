@@ -1,3 +1,9 @@
+## [2.7.3](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.2...v2.7.3) (2026-09-18)
+
+### Performance
+
+* **ci:** de actions staan op hun SHA, want een tag kost een volledige fetch ([7884381](https://forgejo.webgrip.dev/webgrip/workflows/commit/78843812ed98ef74b2e865432d13be37cb4cfb92))
+
 ## [2.7.2](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.1...v2.7.2) (2026-09-17)
 
 ### Fixed
