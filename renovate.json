@@ -1,5 +1,9 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "local>webgrip/renovate-config#v1.9.0"
+  ],
+  "description": "This repo had customManagers and packageRules but never extended the org preset, so it ran on admin defaults: no graduated soak, no per-type semantic commits, no dashboard-approval gate. The repo every other repo's CI depends on was the least governed one. Its own rules below are unchanged and still win — repo config is applied after presets.",
   "customManagers": [
     {
       "customType": "regex",
