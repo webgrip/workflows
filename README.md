@@ -649,10 +649,11 @@ whole repository. (For per-package trains in a monorepo, use `semantic-release-m
 - `config-version` (default `1`) - Pin of `@webgrip/semantic-release-config`, for the no-image
   fallback only; inside the toolchain image the image tag *is* the version
 - `dry-run` (default `false`) - `--dry-run`: no tags, releases, or commits
-- `install-dependencies` (default `auto`) - Install the *consumer's* npm deps before releasing.
-  `auto` only does so when a lockfile / build script actually exists and never fails the release;
-  `true` is the same but fatal on failure; `false` skips both. A Go/PHP/Rust repo that merely
-  carries a `package.json` wants `auto` or `false`.
+- `install-dependencies` (default `auto`) - Install the *consumer's* dependencies from its npm
+  lockfile, then run its `build` script — the build only after a successful install. `auto` never
+  fails the release: a missing or unsupported lockfile, a failed install and a failed build are each
+  logged and skipped. `true` makes every one of those fatal; `false` skips the step. A Go/PHP/Rust
+  repo that merely carries a `package.json` wants `auto` or `false`.
 - `enabled`, `only-refs`, `skip-refs` - Gating from inside the reusable (Forgejo v15 evaluates a
   caller's `with:` at flatten time with an empty `github` context, so branch gating must happen here)
 - `align-to-remote-tip` (default `true`)

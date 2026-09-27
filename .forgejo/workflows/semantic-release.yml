@@ -34,10 +34,11 @@ on:
         type: boolean
       install-dependencies:
         description: >-
-          Install the CONSUMER's npm dependencies (and run its build script) before releasing:
-          "auto" (default) does it only when a lockfile / build script actually exists and never
-          fails the release, "true" is the same but fatal on failure, "false" skips both. A repo
-          that merely carries a package.json (Go, PHP, Rust) wants auto or false.
+          Install the CONSUMER's dependencies from its npm lockfile and then run its build script,
+          the build only after a successful install. "auto" (default) never fails the release: a
+          missing or unsupported lockfile, a failed install and a failed build are each logged and
+          skipped. "true" makes every one of those fatal. "false" skips the step. A repo that
+          merely carries a package.json (Go, PHP, Rust) wants auto or false.
         required: false
         default: 'auto'
         type: string

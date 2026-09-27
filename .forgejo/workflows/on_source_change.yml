@@ -38,8 +38,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: node --test scripts/techdocs-policy.test.cjs
+  semrel-install-policy:
+    runs-on: docker
+    container: harbor.webgrip.dev/webgrip/semantic-release:0.3.4
+    steps:
+      - uses: actions/checkout@v5
+      - run: node --test scripts/semantic-release-install.test.cjs
   release:
-    needs: [docs-policy]
+    needs: [docs-policy, semrel-install-policy]
     name: Semantic Release
     runs-on: docker
     # The toolchain is the image (ADR 0005, this repo's own composite enforces it since v2):

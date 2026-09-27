@@ -42,10 +42,12 @@ inputs:
     default: "true"
   install-dependencies:
     description: >-
-      Install the CONSUMER's npm dependencies (and run its build script) before releasing, for
-      repos whose config or prepareCmd needs them (e.g. @semantic-release/wordpress). "auto"
-      (default) installs only when a lockfile is present and builds only when a build script
-      exists, and never fails the release; "true" is the same but fatal on failure; "false" skips.
+      Install the CONSUMER's dependencies from its npm lockfile (package-lock.json or
+      npm-shrinkwrap.json) and then run its build script, for repos whose config or prepareCmd
+      needs them (e.g. @semantic-release/wordpress). The build runs only after a successful
+      install. "auto" (default) never fails the release: a missing or unsupported lockfile, a
+      failed install and a failed build are each logged and skipped. "true" makes every one of
+      those fatal. "false" skips the step.
     required: false
     default: "auto"
 
@@ -74,31 +76,45 @@ runs:
         git fetch --tags origin "${GITHUB_REF_NAME}"
         git checkout -B "${GITHUB_REF_NAME}" "origin/${GITHUB_REF_NAME}"
 
-    # Only where they mean something: `npm ci` without a lockfile is a hard EUSAGE error and
-    # `npm run build` without a build script is a hard ENOENT, and both used to run unconditionally
-    # under `|| true` — so every non-Node repo printed an npm error wall on a green release.
     - name: Install consumer dependencies
       if: inputs.install-dependencies != 'false'
       shell: bash
       env:
-        STRICT: ${{ inputs.install-dependencies }}
+        INSTALL_DEPENDENCIES: ${{ inputs.install-dependencies }}
       run: |
-        set -uo pipefail
-        [[ "$STRICT" == "true" ]] && set -e
-        [[ -f package.json ]] || { echo "No package.json; nothing to install."; exit 0; }
-        if [[ -f package-lock.json || -f npm-shrinkwrap.json ]]; then
-          npm ci --no-audit --no-fund
-        else
-          echo "package.json without a lockfile; skipping npm ci."
-        fi
-        if node -e 'process.exit((require("./package.json").scripts||{}).build ? 0 : 1)' 2>/dev/null; then
-          if ! npm run build; then
-            [[ "$STRICT" == "true" ]] && exit 1
-            echo "Build failed; continuing because install-dependencies is auto."
+        set +e -u
+        strict=false
+        [[ "$INSTALL_DEPENDENCIES" == "true" ]] && strict=true
+
+        give_up() {
+          if [[ "$strict" == true ]]; then
+            echo "::error::$2 install-dependencies is true, so the release stops here."
+            exit 1
           fi
-        else
-          echo "No build script; skipping."
+          echo "$1$2 install-dependencies is auto, so the release goes on."
+          exit 0
+        }
+        skip() { give_up "" "$1"; }
+        fail() { give_up "::warning::" "$1"; }
+
+        [[ -f package.json ]] || { echo "No package.json; nothing to install or build."; exit 0; }
+
+        if [[ ! -f package-lock.json && ! -f npm-shrinkwrap.json ]]; then
+          for lockfile in pnpm-lock.yaml yarn.lock bun.lock bun.lockb; do
+            [[ -f "$lockfile" ]] && skip "Unsupported lockfile ${lockfile}: only npm lockfiles are installed. Nothing installed, build not run."
+          done
+          skip "package.json has no lockfile. Nothing installed, build not run."
         fi
+
+        echo "Installing consumer dependencies: npm ci"
+        npm ci --no-audit --no-fund || fail "npm ci exited $?. Build not run, because its dependencies are not installed."
+
+        if ! node -e 'process.exit(require("./package.json").scripts?.build ? 0 : 1)'; then
+          echo "No build script; nothing to build."
+          exit 0
+        fi
+        echo "Building the consumer: npm run build"
+        npm run build || fail "npm run build exited $?."
         exit 0
 
     # Start every repo from 0.0.0 (semantic-release otherwise hardcodes the first release to 1.0.0).
