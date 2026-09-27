@@ -1,3 +1,13 @@
+## [2.7.5](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.4...v2.7.5) (2026-09-27)
+
+### Fixed
+
+* **semantic-release:** auto bouwt alleen na een geslaagde install en breekt de release nooit ([a9575b6](https://forgejo.webgrip.dev/webgrip/workflows/commit/a9575b6fe1e077984e64dffb82318a045cfeb74c))
+
+### Internal
+
+* **renovate:** deze repo draait nu ook op het org-preset ([5a2e19a](https://forgejo.webgrip.dev/webgrip/workflows/commit/5a2e19a10855ff796bdc85e078bca40c9a70ba1c))
+
 ## [2.7.4](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.3...v2.7.4) (2026-09-18)
 
 ### Fixed
