@@ -1,3 +1,9 @@
+## [2.7.7](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.6...v2.7.7) (2026-10-01)
+
+### Fixed
+
+* **cloudflare-deploy:** retry every smoke path until the edge serves it ([f9e5c4e](https://forgejo.webgrip.dev/webgrip/workflows/commit/f9e5c4ed59332549cf0a9044340768c5921c6a3c))
+
 ## [2.7.6](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.5...v2.7.6) (2026-10-01)
 
 ### Fixed
