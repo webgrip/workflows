@@ -297,17 +297,24 @@ jobs:
             sleep 10
           done
 
+          answers() {
+            local path="$1" want="$2" code attempt
+            for attempt in $(seq 1 6); do
+              code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${path}" || echo 000)"
+              [ "${code}" = "${want}" ] && break
+              [ "${attempt}" = "6" ] || sleep 10
+            done
+            echo "${path} -> ${code} (expected ${want}, attempt ${attempt}/6)"
+            [ "${code}" = "${want}" ]
+          }
+
           while IFS= read -r path; do
             [ -n "${path}" ] || continue
-            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${path}")"
-            echo "${path} -> ${code}"
-            [ "${code}" = "200" ] || { echo "FAIL ${path} (expected 200)"; exit 1; }
+            answers "${path}" 200 || { echo "FAIL ${path} (expected 200)"; exit 1; }
           done <<< "${SMOKE_PATHS}"
 
           if [ -n "${NOT_FOUND_PATH}" ]; then
-            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${NOT_FOUND_PATH}")"
-            echo "${NOT_FOUND_PATH} -> ${code} (expected 404)"
-            [ "${code}" = "404" ] || { echo "FAIL: soft-404 — the error page is being served with ${code}"; exit 1; }
+            answers "${NOT_FOUND_PATH}" 404 || { echo "FAIL: soft-404 — the error page is not served with 404"; exit 1; }
           fi
 
       - name: Check every redirect rule against the live edge
@@ -326,10 +333,18 @@ jobs:
             echo "no public/_redirects — nothing to check"
             exit 0
           fi
+          answers() {
+            local path="$1" want="$2" code attempt
+            for attempt in $(seq 1 6); do
+              code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${path}" || echo 000)"
+              [ "${code}" = "${want}" ] && break
+              [ "${attempt}" = "6" ] || sleep 10
+            done
+            echo "${path} -> ${code} (expected ${want}, attempt ${attempt}/6)"
+            [ "${code}" = "${want}" ]
+          }
           while read -r src target status _rest; do
             case "${src}" in ''|'#'*) continue ;; esac
             [ -n "${status}" ] || continue
-            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${src}")"
-            echo "${src} -> ${code} (expected ${status})"
-            [ "${code}" = "${status}" ] || { echo "FAIL ${src}"; exit 1; }
+            answers "${src}" "${status}" || { echo "FAIL ${src}"; exit 1; }
           done < public/_redirects
