@@ -1,3 +1,9 @@
+## [2.7.6](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.5...v2.7.6) (2026-10-01)
+
+### Fixed
+
+* **semantic-release:** say when a failed run already pushed its tag ([879e099](https://forgejo.webgrip.dev/webgrip/workflows/commit/879e0998ba2dccd6f086c630b0b8b2bff4c7e4d3))
+
 ## [2.7.5](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.4...v2.7.5) (2026-09-27)
 
 ### Fixed
