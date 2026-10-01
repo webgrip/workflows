@@ -194,6 +194,7 @@ runs:
       env:
         VERSION: ${{ steps.semantic-release.outputs.version }}
         TAG: ${{ steps.semantic-release.outputs.tag }}
+        OUTCOME: ${{ steps.semantic-release.outcome }}
         DRY_RUN: ${{ inputs.dry-run }}
         FORGE_URL: ${{ inputs.forge-url }}
         PKG: ${{ inputs.package-name }}
@@ -204,6 +205,17 @@ runs:
           echo
           if [[ "$DRY_RUN" == "true" ]]; then
             echo "Dry run — no tag, release or commit was pushed."
+          elif [[ "$OUTCOME" == "failure" ]]; then
+            # A failure after "Created tag" means the tag and release commit are already pushed;
+            # a re-run will not publish them (semantic-release sees the tag), so say so.
+            pushed="$(sed 's/\x1b\[[0-9;]*m//g' /tmp/semrel.log 2>/dev/null | grep -oE 'Created tag [^ ]+' | tail -1 | cut -d' ' -f3 || true)"
+            echo "**semantic-release failed.** See the job log for the failing step."
+            if [[ -n "$pushed" ]]; then
+              echo
+              echo "The tag [\`${pushed}\`](${FORGE_URL}/${GITHUB_REPOSITORY}/src/tag/${pushed}) and its release commit"
+              echo "were already pushed, so re-running this job will not publish them. If the release page"
+              echo "is missing, create it on the existing tag: [new release](${FORGE_URL}/${GITHUB_REPOSITORY}/releases/new?tag=${pushed})."
+            fi
           elif [[ -n "$VERSION" ]]; then
             echo "- **version**: \`${VERSION}\`"
             [[ -n "$TAG" ]] && echo "- **tag**: [\`${TAG}\`](${FORGE_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG})"
