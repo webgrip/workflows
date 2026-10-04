@@ -1,3 +1,10 @@
+## [2.8.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.8.0...v2.8.1) (2026-10-04)
+
+### Fixed
+
+* CLAUDE.md is een bestand dat AGENTS.md importeert, geen symlink ([56484b8](https://forgejo.webgrip.dev/webgrip/workflows/commit/56484b80b89548a161569f4d6ab96605b449785c))
+* **dnscontrol:** haal de OpenBao-optie weg, Forgejo geeft daar geen OIDC-token ([cdd9995](https://forgejo.webgrip.dev/webgrip/workflows/commit/cdd99953fb25f00c7204fb57b9b9980c36abdac9))
+
 ## [2.8.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.8...v2.8.0) (2026-10-04)
 
 ### Added
