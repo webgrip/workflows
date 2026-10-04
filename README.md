@@ -409,6 +409,8 @@ A site repository owns its zone: `ops/dns/dnsconfig.js` plus a `creds.json` that
 every push and pull request, `push` on `push-refs` (default `main`) behind the caller's own switch
 (`enabled: ${{ vars.DNS_PUSH == 'on' }}`), `drift` for a nightly run that fails on any correction.
 A push that deletes a record is refused unless HEAD carries `DNS-Allow-Delete: <fqdn>` for it.
+A push that would create a zone is refused: it means the token cannot see the zone, and applying
+it would create a second copy of the zone instead of changing the live one.
 dnscontrol is installed pinned and checksum-verified; the token needs Zone:Read and DNS:Edit on
 the declared zones only. Account-level Cloudflare objects (Zero Trust, R2, tokens) stay in
 `webgrip/cloudflare`.

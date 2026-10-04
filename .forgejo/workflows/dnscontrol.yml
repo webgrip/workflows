@@ -110,6 +110,20 @@ jobs:
           { echo '```'; cat preview.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           exit "${rc}"
 
+      - name: Refuse creating a zone
+        if: inputs.mode == 'push'
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          set -euo pipefail
+          zones="$(sed -nE 's/^#[0-9]+: Ensuring zone "([^"]+)" exists.*/\1/p' preview.txt)"
+          if [ -n "${zones}" ]; then
+            for zone in ${zones}; do
+              echo "refusing: the push would create zone ${zone}; the token cannot see it, or the zone does not exist in this account. Grant the token Zone:Read and DNS:Edit on ${zone}, or create the zone outside this lane."
+            done
+            exit 1
+          fi
+
       - name: Refuse deletions without a trailer
         if: inputs.mode == 'push'
         shell: bash
