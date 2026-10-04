@@ -29,7 +29,7 @@ jobs:
   install-deps-generate-and-deploy:
     name: "Install dependencies, generate with mkdocs, upload artifact and publish to pages branch"
     runs-on: docker
-    container: harbor.webgrip.dev/webgrip/mkdocs-runner:1.0.1
+    container: harbor.webgrip.dev/webgrip/mkdocs-runner:1.1.0@sha256:c455d1ac57b4287189e6bda60adefd03ed297e8d0a88d3814888a37957cae5d0
     env:
       FORGEJO_INSTANCE_URL: ${{ github.server_url }}
       APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
