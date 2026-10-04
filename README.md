@@ -415,19 +415,12 @@ dnscontrol is installed pinned and checksum-verified; the token needs Zone:Read 
 the declared zones only. Account-level Cloudflare objects (Zero Trust, R2, tokens) stay in
 `webgrip/cloudflare`.
 
-The credentials come from one of two places:
-
-- **Secrets** (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`), as below. This is the default.
-- **OpenBao over OIDC**, when `openbao-role` is set: the job exchanges its Forgejo OIDC token for
-  a short-lived OpenBao token through [`openbao-read`](#openbao-read) and reads `token` and
-  `account_id` from `openbao-kv-path`, the zone's read-only credential
-  (`secret/data/cloudflare/dns/<zone with dots as dashes>-ro`). No Cloudflare secret is stored in
-  Forgejo. This path only previews and checks drift: `mode: push` is refused, because CI never
-  holds a write credential and a push is applied by the in-cluster reconciler
-  ([homelab-cluster ADR-0061](https://forgejo.webgrip.dev/webgrip/homelab-cluster/src/branch/main/docs/techdocs/docs/adr/adr-0061-ci-reads-over-oidc-writes-from-the-cluster.md)).
-  The caller job sets `enable-openid-connect: true`, the runner is in-cluster, and the
-  repository has an OpenBao role `ci-<repository name with dots as dashes>`. Forgejo issues no
-  OIDC token to a pull request from a fork, so such a run fails at the token request.
+CI should only preview: a DNS:Edit token belongs to the in-cluster reconciler, not to Forgejo
+([homelab-cluster ADR-0061](https://forgejo.webgrip.dev/webgrip/homelab-cluster/src/branch/main/docs/techdocs/docs/adr/adr-0061-ci-reads-over-oidc-writes-from-the-cluster.md)).
+This workflow cannot read its token from OpenBao: Forgejo 15 gives no OIDC token to a job it
+expands from a reusable workflow, even with `enable-openid-connect: true` on both sides. A site
+that previews with a read-only token from OpenBao runs DNSControl in a job of its own and uses
+[`openbao-read`](#openbao-read) there.
 
 **Example:**
 ```yaml
@@ -448,17 +441,6 @@ dns-push:
   secrets:
     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DNS_TOKEN }}
     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-```
-
-**Example, preview over OIDC:**
-```yaml
-dns-preview:
-  uses: webgrip/workflows/.forgejo/workflows/dnscontrol.yml@<tag>
-  enable-openid-connect: true
-  with:
-    mode: preview
-    openbao-role: ci-twente-dev
-    openbao-kv-path: secret/data/cloudflare/dns/twente-dev-ro
 ```
 
 #### `link-check-static-site.yml`
@@ -809,6 +791,8 @@ following steps. It prints the token's claims (never the token) for comparing ag
 role's bound claims. Any failure stops the job with the HTTP status and OpenBao's error,
 including a property that is missing. The job needs `enable-openid-connect: true` and an
 in-cluster runner; the default `openbao-addr` is the in-cluster service.
+The job must be declared in the caller's own workflow: Forgejo 15 gives no OIDC token to a job
+expanded from a reusable workflow.
 
 ```yaml
 jobs:
