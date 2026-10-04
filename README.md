@@ -415,6 +415,20 @@ dnscontrol is installed pinned and checksum-verified; the token needs Zone:Read 
 the declared zones only. Account-level Cloudflare objects (Zero Trust, R2, tokens) stay in
 `webgrip/cloudflare`.
 
+The credentials come from one of two places:
+
+- **Secrets** (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`), as below. This is the default.
+- **OpenBao over OIDC**, when `openbao-role` is set: the job exchanges its Forgejo OIDC token for
+  a short-lived OpenBao token through [`openbao-read`](#openbao-read) and reads `token` and
+  `account_id` from `openbao-kv-path`, the zone's read-only credential
+  (`secret/data/cloudflare/dns/<zone with dots as dashes>-ro`). No Cloudflare secret is stored in
+  Forgejo. This path only previews and checks drift: `mode: push` is refused, because CI never
+  holds a write credential and a push is applied by the in-cluster reconciler
+  ([homelab-cluster ADR-0061](https://forgejo.webgrip.dev/webgrip/homelab-cluster/src/branch/main/docs/techdocs/docs/adr/adr-0061-ci-reads-over-oidc-writes-from-the-cluster.md)).
+  The caller job sets `enable-openid-connect: true`, the runner is in-cluster, and the
+  repository has an OpenBao role `ci-<repository name with dots as dashes>`. Forgejo issues no
+  OIDC token to a pull request from a fork, so such a run fails at the token request.
+
 **Example:**
 ```yaml
 dns-preview:
@@ -434,6 +448,17 @@ dns-push:
   secrets:
     CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_DNS_TOKEN }}
     CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+```
+
+**Example, preview over OIDC:**
+```yaml
+dns-preview:
+  uses: webgrip/workflows/.forgejo/workflows/dnscontrol.yml@<tag>
+  enable-openid-connect: true
+  with:
+    mode: preview
+    openbao-role: ci-twente-dev
+    openbao-kv-path: secret/data/cloudflare/dns/twente-dev-ro
 ```
 
 #### `link-check-static-site.yml`
@@ -775,6 +800,29 @@ the image prebakes the toolchain at `/opt/semrel` (env `SEMREL_PREBAKED`).
 
 ### `rust-semantic-release`
 Specialized semantic release action for Rust projects.
+
+### `openbao-read`
+Reads secrets from OpenBao with the job's Forgejo Actions OIDC token, so the value is never
+stored as a Forgejo secret. It requests an OIDC token for `audience` (default `openbao-ci`),
+logs in at `auth/forgejo` as `role`, reads each kv-v2 property, masks it and exports it to the
+following steps. It prints the token's claims (never the token) for comparing against the
+role's bound claims. Any failure stops the job with the HTTP status and OpenBao's error,
+including a property that is missing. The job needs `enable-openid-connect: true` and an
+in-cluster runner; the default `openbao-addr` is the in-cluster service.
+
+```yaml
+jobs:
+  preview:
+    runs-on: docker
+    enable-openid-connect: true
+    steps:
+      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/openbao-read@<tag>
+        with:
+          role: ci-twente-dev
+          secrets: |
+            CLOUDFLARE_API_TOKEN=secret/data/cloudflare/dns/twente-dev-ro#token
+            CLOUDFLARE_ACCOUNT_ID=secret/data/cloudflare/dns/twente-dev-ro#account_id
+```
 
 ## 💡 Usage Examples
 

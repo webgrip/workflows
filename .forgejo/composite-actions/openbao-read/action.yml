@@ -1,0 +1,102 @@
+name: "[Action] Read OpenBao secrets over Forgejo OIDC"
+description: >-
+  Exchanges this job's Forgejo Actions OIDC token at OpenBao's auth/forgejo JWT login for a
+  short-lived token, reads each requested kv-v2 property, masks it and exports it to the
+  following steps through GITHUB_ENV. The job must set enable-openid-connect: true and run on
+  an in-cluster runner. Any failure stops the job with the HTTP status and OpenBao's error body.
+
+inputs:
+  role:
+    description: "OpenBao role on auth/forgejo, ci-<repository name with dots replaced by dashes> (e.g. ci-twente-dev)"
+    required: true
+  audience:
+    description: "Audience requested for the OIDC token; must match the role's bound_audiences"
+    required: false
+    default: "openbao-ci"
+  openbao-addr:
+    description: "OpenBao address reachable from the runner"
+    required: false
+    default: "http://openbao.security.svc.cluster.local:8200"
+  secrets:
+    description: "One ENV_NAME=<kv-v2 API path>#<property> per line, e.g. CLOUDFLARE_API_TOKEN=secret/data/cloudflare/dns/twente-dev-ro#token"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Read secrets from OpenBao
+      shell: bash
+      env:
+        OPENBAO_ADDR: ${{ inputs.openbao-addr }}
+        OPENBAO_ROLE: ${{ inputs.role }}
+        OIDC_AUDIENCE: ${{ inputs.audience }}
+        SECRET_SPECS: ${{ inputs.secrets }}
+      run: |
+        set -euo pipefail
+        fail() { echo "::error::$1"; exit 1; }
+
+        [ -n "${OPENBAO_ROLE}" ] || fail "input role is empty"
+        [ -n "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || fail "no OIDC token endpoint: set enable-openid-connect: true on this job (Forgejo never sets it for pull requests from forks)"
+
+        specs=()
+        while IFS= read -r line || [ -n "${line}" ]; do
+          line="$(printf '%s' "${line}" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+          [ -n "${line}" ] || continue
+          [[ "${line}" =~ ^([A-Za-z_][A-Za-z0-9_]*)=([^#[:space:]]+)#([^[:space:]]+)$ ]] \
+            || fail "malformed secrets line '${line}': expected ENV_NAME=<kv-v2 API path>#<property>"
+          specs+=("${line}")
+        done <<< "${SECRET_SPECS}"
+        [ "${#specs[@]}" -gt 0 ] || fail "input secrets names nothing to read"
+
+        workdir="$(mktemp -d)"
+        trap 'rm -rf "${workdir}"' EXIT
+
+        case "${ACTIONS_ID_TOKEN_REQUEST_URL}" in *\?*) sep='&' ;; *) sep='?' ;; esac
+        oidc_code="$(curl -sS -o "${workdir}/oidc.json" -w '%{http_code}' \
+          -H "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+          "${ACTIONS_ID_TOKEN_REQUEST_URL}${sep}audience=${OIDC_AUDIENCE}" || true)"
+        [ "${oidc_code}" = "200" ] || fail "OIDC token request HTTP ${oidc_code}: $(cat "${workdir}/oidc.json" 2>/dev/null)"
+        oidc="$(jq -r '.value // empty' "${workdir}/oidc.json")"
+        [ -n "${oidc}" ] || fail "OIDC token endpoint returned no .value"
+        echo "::add-mask::${oidc}"
+
+        b64pad() { p="$(printf '%s' "$1" | tr '_-' '/+')"; m=$(( ${#p} % 4 )); [ "${m}" -ne 0 ] && p="${p}$(printf '%*s' $((4 - m)) '' | tr ' ' '=')"; printf '%s' "${p}"; }
+        echo "OIDC token claims: $(b64pad "$(printf '%s' "${oidc}" | cut -d. -f2)" | base64 -d 2>/dev/null | jq -c '{sub, repository, event_name, ref, workflow, aud}' 2>/dev/null || echo '<undecodable>')"
+
+        login_code="$(curl -sS -o "${workdir}/login.json" -w '%{http_code}' --request POST \
+          --data "$(jq -nc --arg jwt "${oidc}" --arg role "${OPENBAO_ROLE}" '{jwt:$jwt, role:$role}')" \
+          "${OPENBAO_ADDR}/v1/auth/forgejo/login" || true)"
+        [ "${login_code}" = "200" ] || fail "OpenBao login as role ${OPENBAO_ROLE} HTTP ${login_code}: $(cat "${workdir}/login.json" 2>/dev/null)"
+        bao_token="$(jq -r '.auth.client_token // empty' "${workdir}/login.json")"
+        [ -n "${bao_token}" ] || fail "OpenBao login returned no client_token"
+        echo "::add-mask::${bao_token}"
+
+        for spec in "${specs[@]}"; do
+          [[ "${spec}" =~ ^([A-Za-z_][A-Za-z0-9_]*)=([^#[:space:]]+)#([^[:space:]]+)$ ]]
+          name="${BASH_REMATCH[1]}"
+          path="${BASH_REMATCH[2]#/}"
+          property="${BASH_REMATCH[3]}"
+          read_code="$(curl -sS -o "${workdir}/read.json" -w '%{http_code}' \
+            -H "X-Vault-Token: ${bao_token}" \
+            "${OPENBAO_ADDR}/v1/${path}" || true)"
+          [ "${read_code}" = "200" ] || fail "OpenBao read ${path} HTTP ${read_code}: $(cat "${workdir}/read.json" 2>/dev/null)"
+          value="$(jq -r --arg p "${property}" '.data.data[$p] // empty | if type == "string" then . else tojson end' "${workdir}/read.json")"
+          [ -n "${value}" ] || fail "OpenBao path ${path} has no property '${property}' (present: $(jq -r '.data.data // {} | keys | join(", ")' "${workdir}/read.json"))"
+          while IFS= read -r value_line; do
+            [ -n "${value_line}" ] && echo "::add-mask::${value_line}"
+          done <<< "${value}"
+          delimiter="OPENBAO_$(od -An -N8 -tx1 /dev/urandom | tr -d ' \n')"
+          {
+            echo "${name}<<${delimiter}"
+            printf '%s\n' "${value}"
+            echo "${delimiter}"
+          } >> "${workdir}/env"
+          echo "${name} <- ${path}#${property}"
+        done
+        cat "${workdir}/env" >> "${GITHUB_ENV}"
+
+        revoke_code="$(curl -sS -o /dev/null -w '%{http_code}' --request POST \
+          -H "X-Vault-Token: ${bao_token}" \
+          "${OPENBAO_ADDR}/v1/auth/token/revoke-self" || true)"
+        [ "${revoke_code}" = "204" ] || [ "${revoke_code}" = "200" ] \
+          || echo "::warning::OpenBao token revoke-self HTTP ${revoke_code}; it expires at the end of its TTL"
