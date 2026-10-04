@@ -1,3 +1,9 @@
+## [2.8.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.8...v2.8.0) (2026-10-04)
+
+### Added
+
+* **dnscontrol:** preview met een leestoken uit OpenBao via OIDC ([73c2ff4](https://forgejo.webgrip.dev/webgrip/workflows/commit/73c2ff415f3504f2d96b6e5841c3158fe40c9f4a))
+
 ## [2.7.8](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.7...v2.7.8) (2026-10-04)
 
 ### Fixed
