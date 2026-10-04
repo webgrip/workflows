@@ -1,3 +1,9 @@
+## [2.7.8](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.7...v2.7.8) (2026-10-04)
+
+### Fixed
+
+* **dnscontrol:** een push die een zone zou aanmaken wordt geweigerd ([72967d4](https://forgejo.webgrip.dev/webgrip/workflows/commit/72967d400a0488b4e05000373a28f0f0282b9821))
+
 ## [2.7.7](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.7.6...v2.7.7) (2026-10-01)
 
 ### Fixed
