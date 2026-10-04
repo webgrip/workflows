@@ -36,7 +36,7 @@ jobs:
     # GHCR fan-out froze AGAIN (2026-08-09: ghcr `latest` = old content under a fresh digest, no
     # mkdocs-llms-source; Harbor's 1.3.0 has it) — the same staleness that froze techdocs-runner's
     # base at 1.2.7. Private-project pulls from job containers are proven (helm-deploy, rust-releaser).
-    container: harbor.webgrip.dev/webgrip/techdocs-builder:1.6.0
+    container: harbor.webgrip.dev/webgrip/techdocs-builder:1.8.0@sha256:2726a41cd7f3d40813baf3301a65b7f1cc6fa47d43518d57b3f1f0e4dc95150a
     steps:
       # fetch-depth 0: git-revision-date-localized derives per-page "last
       # updated" from git log — a shallow clone would date every page today.
