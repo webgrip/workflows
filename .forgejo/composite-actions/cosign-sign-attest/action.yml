@@ -78,6 +78,14 @@ inputs:
       empty disables the KV read.
     required: false
     default: "secret/data/dependency-track/api-key"
+  cve-budget-predicate:
+    description: >-
+      Path, relative to the workspace, of the cve-budget.json verdict a cve-gate step wrote for
+      this image. When present it is attested with predicate type
+      https://webgrip.dev/attestations/cve-budget/v1 under the same Transit key, so admission
+      can check the verdict. When absent the image is signed without one and a warning is logged.
+    required: false
+    default: "cve-budget.json"
 
 runs:
   using: composite
@@ -170,6 +178,7 @@ runs:
         OIDC_AUDIENCE: ${{ inputs.oidc-audience }}
         TRANSIT_KEY: ${{ inputs.transit-key }}
         DT_KV_PATH: ${{ inputs.dt-api-key-kv-path }}
+        CVE_BUDGET_PREDICATE: ${{ inputs.cve-budget-predicate }}
         IMAGE: ${{ steps.digest.outputs.image-with-digest }}
       run: |
         set -euo pipefail
@@ -210,6 +219,12 @@ runs:
         cosign sign   --yes --tlog-upload=false --key "hashivault://${TRANSIT_KEY}" "$IMAGE"
         cosign attest --yes --tlog-upload=false --key "hashivault://${TRANSIT_KEY}" \
           --predicate sbom.cdx.json --type cyclonedx "$IMAGE"
+        if [ -s "$CVE_BUDGET_PREDICATE" ]; then
+          cosign attest --yes --tlog-upload=false --key "hashivault://${TRANSIT_KEY}" \
+            --predicate "$CVE_BUDGET_PREDICATE" --type https://webgrip.dev/attestations/cve-budget/v1 "$IMAGE"
+        else
+          echo "WARN:  no CVE-budget verdict at ${CVE_BUDGET_PREDICATE}; ${IMAGE} is signed without one and admission will refuse it once the CVE-budget policy enforces"
+        fi
         # 4) Dependency-Track API key from KV with the same short-lived token (no Forgejo
         #    org secret). Caller-provided env DT_API_KEY wins; read failure (policy not yet
         #    granting the path, missing key) is fail-soft — the DT upload step just skips.
