@@ -1,3 +1,13 @@
+## [2.8.2](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.8.1...v2.8.2) (2026-10-22)
+
+### Fixed
+
+* **cosign:** attest the CVE-budget verdict next to the SBOM ([f65fba3](https://forgejo.webgrip.dev/webgrip/workflows/commit/f65fba32632ee41444a5222e2c2371d07766d523))
+
+### Internal
+
+* **renovate:** extend the shared preset at v1.13.0 ([bb14223](https://forgejo.webgrip.dev/webgrip/workflows/commit/bb14223e63a85001efc89e335a090d1f99503be0))
+
 ## [2.8.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.8.0...v2.8.1) (2026-10-04)
 
 ### Fixed
