@@ -4,3 +4,7 @@
 .act_secrets
 .act_temp/
 act_output/
+
+
+# APM dependencies
+apm_modules/
