@@ -1,3 +1,13 @@
+## [2.9.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.8.3...v2.9.0) (2026-10-24)
+
+### Added
+
+* agents-check reusable workflow for the agent standard ([8ca8e4e](https://forgejo.webgrip.dev/webgrip/workflows/commit/8ca8e4e29aacf1767e1f23add17f56573799986f))
+
+### Internal
+
+* **agents:** adopt the webgrip agent standard (agent-standards v0.2.0) ([1ab92be](https://forgejo.webgrip.dev/webgrip/workflows/commit/1ab92beafbc88449148d1db5d1e80030d85fc3e0))
+
 ## [2.8.3](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.8.2...v2.8.3) (2026-10-24)
 
 ### Fixed
