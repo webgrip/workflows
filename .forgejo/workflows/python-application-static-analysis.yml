@@ -122,7 +122,7 @@ jobs:
 
       - name: Render summary
         if: ${{ always() }}
-        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/workflow-status-summary@main
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/workflow-status-summary@v2.9.0
         with:
           title: 'Python Static Analysis'
           subtitle: 'Quality gate for Python applications and libraries'

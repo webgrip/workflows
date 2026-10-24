@@ -48,7 +48,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
 
       - id: semantic-release
-        uses: webgrip/workflows/.github/composite-actions/semantic-release@main
+        uses: webgrip/workflows/.github/composite-actions/semantic-release@v2.9.0
         with:
           release-type: ${{ inputs.release-type }}
           token: ${{ inputs.use-bot-to-commit == true && steps.app-token.outputs.token || github.token }}
