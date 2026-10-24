@@ -34,19 +34,19 @@ concurrency:
 jobs:
   docs-policy:
     runs-on: docker
-    container: harbor.webgrip.dev/webgrip/semantic-release:0.3.4
+    container: harbor.webgrip.dev/webgrip/semantic-release:0.3.7@sha256:2f7a1315b2a9e93a48ea3f6b228e95e902b282be9b2da215b1f50ff02084de65
     steps:
       - uses: actions/checkout@v5
       - run: node --test scripts/techdocs-policy.test.cjs
   semrel-install-policy:
     runs-on: docker
-    container: harbor.webgrip.dev/webgrip/semantic-release:0.3.4
+    container: harbor.webgrip.dev/webgrip/semantic-release:0.3.7@sha256:2f7a1315b2a9e93a48ea3f6b228e95e902b282be9b2da215b1f50ff02084de65
     steps:
       - uses: actions/checkout@v5
       - run: node --test scripts/semantic-release-install.test.cjs
   internal-refs-policy:
     runs-on: docker
-    container: harbor.webgrip.dev/webgrip/semantic-release:0.3.4
+    container: harbor.webgrip.dev/webgrip/semantic-release:0.3.7@sha256:2f7a1315b2a9e93a48ea3f6b228e95e902b282be9b2da215b1f50ff02084de65
     steps:
       - uses: actions/checkout@v5
       - run: node scripts/internal-refs.cjs check
@@ -59,7 +59,7 @@ jobs:
     # without this container the composite fails loudly — which is exactly how the release of
     # the v2 commit itself died (the old fallback met config 1.2.3's toolchain guard).
     container:
-      image: harbor.webgrip.dev/webgrip/semantic-release:0.3.4
+      image: harbor.webgrip.dev/webgrip/semantic-release:0.3.7@sha256:2f7a1315b2a9e93a48ea3f6b228e95e902b282be9b2da215b1f50ff02084de65
     permissions:
       contents: write
       issues: write
