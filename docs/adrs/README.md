@@ -15,6 +15,7 @@ Numbers are never reused and files are never renamed, because inbound links brea
 | [0004](0004-ci-bot-identity-and-forgejo-package-distribution.md) | CI bot identity and Forgejo package distribution     | Accepted | 2026-07-26 |
 | [0005](0005-semantic-release-toolchain-image.md)                 | The semantic-release toolchain is an image           | Accepted | 2026-07-29 |
 | [0006](0006-no-comments-in-code.md)                              | No comments in code, estate-wide (moved to ai-skills) | Accepted | 2026-09-05 |
+| [0007](0007-release-pins-internal-refs.md)                       | A release pins its own internal refs to its tag      | Proposed | 2026-10-24 |
 
 ## Scope
 

@@ -65,6 +65,11 @@ library's shape.
   `forgejo-tags` datasource, which looks refs up as tags: an `@main` pin 404s and fails the
   consumer's **entire** Renovate run, not just that dependency. The library shipped 45
   workflows with zero tags for months and broke every consumer this way.
+- **Internal refs stay `webgrip/workflows/<path>@main` on main; the release pins them** (ADR 0007).
+  Never write a relative `./` ref in a library file (Forgejo resolves it in the caller's repo) and
+  never pin an internal ref to a tag or sha by hand: the release rewrites only `@main`, and
+  `node scripts/internal-refs.cjs check` fails on anything else. A release tag points at a pin
+  commit off main; `.releaserc.cjs` grafts those commits back so semantic-release still finds them.
 - **The toolchain is the image** (ADR 0005). Release jobs run in
   `harbor.webgrip.dev/webgrip/semantic-release:<pin>` and install nothing at release time; the
   composite fails loudly without it rather than silently falling back.
