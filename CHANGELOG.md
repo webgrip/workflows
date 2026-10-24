@@ -1,3 +1,10 @@
+## [2.8.3](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.8.2...v2.8.3) (2026-10-24)
+
+### Fixed
+
+* **release:** pin nested workflow and action refs to the tag being cut ([f31fcd1](https://forgejo.webgrip.dev/webgrip/workflows/commit/f31fcd1974534275980978fd60a6591415ff1a3d))
+* **renovate:** let toolchain image bumps skip the dashboard gate ([cd910ed](https://forgejo.webgrip.dev/webgrip/workflows/commit/cd910ed3e3f663dbbe1af966b05dc45ba9a44a7c))
+
 ## [2.8.2](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.8.1...v2.8.2) (2026-10-22)
 
 ### Fixed
