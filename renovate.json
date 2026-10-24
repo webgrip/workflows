@@ -25,6 +25,23 @@
         "custom.regex"
       ],
       "pinDigests": false
+    },
+    {
+      "description": "The release toolchain images are first-party (webgrip/infrastructure, ADR 0005) and every estate release runs in them, so a new toolchain must reach this repo's defaults without a dashboard tick: on 2026-10-24 semantic-release 0.3.7 and semantic-release-monorepo 0.3.6, the first images with @webgrip/semantic-release-config 1.4.0 (homelab ADR-0069's forge adapter), waited behind the org preset's dependencyDashboardApproval. Both images move in one PR, outside the concurrency limits, and still need a merge.",
+      "matchDepNames": [
+        "harbor.webgrip.dev/webgrip/semantic-release",
+        "harbor.webgrip.dev/webgrip/semantic-release-monorepo",
+        "harbor.webgrip.dev/webgrip/semantic-release-rust"
+      ],
+      "matchUpdateTypes": [
+        "patch",
+        "minor"
+      ],
+      "dependencyDashboardApproval": false,
+      "groupName": "semantic-release toolchain images",
+      "prConcurrentLimit": 0,
+      "branchConcurrentLimit": 0,
+      "prPriority": 10
     }
   ]
 }
