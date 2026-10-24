@@ -59,7 +59,7 @@ jobs:
   build:
     name: "Docker Build and Push (GHCR)"
     # Delegate to the generic engine workflow with the registry pinned to ghcr.io.
-    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push-registry.yml@main
+    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push-registry.yml@v2.8.3
     with:
       registry: ghcr.io
       docker-context: ${{ inputs.docker-context }}

@@ -30,7 +30,7 @@ jobs:
       fail-fast: false
       matrix:
         include: ${{ fromJson(inputs.paths) }}
-    uses: webgrip/workflows/.forgejo/workflows/helm-chart-push.yml@main
+    uses: webgrip/workflows/.forgejo/workflows/helm-chart-push.yml@v2.8.3
     with:
       registry: ${{ inputs.registry }}
       path: ${{ matrix.path }}
