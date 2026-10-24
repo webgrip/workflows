@@ -20,7 +20,7 @@ jobs:
   deploy-gh-pages:
     name: "Publish to pages branch"
     runs-on: docker
-    container: harbor.webgrip.dev/webgrip/techdocs-runner:1.0.1
+    container: harbor.webgrip.dev/webgrip/techdocs-runner:1.1.0@sha256:2cf411314cb4c1181ecc34d0b4426199b2e2e704e02a348fafbdcb3f8421e6f6
     env:
       FORGEJO_INSTANCE_URL: ${{ github.server_url }}
       APP_BOT_SLUG: ${{ vars.WEBGRIP_CI_BOT_NAME }}
