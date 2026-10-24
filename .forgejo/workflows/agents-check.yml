@@ -1,0 +1,42 @@
+name: '[Call] Agents check'
+
+on:
+  workflow_call:
+    inputs:
+      blocking:
+        description: 'Fail the caller when agentstd check fails. Leave false for the first two weeks after adopting the agent standard.'
+        required: false
+        default: false
+        type: boolean
+      enabled:
+        description: 'Gate the job from inside the reusable workflow; a caller-level if: does not reach flattened jobs.'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  agentstd:
+    name: 'agentstd check'
+    if: ${{ inputs.enabled }}
+    runs-on: docker
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: https://github.com/jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.10.7
+          install_args: uv
+          cache: false
+          github_token: ''
+
+      - name: Check the agent files against the agent standard
+        continue-on-error: ${{ !inputs.blocking }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag=$(awk '/agent-standards(\.git)?$/ {found = 1; next} found && /ref:/ {print $2; exit}' apm.yml)
+          if [ -z "$tag" ]; then
+            echo "apm.yml pins no agent-standards package; adopt the standard first (agent-standards docs/adopting.md)." >&2
+            exit 1
+          fi
+          mise exec -- uvx --from "git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@${tag}#subdirectory=cli" agentstd check

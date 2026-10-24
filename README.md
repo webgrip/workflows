@@ -231,6 +231,14 @@ Runs Go static analysis with `gofmt`, `go vet`, `golangci-lint`, `govulncheck`, 
 #### `go-application-tests.yml`
 Runs Go test suites and uploads coverage and test output artifacts.
 
+#### `agents-check.yml` (Forgejo-only)
+Runs `agentstd check` from [agent-standards](https://forgejo.webgrip.dev/webgrip/agent-standards) at the tag the repository pins in `apm.yml`: generated agent files match `.apm` and `apm.lock.yaml`, `CLAUDE.md` imports nothing, no credential sits in MCP configuration, and the session budget holds. Non-blocking by default; pass `blocking: true` two weeks after adopting the standard.
+
+```yaml
+agents-check:
+  uses: webgrip/workflows/.forgejo/workflows/agents-check.yml@<sha> # vX.Y.Z
+```
+
 ### Hard-Gate Quality Workflows (Forgejo-only)
 
 The `*-application-tests` / `*-application-static-analysis` family above is deliberately
