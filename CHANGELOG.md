@@ -1,3 +1,18 @@
+## [2.9.4](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.3...v2.9.4) (2026-10-25)
+
+### Fixed
+
+* **deps:** update semantic-release toolchain images ([b71ee8d](https://forgejo.webgrip.dev/webgrip/workflows/commit/b71ee8d71ba4c165cf25f7cfa4ea0f2483410cb4))
+* **helm:** package charts at the release version, not the committed one ([8bdd72f](https://forgejo.webgrip.dev/webgrip/workflows/commit/8bdd72f62c849b82f03c801aed0569b82ef7b128))
+* **semantic-release:** run in the config 2.x toolchain image ([8fcd698](https://forgejo.webgrip.dev/webgrip/workflows/commit/8fcd698929f54116103988d765405b483a2cc6fe))
+
+### Internal
+
+* **release:** pin internal refs to v2.8.3 [skip ci] ([fec5377](https://forgejo.webgrip.dev/webgrip/workflows/commit/fec5377edfef94b7836bb115c732dfee6421e010))
+* **release:** pin internal refs to v2.9.0 [skip ci] ([f12d392](https://forgejo.webgrip.dev/webgrip/workflows/commit/f12d39223bbba50410cd91a70836e96035168086))
+* **release:** pin internal refs to v2.9.1 [skip ci] ([74905d1](https://forgejo.webgrip.dev/webgrip/workflows/commit/74905d1b4068db04bbf80d72ff9a1ff2cde6ec75))
+* **release:** pin internal refs to v2.9.2 [skip ci] ([127b8aa](https://forgejo.webgrip.dev/webgrip/workflows/commit/127b8aa42ee77e804e26699a79d46e27b03f01e9))
+
 ## [2.9.3](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.2...v2.9.3) (2026-10-25)
 
 ### Fixed
