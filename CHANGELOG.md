@@ -1,3 +1,20 @@
+## [2.9.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.0...v2.9.1) (2026-10-25)
+
+### Fixed
+
+* **agents-check:** make the non-blocking mode parse on Forgejo ([f9fa855](https://forgejo.webgrip.dev/webgrip/workflows/commit/f9fa855890a00e08ec1d718eca4f9fc2b389fe31))
+
+### CI
+
+* call agents-check at main from this repository ([bc360ea](https://forgejo.webgrip.dev/webgrip/workflows/commit/bc360ea01fa8aa75cb3a88a31b607a0ccb541c00))
+* run the shared agents-check workflow on agent-file changes ([532fe2b](https://forgejo.webgrip.dev/webgrip/workflows/commit/532fe2bb65d226b194be6c11fdcf42e1821a2262))
+
+### Internal
+
+* **agents:** move to agent-standards v0.3.0 ([2b1f62a](https://forgejo.webgrip.dev/webgrip/workflows/commit/2b1f62a572514cf59cef394315cefd3d4613e15b))
+* **release:** pin internal refs to v2.8.3 [skip ci] ([fec5377](https://forgejo.webgrip.dev/webgrip/workflows/commit/fec5377edfef94b7836bb115c732dfee6421e010))
+* **renovate:** bump the agent-standards pins through the apm preset ([e366dc9](https://forgejo.webgrip.dev/webgrip/workflows/commit/e366dc9fc4dcbddfbc06a7180c7ae0375b5c6442))
+
 ## [2.9.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.8.3...v2.9.0) (2026-10-24)
 
 ### Added
