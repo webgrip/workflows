@@ -2,9 +2,37 @@ name: Agents check
 
 on:
   push:
-    paths: [apm.yml, apm.lock.yaml, .agentstd.toml, '.apm/**', AGENTS.md, '**/AGENTS.md', CLAUDE.md, '.claude/**', '.agents/**', '.codex/**', .mcp.json, opencode.json]
+    paths:
+      - apm.yml
+      - apm.lock.yaml
+      - .agentstd.toml
+      - '.apm/**'
+      - AGENTS.md
+      - '**/AGENTS.md'
+      - CLAUDE.md
+      - '.claude/**'
+      - '.agents/**'
+      - '.codex/**'
+      - .mcp.json
+      - opencode.json
+      - .forgejo/workflows/agents-check.yml
+      - .forgejo/workflows/on_agents_change.yml
   pull_request:
-    paths: [apm.yml, apm.lock.yaml, .agentstd.toml, '.apm/**', AGENTS.md, '**/AGENTS.md', CLAUDE.md, '.claude/**', '.agents/**', '.codex/**', .mcp.json, opencode.json]
+    paths:
+      - apm.yml
+      - apm.lock.yaml
+      - .agentstd.toml
+      - '.apm/**'
+      - AGENTS.md
+      - '**/AGENTS.md'
+      - CLAUDE.md
+      - '.claude/**'
+      - '.agents/**'
+      - '.codex/**'
+      - .mcp.json
+      - opencode.json
+      - .forgejo/workflows/agents-check.yml
+      - .forgejo/workflows/on_agents_change.yml
 
 jobs:
   agents-check:
