@@ -1,3 +1,34 @@
+## [3.0.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.6...v3.0.0) (2026-10-25)
+
+### ⚠ BREAKING CHANGES
+
+* **semantic-release:** a caller that does not pass toolchain-image now releases
+  with @webgrip/semantic-release-config 2.x. Before moving a pin (or a
+  caller on [@main](https://forgejo.webgrip.dev/main)) to this version, its .releaserc.cjs must drop the removed
+  options changelog, changelogTitle and extraAssets (they throw at load
+  time), must not add @semantic-release/git or semantic-release-monorepo, and
+  every commit since the last tag must be a conventional commit. Releases
+  stop committing anything: no CHANGELOG.md, no version bump, no
+  chore(release) commit; read the version from the tag or the version
+  output. A caller that is not ready yet can keep its current behaviour by
+  passing toolchain-image: harbor.webgrip.dev/webgrip/semantic-release:0.3.7
+  (or semantic-release-monorepo:0.3.6) explicitly.
+
+### Added
+
+* **semantic-release:** default the release workflows to the config 2.x toolchain image ([85c9525](https://forgejo.webgrip.dev/webgrip/workflows/commit/85c952564a7d823062e5628cca97a021bb4b24fe))
+
+### Internal
+
+* **release:** pin internal refs to v2.8.3 [skip ci] ([fec5377](https://forgejo.webgrip.dev/webgrip/workflows/commit/fec5377edfef94b7836bb115c732dfee6421e010))
+* **release:** pin internal refs to v2.9.0 [skip ci] ([f12d392](https://forgejo.webgrip.dev/webgrip/workflows/commit/f12d39223bbba50410cd91a70836e96035168086))
+* **release:** pin internal refs to v2.9.1 [skip ci] ([74905d1](https://forgejo.webgrip.dev/webgrip/workflows/commit/74905d1b4068db04bbf80d72ff9a1ff2cde6ec75))
+* **release:** pin internal refs to v2.9.2 [skip ci] ([127b8aa](https://forgejo.webgrip.dev/webgrip/workflows/commit/127b8aa42ee77e804e26699a79d46e27b03f01e9))
+* **release:** pin internal refs to v2.9.3 [skip ci] ([4efc731](https://forgejo.webgrip.dev/webgrip/workflows/commit/4efc7318da3e18a601383c03d8f853b1c2a51417))
+* **release:** pin internal refs to v2.9.4 [skip ci] ([38ff85b](https://forgejo.webgrip.dev/webgrip/workflows/commit/38ff85babb5b92fbecab445a246145bcdf9320c2))
+* **release:** pin internal refs to v2.9.5 [skip ci] ([d1937d0](https://forgejo.webgrip.dev/webgrip/workflows/commit/d1937d0f9d6ef33f64ccec547b107b88fcfcb4ee))
+* **renovate:** take the shared Renovate profile ([2a38d7a](https://forgejo.webgrip.dev/webgrip/workflows/commit/2a38d7a1482f5b6b81a21215d2a06356d5f49a65))
+
 ## [2.9.6](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.5...v2.9.6) (2026-10-25)
 
 ### Fixed
