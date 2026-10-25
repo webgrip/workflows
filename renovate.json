@@ -7,30 +7,29 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "The release toolchain images (built in webgrip/infrastructure, ADR 0005) are named in workflow input DEFAULTS. Renovate's workflow manager pins `uses:` refs but is blind to an image tag handed to a job via an input default, so nothing would watch the toolchain a release actually runs in. Same annotated-default pattern infrastructure uses for tool versions passed to composite actions. Only the tag is captured; the repository comes from depName.",
+      "description": "The release toolchain images are named in workflow input DEFAULTS. Renovate's workflow manager pins `uses:` refs but is blind to an image tag handed to a job via an input default, so nothing would watch the toolchain a release actually runs in. Same annotated-default pattern infrastructure uses for tool versions passed to composite actions. The tag is captured, and the digest too when the default pins one (the semantic-release image is pinned as tag@sha256 since config 2.x), so a bump rewrites both; the repository comes from depName.",
       "managerFilePatterns": [
         "/^\\.forgejo/workflows/.+\\.ya?ml$/",
         "/(^|/)action\\.ya?ml$/"
       ],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s*\\n\\s*default: '[^']*:(?<currentValue>[^']+)'"
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)(?: versioning=(?<versioning>\\S+))?\\s*\\n\\s*default: '[^'@]*:(?<currentValue>[^'@]+)(?:@(?<currentDigest>sha256:[a-f0-9]+))?'"
       ],
       "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{else}}semver{{/if}}"
     }
   ],
   "packageRules": [
     {
-      "description": "The toolchain image tag is a bare version reused as part of a composed image ref; appending an @sha256 digest would corrupt it.",
+      "description": "Renovate never adds a digest to an annotated default that has none. The semantic-release toolchain default carries its digest explicitly, and Renovate keeps an existing digest current on every bump.",
       "matchManagers": [
         "custom.regex"
       ],
       "pinDigests": false
     },
     {
-      "description": "The release toolchain images are first-party (webgrip/infrastructure, ADR 0005) and every estate release runs in them, so a new toolchain must reach this repo's defaults without a dashboard tick: on 2026-10-24 semantic-release 0.3.7 and semantic-release-monorepo 0.3.6, the first images with @webgrip/semantic-release-config 1.4.0 (homelab ADR-0069's forge adapter), waited behind the org preset's dependencyDashboardApproval. Both images move in one PR, outside the concurrency limits, and still need a merge.",
+      "description": "The release toolchain images are first-party (the semantic-release image is built and released by webgrip/semantic-release-config, tagged with the config version it carries; the rust image by webgrip/infrastructure, ADR 0005) and every estate release runs in them, so a new patch or minor toolchain must reach this repo's defaults without a dashboard tick: on 2026-10-24 semantic-release 0.3.7 and semantic-release-monorepo 0.3.6, the first images with @webgrip/semantic-release-config 1.4.0 (homelab ADR-0069's forge adapter), waited behind the org preset's dependencyDashboardApproval. A major is a new config major that changes what every caller's release does, so it stays behind the preset's dashboard approval and is never merged unattended. The semantic-release-monorepo image is retired: config 2.x builds monorepo trains itself.",
       "matchDepNames": [
         "harbor.webgrip.dev/webgrip/semantic-release",
-        "harbor.webgrip.dev/webgrip/semantic-release-monorepo",
         "harbor.webgrip.dev/webgrip/semantic-release-rust"
       ],
       "matchUpdateTypes": [
