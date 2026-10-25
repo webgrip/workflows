@@ -50,6 +50,12 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - run: node --test scripts/toolchain-probe.test.cjs
+  chart-version-policy:
+    runs-on: docker
+    container: harbor.webgrip.dev/webgrip/semantic-release:0.3.7@sha256:2f7a1315b2a9e93a48ea3f6b228e95e902b282be9b2da215b1f50ff02084de65
+    steps:
+      - uses: actions/checkout@v5
+      - run: node --test scripts/chart-version.test.cjs
   internal-refs-policy:
     runs-on: docker
     container: harbor.webgrip.dev/webgrip/semantic-release:0.3.7@sha256:2f7a1315b2a9e93a48ea3f6b228e95e902b282be9b2da215b1f50ff02084de65
@@ -58,7 +64,7 @@ jobs:
       - run: node scripts/internal-refs.cjs check
       - run: node --test scripts/internal-refs.test.cjs
   release:
-    needs: [docs-policy, semrel-install-policy, toolchain-probe-policy, internal-refs-policy]
+    needs: [docs-policy, semrel-install-policy, toolchain-probe-policy, chart-version-policy, internal-refs-policy]
     name: Semantic Release
     runs-on: docker
     # The toolchain is the image (ADR 0005, this repo's own composite enforces it since v2):

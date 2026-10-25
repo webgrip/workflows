@@ -114,7 +114,7 @@ jobs:
       - name: Package and push the chart
         if: steps.chart-probe.outputs.exists != 'true'
         run: |
-          helm package ${{ inputs.path }}
+          helm package ${{ inputs.path }} --version "${{ inputs.version }}"
           helm push ./${{ inputs.name }}-${{ inputs.version }}.tgz oci://${{ inputs.registry }}/${{ inputs.oci-path || github.repository }}
       # Forgejo-only: an OCI-pushed chart lands in the CONTAINER registry (type
       # `container`, named after the chart) and is NOT shown on the repo's packages page
