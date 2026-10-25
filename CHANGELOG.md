@@ -1,3 +1,25 @@
+## [2.9.6](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.5...v2.9.6) (2026-10-25)
+
+### Fixed
+
+* **lighthouse-budgets:** stream extra-cp paths through tar ([98c8a57](https://forgejo.webgrip.dev/webgrip/workflows/commit/98c8a57264fc800d29cc95a4da847d1da4275bd3))
+
+### CI
+
+* **actions:** Update harbor.webgrip.dev/webgrip/helm-deploy Docker tag ( 1.2.2 ➔ 1.3.0 ) ([a12fdb8](https://forgejo.webgrip.dev/webgrip/workflows/commit/a12fdb849f49910f77ddf71a78c1d8854a19a11a))
+* **actions:** Update harbor.webgrip.dev/webgrip/mkdocs-runner Docker tag ( 1.0.1 ➔ 1.1.0 ) ([e8ea9a2](https://forgejo.webgrip.dev/webgrip/workflows/commit/e8ea9a26502b32cb7a5f9a339f1835db2352b280))
+* **actions:** Update harbor.webgrip.dev/webgrip/techdocs-builder Docker tag to v1.8.1 ([0fd9e9b](https://forgejo.webgrip.dev/webgrip/workflows/commit/0fd9e9b9c6deda37526b5f1b1c0cc504a493d64f))
+* **actions:** Update harbor.webgrip.dev/webgrip/techdocs-runner Docker tag ( 1.0.1 ➔ 1.1.0 ) ([6608ee9](https://forgejo.webgrip.dev/webgrip/workflows/commit/6608ee9b1b3da72bf5504a4817f04dad0044174b))
+
+### Internal
+
+* **release:** pin internal refs to v2.8.3 [skip ci] ([fec5377](https://forgejo.webgrip.dev/webgrip/workflows/commit/fec5377edfef94b7836bb115c732dfee6421e010))
+* **release:** pin internal refs to v2.9.0 [skip ci] ([f12d392](https://forgejo.webgrip.dev/webgrip/workflows/commit/f12d39223bbba50410cd91a70836e96035168086))
+* **release:** pin internal refs to v2.9.1 [skip ci] ([74905d1](https://forgejo.webgrip.dev/webgrip/workflows/commit/74905d1b4068db04bbf80d72ff9a1ff2cde6ec75))
+* **release:** pin internal refs to v2.9.2 [skip ci] ([127b8aa](https://forgejo.webgrip.dev/webgrip/workflows/commit/127b8aa42ee77e804e26699a79d46e27b03f01e9))
+* **release:** pin internal refs to v2.9.3 [skip ci] ([4efc731](https://forgejo.webgrip.dev/webgrip/workflows/commit/4efc7318da3e18a601383c03d8f853b1c2a51417))
+* **release:** pin internal refs to v2.9.4 [skip ci] ([38ff85b](https://forgejo.webgrip.dev/webgrip/workflows/commit/38ff85babb5b92fbecab445a246145bcdf9320c2))
+
 ## [2.9.5](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.4...v2.9.5) (2026-10-25)
 
 ### Fixed
