@@ -1,3 +1,18 @@
+## [2.9.2](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.1...v2.9.2) (2026-10-25)
+
+### Fixed
+
+* **agents-check:** install only uv, not the caller's mise toolset ([9067943](https://forgejo.webgrip.dev/webgrip/workflows/commit/90679433284354d4bdebccfa73aafde431bc9517))
+
+### CI
+
+* run this repository's agents-check when the reusable workflow changes ([f342c63](https://forgejo.webgrip.dev/webgrip/workflows/commit/f342c635b3a534bece95c255e1d568e330435e83))
+
+### Internal
+
+* **release:** pin internal refs to v2.8.3 [skip ci] ([fec5377](https://forgejo.webgrip.dev/webgrip/workflows/commit/fec5377edfef94b7836bb115c732dfee6421e010))
+* **release:** pin internal refs to v2.9.0 [skip ci] ([f12d392](https://forgejo.webgrip.dev/webgrip/workflows/commit/f12d39223bbba50410cd91a70836e96035168086))
+
 ## [2.9.1](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.0...v2.9.1) (2026-10-25)
 
 ### Fixed
