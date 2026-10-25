@@ -1,3 +1,15 @@
+## [2.9.3](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.2...v2.9.3) (2026-10-25)
+
+### Fixed
+
+* **agents-check:** skip mise-action's locked install ([7950c71](https://forgejo.webgrip.dev/webgrip/workflows/commit/7950c71dd1c4d89cc2b5517a48b1e4cafd574cbd))
+
+### Internal
+
+* **release:** pin internal refs to v2.8.3 [skip ci] ([fec5377](https://forgejo.webgrip.dev/webgrip/workflows/commit/fec5377edfef94b7836bb115c732dfee6421e010))
+* **release:** pin internal refs to v2.9.0 [skip ci] ([f12d392](https://forgejo.webgrip.dev/webgrip/workflows/commit/f12d39223bbba50410cd91a70836e96035168086))
+* **release:** pin internal refs to v2.9.1 [skip ci] ([74905d1](https://forgejo.webgrip.dev/webgrip/workflows/commit/74905d1b4068db04bbf80d72ff9a1ff2cde6ec75))
+
 ## [2.9.2](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.1...v2.9.2) (2026-10-25)
 
 ### Fixed
