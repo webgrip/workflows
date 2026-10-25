@@ -30,13 +30,22 @@ jobs:
           github_token: ''
 
       - name: Check the agent files against the agent standard
-        continue-on-error: ${{ !inputs.blocking }}
         shell: bash
+        env:
+          # Forgejo's parser wants a literal boolean for step-level continue-on-error, so a
+          # non-blocking failure is turned into a warning here instead.
+          BLOCKING: ${{ inputs.blocking }}
         run: |
-          set -euo pipefail
+          set -uo pipefail
           tag=$(awk '/agent-standards(\.git)?$/ {found = 1; next} found && /ref:/ {print $2; exit}' apm.yml)
           if [ -z "$tag" ]; then
             echo "apm.yml pins no agent-standards package; adopt the standard first (agent-standards docs/adopting.md)." >&2
             exit 1
           fi
-          mise exec -- uvx --from "git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@${tag}#subdirectory=cli" agentstd check
+          if mise exec -- uvx --from "git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@${tag}#subdirectory=cli" agentstd check; then
+            exit 0
+          fi
+          if [ "$BLOCKING" = "true" ]; then
+            exit 1
+          fi
+          echo "::warning::agentstd check failed; non-blocking until the caller passes blocking: true"

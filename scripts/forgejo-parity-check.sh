@@ -66,6 +66,7 @@ FORGEJO_ONLY=(
     techdocs-deploy-gh-pages.yml            # runs on Forgejo, mirrors docs out to GitHub Pages
     update_techdocs.yml                     # in-cluster techdocs pipeline, Forgejo-first
     agents-check.yml                        # agent standard check; agentstd and its packages live on this Forgejo
+    on_agents_change.yml                    # runs agents-check on this repository's own agent files
 )
 
 is_forgejo_only() {
