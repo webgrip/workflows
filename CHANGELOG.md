@@ -1,3 +1,17 @@
+## [2.9.5](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.4...v2.9.5) (2026-10-25)
+
+### Fixed
+
+* **lighthouse-budgets:** copy nested and symlinked extra-cp paths ([fa5af21](https://forgejo.webgrip.dev/webgrip/workflows/commit/fa5af21e7c5f61aab9d96a38eb07838f7ca90f02))
+
+### Internal
+
+* **release:** pin internal refs to v2.8.3 [skip ci] ([fec5377](https://forgejo.webgrip.dev/webgrip/workflows/commit/fec5377edfef94b7836bb115c732dfee6421e010))
+* **release:** pin internal refs to v2.9.0 [skip ci] ([f12d392](https://forgejo.webgrip.dev/webgrip/workflows/commit/f12d39223bbba50410cd91a70836e96035168086))
+* **release:** pin internal refs to v2.9.1 [skip ci] ([74905d1](https://forgejo.webgrip.dev/webgrip/workflows/commit/74905d1b4068db04bbf80d72ff9a1ff2cde6ec75))
+* **release:** pin internal refs to v2.9.2 [skip ci] ([127b8aa](https://forgejo.webgrip.dev/webgrip/workflows/commit/127b8aa42ee77e804e26699a79d46e27b03f01e9))
+* **release:** pin internal refs to v2.9.3 [skip ci] ([4efc731](https://forgejo.webgrip.dev/webgrip/workflows/commit/4efc7318da3e18a601383c03d8f853b1c2a51417))
+
 ## [2.9.4](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.3...v2.9.4) (2026-10-25)
 
 ### Fixed
