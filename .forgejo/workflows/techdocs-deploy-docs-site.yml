@@ -67,7 +67,7 @@ jobs:
     # techdocs-generate.yml). 1.4.0 ships zensical + rclone.
     container: harbor.webgrip.dev/webgrip/techdocs-builder:1.8.1@sha256:8ab2ba19e83325cbf8bc44fabc42cd07ebb77f3fbfd5c1749fb7133625e13e64
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         if: ${{ inputs.enabled == 'true' }}
 
       # forgejo/* fork, NOT actions/*: v4 refuses non-github.com hosts (GHES error).

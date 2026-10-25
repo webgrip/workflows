@@ -75,14 +75,14 @@ jobs:
     steps:
       - name: Mint GitHub App installation token (owner-based)
         id: app-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         with:
           app-id: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
           private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
           owner: ${{ env.ORG }}
 
       - name: Check out new repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ env.ORG }}/${{ env.NEW_REPO }}
           ref: main
@@ -111,7 +111,7 @@ jobs:
 
       - name: Replace values across repository (if provided)
         if: ${{ inputs.replace_values != '' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           REPLACE_VALUES_YAML: ${{ inputs.replace_values }}
         with:
@@ -186,7 +186,7 @@ jobs:
 
       - name: Rename / merge paths based on replace_values keys (if provided)
         if: ${{ inputs.replace_values != '' }}
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         env:
           REPLACE_VALUES_YAML: ${{ inputs.replace_values }}
         with:
@@ -262,7 +262,7 @@ jobs:
 
       - name: Resolve bot noreply email
         id: bot-email
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |
@@ -331,7 +331,7 @@ jobs:
       - name: Ensure gh-pages branch, configure Pages, and set homepage (best-effort, opt-in)
         if: ${{ inputs.configure_pages }}
         continue-on-error: true
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |

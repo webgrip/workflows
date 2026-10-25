@@ -86,7 +86,7 @@ jobs:
     steps:
       # Pinned to v5. The "v6 is broken on non-GitHub runners" reason was
       # disproven 2026-09-18 (homelab-cluster canary run 1710); the pin stays.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Enable pnpm
         shell: bash

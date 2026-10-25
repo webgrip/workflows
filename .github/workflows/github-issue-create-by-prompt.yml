@@ -48,14 +48,14 @@ jobs:
     steps:
       - name: Mint GitHub App installation token for webgrip-ci
         id: app-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         with:
           app-id: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
           private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
       - name: Checkout prompt repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ inputs.prompt-repository }}
           path: __prompt-repo
@@ -64,13 +64,13 @@ jobs:
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: '24.22.1'
 
       - name: Run AI Inference for prompt file
         id: inference
-        uses: actions/ai-inference@v1
+        uses: actions/ai-inference@b81b2afb8390ee6839b494a404766bef6493c7d9 # v1.2.8
         with:
           prompt-file: ./__prompt-repo/${{ inputs.prompt-path }}
           input: |
@@ -90,7 +90,7 @@ jobs:
           cp "${{ steps.inference.outputs['response-file'] }}" out/$fname
 
       - name: Upload AI body artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ai-body-${{ steps.save_response.outputs.fname }}
           path: out/${{ steps.save_response.outputs.fname }}
@@ -105,21 +105,21 @@ jobs:
     steps:
       - name: Mint GitHub App installation token (owner-based)
         id: app-token
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2.2.2
         with:
           app-id: ${{ secrets.WEBGRIP_CI_CLIENT_ID }}
           private-key: ${{ secrets.WEBGRIP_CI_APP_PRIVATE_KEY }}
           owner: ${{ env.ORG }}
 
       - name: Download AI body artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: ai-body-*
           path: ai-bodies
           merge-multiple: true
 
       - name: Create issue from AI body file
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           github-token: ${{ steps.app-token.outputs.token }}
           script: |

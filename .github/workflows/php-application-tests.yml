@@ -12,7 +12,7 @@ jobs:
     runs-on: arc-runner-set
 
     container:
-      image: ghcr.io/webgrip/php-ci-runner:latest
+      image: ghcr.io/webgrip/php-ci-runner:latest@sha256:5fe08e81e048bed7c4a00a1e6dad1c557fa2a4be957a9096f17e07cdbac3f705
       env:
         COMPOSER_AUTH: >
           {
@@ -29,10 +29,10 @@ jobs:
       matrix:
         testsuite: [ 'Unit', 'Integration', 'Functional' ]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Cache composer vendor
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: vendor
           key: "composer-${{ hashFiles('**/composer.lock', '**/composer.json') }}"
@@ -56,7 +56,7 @@ jobs:
           esac
 
       - name: Upload coverage artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-${{ matrix.testsuite }}
           path: coverage

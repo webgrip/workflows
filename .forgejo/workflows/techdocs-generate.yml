@@ -40,7 +40,7 @@ jobs:
     steps:
       # fetch-depth 0: git-revision-date-localized derives per-page "last
       # updated" from git log — a shallow clone would date every page today.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         if: ${{ inputs.enabled == 'true' }}
         with:
           fetch-depth: 0

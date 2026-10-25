@@ -23,7 +23,7 @@ jobs:
     name: 'Validate Helm Chart'
     runs-on: docker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       # helm is baked into the ci-runner host image; setup-helm remains as fallback for
       # runners without it.
       - name: Check for preinstalled helm
@@ -35,10 +35,10 @@ jobs:
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
         if: steps.helm-check.outputs.present != 'true'
         with:
-          version: v3.17.0
+          version: v3.22.1
       - run: |
           helm lint ${{ inputs.path }}
       - name: Render chart

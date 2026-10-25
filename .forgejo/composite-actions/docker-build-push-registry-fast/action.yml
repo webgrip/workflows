@@ -112,7 +112,7 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
     # Fail here rather than 40 lines into a buildx invocation with a confusing error. buildx comes
     # from the ci-runner image (inherited from the actions-runner base), which is a property no

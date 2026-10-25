@@ -163,7 +163,7 @@ jobs:
           esac
       # fetch-depth 0 = all branches and tags, so one push refreshes the whole mirror.
       # Explicit repository: inputs.repo, not the github.repository dispatch trap above.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ inputs.repo }}
           fetch-depth: 0
@@ -312,7 +312,7 @@ jobs:
               exit 1 ;;
           esac
       # setup-buildx guarantees the buildx CLI plugin for imagetools; no builder is used.
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
       - name: Copy image from source registry
         shell: bash
         env:
@@ -359,7 +359,7 @@ jobs:
       - uses: https://github.com/sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         if: inputs.copy-accessories && steps.cosign.outputs.present != 'true'
         with:
-          cosign-release: v2.4.3
+          cosign-release: v2.6.5
       - name: Copy cosign accessories to GHCR
         if: inputs.copy-accessories
         shell: bash
@@ -400,7 +400,7 @@ jobs:
     if: inputs.enabled && inputs.chart-path != ''
     runs-on: docker
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           repository: ${{ inputs.repo }}
           ref: ${{ inputs.ref || format('v{0}', inputs.version) }}
@@ -416,10 +416,10 @@ jobs:
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
           fi
-      - uses: https://github.com/azure/setup-helm@v4
+      - uses: https://github.com/azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
         if: steps.helm-check.outputs.present != 'true'
         with:
-          version: v3.18.4
+          version: v3.22.1
       - name: Push chart (OCI)
         shell: bash
         env:

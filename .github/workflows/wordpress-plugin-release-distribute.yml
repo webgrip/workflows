@@ -114,7 +114,7 @@ jobs:
         plugin_slug: ${{ fromJSON(needs.prepare.outputs.slugs) }}
     steps:
       - name: 'Check out repository'
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
           ref: ${{ inputs.checkout-ref != '' && inputs.checkout-ref || format('refs/tags/{0}{1}', inputs.tag-prefix, inputs.version) }}
@@ -127,7 +127,7 @@ jobs:
       - name: 'Package ZIP (dry-run)'
         id: wporg-zip
         if: ${{ inputs.generate-zip }}
-        uses: 10up/action-wordpress-plugin-deploy@stable
+        uses: 10up/action-wordpress-plugin-deploy@54bd289b8525fd23a5c365ec369185f2966529c2 # stable
         with:
           dry-run: true
           generate-zip: true
@@ -161,7 +161,7 @@ jobs:
 
       - name: 'Upload ZIP artifact'
         if: ${{ inputs.generate-zip }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: wporg-plugin-${{ matrix.plugin_slug }}-zip
           path: ${{ steps.zip.outputs.path }}
@@ -180,7 +180,7 @@ jobs:
 
       - name: 'Deploy to WordPress.org'
         if: ${{ inputs.deploy-to-wporg }}
-        uses: 10up/action-wordpress-plugin-deploy@stable
+        uses: 10up/action-wordpress-plugin-deploy@54bd289b8525fd23a5c365ec369185f2966529c2 # stable
         with:
           dry-run: ${{ inputs.dry-run }}
           generate-zip: false
@@ -205,14 +205,14 @@ jobs:
       contents: write
     steps:
       - name: 'Download ZIP artifacts'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: wporg-plugin-*-zip
           merge-multiple: true
           path: wporg-zips
 
       - name: 'Upload ZIP(s) to GitHub Release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: ${{ inputs.release-tag != '' && inputs.release-tag || format('{0}{1}', inputs.tag-prefix, inputs.version) }}
           files: wporg-zips/**/*.zip

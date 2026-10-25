@@ -27,9 +27,9 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
-      - uses: https://github.com/jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+      - uses: https://github.com/jdx/mise-action@8418fedb1110381a0d3ba51a7a415d7c1b884550 # v5.2.2
         with:
-          version: 2026.10.7
+          version: 2026.10.19
           # No mise install here: with a mise.lock in the caller, mise-action adds --locked,
           # which refuses uv@0.12.24 when that lock does not list it. mise exec installs it.
           install: false
