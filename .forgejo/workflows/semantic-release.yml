@@ -126,7 +126,7 @@ jobs:
       tag: ${{ steps.semantic-release.outputs.tag }}
     steps:
       - id: semantic-release
-        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/semantic-release@main
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/semantic-release@v2.9.5
         with:
           release-type: ${{ inputs.release-type }}
           token: ${{ secrets.CI_TOKEN || secrets.FORGEJO_TOKEN }}
