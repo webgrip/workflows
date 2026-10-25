@@ -75,7 +75,7 @@ jobs:
     name: "Docker Build and Push (Harbor)"
     # Delegate to the generic engine workflow; Harbor's robot creds map onto REGISTRY_*.
     # (The literal '$' in the robot username robot$webgrip+ci is a YAML value, not shell-expanded.)
-    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push-registry.yml@main
+    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push-registry.yml@v2.9.4
     with:
       registry: ${{ inputs.registry }}
       docker-context: ${{ inputs.docker-context }}

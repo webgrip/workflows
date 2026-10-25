@@ -23,7 +23,7 @@ on:
 jobs:
   release:
     name: 'Release'
-    uses: webgrip/workflows/.forgejo/workflows/semantic-release.yml@main
+    uses: webgrip/workflows/.forgejo/workflows/semantic-release.yml@v2.9.4
     with:
       use-bot-to-commit: true
     secrets:
@@ -39,7 +39,7 @@ jobs:
       always()
       && needs.release.result == 'success'
       && needs.release.outputs.version != ''
-    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push.yml@main
+    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push.yml@v2.9.4
     secrets:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}

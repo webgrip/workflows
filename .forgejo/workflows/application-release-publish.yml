@@ -17,7 +17,7 @@ on:
 jobs:
   release-publish:
     name: 'Publish'
-    uses: webgrip/workflows/.forgejo/workflows/semantic-release.yml@main
+    uses: webgrip/workflows/.forgejo/workflows/semantic-release.yml@v2.9.4
     with:
       use-bot-to-commit: true
     secrets:
