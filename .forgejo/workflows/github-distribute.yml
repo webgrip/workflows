@@ -104,7 +104,7 @@ on:
         required: false
         default: ''
       chart-path:
-        description: 'Path to the Helm chart (e.g. ops/helm/mychart). Empty skips the chart job. Chart.yaml version must equal <version> at <ref>.'
+        description: 'Path to the Helm chart (e.g. ops/helm/mychart). Empty skips the chart job. The chart is packaged at <version>; Chart.yaml version at <ref> is ignored.'
         type: string
         required: false
         default: ''
@@ -441,6 +441,6 @@ jobs:
             echo "ghcr.io/${oci}/${CHART_NAME}:${VERSION} is already published — nothing to do."
             exit 0
           fi
-          helm package "$CHART_PATH"
+          helm package "$CHART_PATH" --version "$VERSION"
           helm push "./${CHART_NAME}-${VERSION}.tgz" "oci://ghcr.io/${oci}"
           echo "Pushed ghcr.io/${oci}/${CHART_NAME}:${VERSION}"

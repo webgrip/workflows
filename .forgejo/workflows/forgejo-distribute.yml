@@ -110,7 +110,7 @@ on:
         required: false
         default: false
       chart-path:
-        description: 'Path to the Helm chart (e.g. ops/helm/mychart). Empty skips the chart job. Chart.yaml version must equal <version> at <ref> (semantic-release-helm3 lockstep).'
+        description: 'Path to the Helm chart (e.g. ops/helm/mychart). Empty skips the chart job. The chart is packaged at <version>; Chart.yaml version at <ref> is ignored.'
         type: string
         required: false
         default: ''
@@ -277,7 +277,7 @@ jobs:
         run: |
           set -euo pipefail
           printf '%s' "$REGISTRY_TOKEN" | helm registry login "$REGISTRY" --username "$REGISTRY_USERNAME" --password-stdin
-          helm package "$CHART_PATH"
+          helm package "$CHART_PATH" --version "$VERSION"
           helm push "./${CHART_NAME}-${VERSION}.tgz" "oci://${REGISTRY}/${OWNER}"
       - name: Link chart package to repo
         if: inputs.link-repo != ''
