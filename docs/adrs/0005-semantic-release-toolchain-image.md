@@ -182,6 +182,11 @@ outlives the job. No data classification change.
   `semantic-release-monorepo.yml` both default to that one image, pinned by tag and digest; the
   `semantic-release-monorepo` image from `webgrip/infrastructure` is retired. The rust image is
   unchanged.
+* **Amendment (2026-10-25, VIK-2321)**: the rust image and the Forgejo `rust-semantic-release`
+  composite are retired. Nothing called the composite and no repository in the estate publishes a
+  cargo crate. `rust-semantic-release.yml` never used the composite: it runs in `rust-releaser`,
+  which stays, so follow-up 4 below now means pointing it at a real consumer, not at a rust
+  toolchain image.
 * **Follow-ups / TODOs**:
   1. Publish the images from `webgrip/infrastructure` **before** merging the composite defaults
      here; the reusables default to them, so a missing image fails at the container pull.

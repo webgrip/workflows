@@ -27,10 +27,9 @@
       "pinDigests": false
     },
     {
-      "description": "The release toolchain images are first-party (the semantic-release image is built and released by webgrip/semantic-release-config, tagged with the config version it carries; the rust image by webgrip/infrastructure, ADR 0005) and every estate release runs in them, so a new patch or minor toolchain must reach this repo's defaults without a dashboard tick: on 2026-10-24 semantic-release 0.3.7 and semantic-release-monorepo 0.3.6, the first images with @webgrip/semantic-release-config 1.4.0 (homelab ADR-0069's forge adapter), waited behind the org preset's dependencyDashboardApproval. A major is a new config major that changes what every caller's release does, so it stays behind the preset's dashboard approval and is never merged unattended. The semantic-release-monorepo image is retired: config 2.x builds monorepo trains itself.",
+      "description": "The release toolchain image is first-party (built and released by webgrip/semantic-release-config, tagged with the config version it carries, ADR 0005) and every estate release runs in it, so a new patch or minor toolchain must reach this repo's defaults without a dashboard tick: on 2026-10-24 semantic-release 0.3.7 and semantic-release-monorepo 0.3.6, the first images with @webgrip/semantic-release-config 1.4.0 (homelab ADR-0069's forge adapter), waited behind the org preset's dependencyDashboardApproval. A major is a new config major that changes what every caller's release does, so it stays behind the preset's dashboard approval and is never merged unattended. The semantic-release-monorepo image is retired: config 2.x builds monorepo trains itself. The semantic-release-rust image is retired: nothing used it (VIK-2321).",
       "matchDepNames": [
-        "harbor.webgrip.dev/webgrip/semantic-release",
-        "harbor.webgrip.dev/webgrip/semantic-release-rust"
+        "harbor.webgrip.dev/webgrip/semantic-release"
       ],
       "matchUpdateTypes": [
         "patch",
