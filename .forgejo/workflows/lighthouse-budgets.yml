@@ -106,7 +106,10 @@ jobs:
           docker cp lighthouserc.json "${name}:/repo/lighthouserc.json"
           while IFS= read -r p; do
             [ -n "${p}" ] || continue
-            docker cp "${p}" "${name}:/repo/${p}"
+            # Nested paths need their parent in the container, and -L copies what a
+            # symlink points at, so a pnpm package such as node_modules/@scope/pkg works.
+            docker exec -u 0 "${name}" mkdir -p "/repo/$(dirname "${p}")"
+            docker cp -L "${p}" "${name}:/repo/${p}"
           done <<< "${EXTRA_CP}"
           # lhci comes from the image (locked lockfile, ADR-0005) — nothing installs here.
           docker exec -w /repo "${name}" bash -c "lhci autorun"
