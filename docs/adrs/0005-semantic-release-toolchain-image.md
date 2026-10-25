@@ -192,6 +192,7 @@ outlives the job. No data classification change.
      here; the reusables default to them, so a missing image fails at the container pull.
   2. Roll out on `ploeg` first, then the chart trains.
   3. Retire the unversioned `SEMREL_PREBAKED` bake on the ci-runner host image once consumers move.
+     Done 2026-10-25 (infrastructure #163).
   4. `rust-semantic-release.yml` (the workflow, not the composite) still builds with hardcoded
      `mybin` targets and calls `npx semantic-release` directly; it needs a real consumer before it
      can be pointed at the rust image.
@@ -204,3 +205,4 @@ outlives the job. No data classification change.
 | ------- | ---------- | --------------- | ---------------- |
 | 1.0.0   | 2026-07-29 | Ryan Grippeling | Initial creation |
 | 1.1.0   | 2026-10-25 | Ryan Grippeling | Defaults move to the config 2.x image built by webgrip/semantic-release-config; monorepo image retired |
+| 1.2.0   | 2026-10-25 | Ryan Grippeling | Follow-up 3 done: the ci-runner host image no longer bakes a toolchain |

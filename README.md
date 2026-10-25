@@ -789,9 +789,10 @@ Reusable composite action for building and pushing Docker images.
 Reusable composite action for building and pushing Docker images to GHCR.
 
 ### `semantic-release`
-Composite action for semantic release automation with Node.js setup. The Forgejo copy skips
-setup-node when node is baked into the runner image, and skips the npm install entirely when
-the image prebakes the toolchain at `/opt/semrel` (env `SEMREL_PREBAKED`).
+Composite action for semantic release automation. The Forgejo copy runs in the release
+toolchain image (`harbor.webgrip.dev/webgrip/semantic-release`, built by
+webgrip/semantic-release-config), which carries the toolchain at `/opt/semrel` (env
+`SEMREL_PREBAKED`). It installs nothing and fails with instructions in any other container.
 
 ### `openbao-read`
 Reads secrets from OpenBao with the job's Forgejo Actions OIDC token, so the value is never
