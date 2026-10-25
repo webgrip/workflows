@@ -19,13 +19,17 @@ jobs:
     name: 'agentstd check'
     if: ${{ inputs.enabled }}
     runs-on: docker
+    env:
+      # Only uv is needed. Without this, mise exec installs the caller's whole toolset
+      # (node, go tools, ...), which fails on lockfile settings and GitHub rate limits.
+      MISE_IGNORED_CONFIG_PATHS: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - uses: https://github.com/jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: 2026.10.7
-          install_args: uv
+          install_args: uv@0.12.24
           cache: false
           github_token: ''
 
@@ -42,7 +46,7 @@ jobs:
             echo "apm.yml pins no agent-standards package; adopt the standard first (agent-standards docs/adopting.md)." >&2
             exit 1
           fi
-          if mise exec -- uvx --from "git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@${tag}#subdirectory=cli" agentstd check; then
+          if mise exec uv@0.12.24 -- uvx --from "git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@${tag}#subdirectory=cli" agentstd check; then
             exit 0
           fi
           if [ "$BLOCKING" = "true" ]; then
