@@ -239,6 +239,21 @@ agents-check:
   uses: webgrip/workflows/.forgejo/workflows/agents-check.yml@<sha> # vX.Y.Z
 ```
 
+#### `coderabbit-review.yml` (Forgejo-only)
+CodeRabbit reviews no Forgejo pull request, so this runs its CLI on the pull request's diff and posts the findings as one Forgejo review through `agentstd review` ([agent-standards docs/coderabbit.md](https://forgejo.webgrip.dev/webgrip/agent-standards/src/branch/main/docs/coderabbit.md)). Every run counts against the API key's seat (5 reviews per hour on Essentials), so trigger it on `opened`, `ready_for_review` and a label rather than on every push. Non-blocking unless the caller passes `blocking: true`.
+
+```yaml
+on:
+  pull_request:
+    types: [opened, ready_for_review, labeled]
+jobs:
+  coderabbit:
+    if: github.event.action != 'labeled' || github.event.label.name == 'review-me'
+    uses: webgrip/workflows/.forgejo/workflows/coderabbit-review.yml@<sha> # vX.Y.Z
+    secrets:
+      CODERABBIT_API_KEY: ${{ secrets.CODERABBIT_API_KEY }}
+```
+
 ### Hard-Gate Quality Workflows (Forgejo-only)
 
 The `*-application-tests` / `*-application-static-analysis` family above is deliberately
