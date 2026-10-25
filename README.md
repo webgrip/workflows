@@ -248,8 +248,10 @@ on:
     types: [opened, ready_for_review, labeled]
 jobs:
   coderabbit:
-    if: github.event.action != 'labeled' || github.event.label.name == 'review-me'
     uses: webgrip/workflows/.forgejo/workflows/coderabbit-review.yml@<sha> # vX.Y.Z
+    with:
+      # A caller-level if: does not reach a reusable workflow's jobs on Forgejo; gate through enabled.
+      enabled: ${{ github.event.action != 'labeled' || github.event.label.name == 'review-me' }}
     secrets:
       CODERABBIT_API_KEY: ${{ secrets.CODERABBIT_API_KEY }}
 ```
