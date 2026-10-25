@@ -65,7 +65,7 @@ jobs:
     runs-on: docker
     # First-party Harbor image, version-pinned (the ghcr fan-out freezes — see
     # techdocs-generate.yml). 1.4.0 ships zensical + rclone.
-    container: harbor.webgrip.dev/webgrip/techdocs-builder:1.6.0
+    container: harbor.webgrip.dev/webgrip/techdocs-builder:1.8.1@sha256:8ab2ba19e83325cbf8bc44fabc42cd07ebb77f3fbfd5c1749fb7133625e13e64
     steps:
       - uses: actions/checkout@v5
         if: ${{ inputs.enabled == 'true' }}
