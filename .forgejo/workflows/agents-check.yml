@@ -19,6 +19,7 @@ jobs:
     name: 'agentstd check'
     if: ${{ inputs.enabled }}
     runs-on: docker
+    timeout-minutes: 15
     env:
       # Only uv is needed. Without this, mise exec installs the caller's whole toolset
       # (node, go tools, ...), which fails on lockfile settings and GitHub rate limits.
@@ -29,7 +30,9 @@ jobs:
       - uses: https://github.com/jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: 2026.10.7
-          install_args: uv@0.12.24
+          # No mise install here: with a mise.lock in the caller, mise-action adds --locked,
+          # which refuses uv@0.12.24 when that lock does not list it. mise exec installs it.
+          install: false
           cache: false
           github_token: ''
 
@@ -46,7 +49,7 @@ jobs:
             echo "apm.yml pins no agent-standards package; adopt the standard first (agent-standards docs/adopting.md)." >&2
             exit 1
           fi
-          if mise exec uv@0.12.24 -- uvx --from "git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@${tag}#subdirectory=cli" agentstd check; then
+          if timeout 600 mise exec uv@0.12.24 -- uvx --from "git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@${tag}#subdirectory=cli" agentstd check; then
             exit 0
           fi
           if [ "$BLOCKING" = "true" ]; then
