@@ -793,9 +793,6 @@ Composite action for semantic release automation with Node.js setup. The Forgejo
 setup-node when node is baked into the runner image, and skips the npm install entirely when
 the image prebakes the toolchain at `/opt/semrel` (env `SEMREL_PREBAKED`).
 
-### `rust-semantic-release`
-Specialized semantic release action for Rust projects.
-
 ### `openbao-read`
 Reads secrets from OpenBao with the job's Forgejo Actions OIDC token, so the value is never
 stored as a Forgejo secret. It requests an OIDC token for `audience` (default `openbao-ci`),
