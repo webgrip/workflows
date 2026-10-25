@@ -172,7 +172,7 @@ jobs:
 
       - name: Render summary
         if: ${{ always() }}
-        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/workflow-status-summary@main
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/workflow-status-summary@v3.0.0
         with:
           title: 'Java Static Analysis'
           subtitle: 'Quality gate for Maven and Gradle projects'
