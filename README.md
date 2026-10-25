@@ -647,12 +647,15 @@ Automated semantic versioning and releases using conventional commits — one re
 whole repository. (For per-package trains in a monorepo, use `semantic-release-monorepo.yml`.)
 
 **Features:**
-- Conventional commit parsing, changelog generation, tag + release creation
+- Conventional commit parsing, release notes on the forge release page, tag + release creation.
+  With `@webgrip/semantic-release-config` 2.x a release is the tag alone: nothing (no
+  `CHANGELOG.md`, no version bump) is committed back
 - **Installs nothing.** The job runs in `harbor.webgrip.dev/webgrip/semantic-release`, which bakes
   in node, git, yq, semantic-release 25, `@webgrip/semantic-release-config` and the plugin set from
   a committed lockfile ([ADR 0005](docs/adrs/0005-semantic-release-toolchain-image.md); the image is
-  built in `webgrip/infrastructure`). Release setup is ~0 instead of ~3m45s, and the same commit
-  releases the same way next month.
+  built and released by `webgrip/semantic-release-config` and tagged with the config version it
+  carries). Release setup is ~0 instead of ~3m45s, and the same commit releases the same way next
+  month.
 - Resolves the repo's `.releaserc.cjs|js|json` (or `--extends` a `release-type` variant)
 - Serialized per ref (`concurrency`, no cancel-in-progress) and realigned to the remote branch tip,
   so two runs cannot race for the same tag or die "behind remote" and silently release nothing.
@@ -660,9 +663,11 @@ whole repository. (For per-package trains in a monorepo, use `semantic-release-m
 **Inputs:**
 - `release-type` (optional) - Type of release
 - `use-bot-to-commit` - Use the CI bot for commits
-- `toolchain-image` (default `harbor.webgrip.dev/webgrip/semantic-release:<version>`) - The image
-  the release runs in, pinned to a released version and Renovate-watched. Override with an image
-  built `FROM` it if your `prepareCmd` needs helm/php/docker
+- `toolchain-image` (default `harbor.webgrip.dev/webgrip/semantic-release:<config version>@sha256:…`,
+  config 2.x since workflows v3) - The image the release runs in, pinned by tag and digest and
+  Renovate-watched. Override with an image built `FROM` it if your `prepareCmd` needs
+  helm/php/docker, or pin a config 1.x image while your `.releaserc.cjs` still uses `changelog`,
+  `changelogTitle` or `extraAssets`
 - `config-version` (default `1`) - Pin of `@webgrip/semantic-release-config`, for the no-image
   fallback only; inside the toolchain image the image tag *is* the version
 - `dry-run` (default `false`) - `--dry-run`: no tags, releases, or commits
@@ -716,16 +721,16 @@ Minimal example `.releaserc.json` for a WordPress plugin that uploads the genera
 Per-package release train for monorepos: wraps the `semantic-release-monorepo` composite action
 (checkout `fetch-depth: 0`, push permissions, version normalization). Commit analysis is scoped
 to `package-path` by the [`semantic-release-monorepo`](https://github.com/pmowrer/semantic-release-monorepo)
-plugin; config is resolved by cosmiconfig from the package dir upward (a package-local
-`.releaserc.cjs` wins, else the repo root `.releaserc.js`). The consumer config **must** write
-`version=`/`tag=` to `$GITHUB_OUTPUT` via an `@semantic-release/exec` `successCmd` for the
-outputs to be populated. `@semantic-release/git` + `changelog` are pre-installed for configs
-that commit release artifacts back (CHANGELOG.md, Chart.yaml, …). Like the single-package train it
-**installs nothing**: the job runs in `harbor.webgrip.dev/webgrip/semantic-release-monorepo`,
-which additionally bakes in `semantic-release-monorepo` — so the `monorepo` input is now a no-op,
-kept only for caller compatibility. See
-[ADR 0005](docs/adrs/0005-semantic-release-toolchain-image.md); the images themselves are built in
-`webgrip/infrastructure` (`ops/docker/semantic-release/`).
+plugin under config 1.x, and by `makeConfig({ monorepo: true })` itself under config 2.x; config
+is resolved by cosmiconfig from the package dir upward (a package-local `.releaserc.cjs` wins,
+else the repo root `.releaserc.js`). The consumer config **must** write `version=`/`tag=` to
+`$GITHUB_OUTPUT` via an `@semantic-release/exec` `successCmd` for the outputs to be populated.
+Like the single-package train it **installs nothing**, and since workflows v3 it runs in the
+same `harbor.webgrip.dev/webgrip/semantic-release` image (config 2.x), which builds monorepo
+trains itself and commits nothing back: the `harbor.webgrip.dev/webgrip/semantic-release-monorepo`
+image is retired, and the `monorepo` input is a no-op kept only for caller compatibility. See
+[ADR 0005](docs/adrs/0005-semantic-release-toolchain-image.md); the image is built and released
+by `webgrip/semantic-release-config`.
 
 **Inputs:** `package-path` (`.` for a root-scoped train), `package-name`, `dry-run`.
 **Secrets:** `CI_TOKEN` (preferred; pass `secrets.WEBGRIP_CI_TOKEN`) or `FORGEJO_TOKEN`;

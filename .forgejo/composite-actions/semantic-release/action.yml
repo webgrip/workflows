@@ -1,7 +1,7 @@
 name: "[Action] Semantic Release"
 description: >-
   Cut a repository's release with semantic-release. Expects to run in the toolchain image
-  (harbor.webgrip.dev/webgrip/semantic-release:0.1.2 — see docs/adrs/0005-semantic-release-toolchain-image.md),
+  (harbor.webgrip.dev/webgrip/semantic-release:<config version> — see docs/adrs/0005-semantic-release-toolchain-image.md),
   which bakes in node, git, yq, semantic-release 25 and @webgrip/semantic-release-config, so this
   action installs nothing and this file is only about RELEASE semantics. Output contract: the
   resolved config must include an @semantic-release/exec successCmd that writes

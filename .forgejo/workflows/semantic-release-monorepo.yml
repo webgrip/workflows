@@ -24,21 +24,23 @@ on:
         default: false
         type: boolean
       monorepo:
-        description: 'Set true when the resolved config uses makeConfig({monorepo:true}); the composite then installs semantic-release-monorepo (the shared config un-bundles it).'
+        description: 'Retained for caller compatibility and a no-op: config 2.x builds monorepo trains itself (makeConfig({ monorepo: true })), and a config 1.x image carries semantic-release-monorepo baked in.'
         required: false
         default: false
         type: boolean
       toolchain-image:
         description: >-
-          The image the release runs in — node, git, yq, semantic-release 25,
-          @webgrip/semantic-release-config and semantic-release-monorepo, all locked (ADR 0005).
-          Built and released in webgrip/infrastructure (ops/docker/semantic-release-monorepo), so
-          the tag is that image's own release version and this default is bumped deliberately, by a
-          PR here, when the toolchain moves. Override with an image built FROM it if your prepareCmd
-          needs extra tooling (helm, php, docker CLI).
+          The image the release runs in — node, git, yq, semantic-release 25 and
+          @webgrip/semantic-release-config, all locked (ADR 0005). Config 2.x builds monorepo
+          trains itself (makeConfig({ monorepo: true })), so this is the same single image as
+          semantic-release.yml; the separate semantic-release-monorepo image is retired. Built and
+          released by webgrip/semantic-release-config, so the tag is the config version it carries
+          and this default, pinned by tag and digest, is bumped deliberately, by a PR here, when the
+          toolchain moves. Override with an image built FROM it if your prepareCmd needs extra
+          tooling (helm, php, docker CLI).
         required: false
-        # renovate: datasource=docker depName=harbor.webgrip.dev/webgrip/semantic-release-monorepo
-        default: 'harbor.webgrip.dev/webgrip/semantic-release-monorepo:0.3.6'
+        # renovate: datasource=docker depName=harbor.webgrip.dev/webgrip/semantic-release
+        default: 'harbor.webgrip.dev/webgrip/semantic-release:2.1.2@sha256:1fd0856cbfe52386712060bda1d84b9efa3de3d903d1754914d8cf6486d6fd37'
         type: string
       enabled:
         description: 'Gate the job from INSIDE the reusable. Forgejo v15 flattening drops if-conditions on uses-caller jobs, so pass needs-based conditions here (needs.* survives flattening; github.* does NOT — use only-refs for branch gating).'

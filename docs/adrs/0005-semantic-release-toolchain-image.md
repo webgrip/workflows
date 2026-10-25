@@ -4,7 +4,7 @@
 * **Deciders**: Ryan Grippeling
 * **Date**: 2026-07-29
 * **Tags**: CI::ReusableWorkflows, Forgejo, SupplyChain, Performance
-* **Version**: 1.0.0
+* **Version**: 1.1.0
 
 ---
 
@@ -175,6 +175,13 @@ outlives the job. No data classification change.
 * **Where the images are built**: `webgrip/infrastructure` — `ops/docker/semantic-release{,-monorepo,-rust}/`,
   one independent image per directory, each with its own committed lockfile (Renovate-owned) folded
   into the same `package.json` that carries the image's release version.
+* **Amendment (2026-10-25, workflows v3)**: the decision stands (the toolchain is an image), the
+  place it is built moved. `@webgrip/semantic-release-config` 2.x builds and releases its own
+  image, `harbor.webgrip.dev/webgrip/semantic-release:<config version>`, so the image tag is the
+  config version. Config 2.x builds monorepo trains itself, so `semantic-release.yml` and
+  `semantic-release-monorepo.yml` both default to that one image, pinned by tag and digest; the
+  `semantic-release-monorepo` image from `webgrip/infrastructure` is retired. The rust image is
+  unchanged.
 * **Follow-ups / TODOs**:
   1. Publish the images from `webgrip/infrastructure` **before** merging the composite defaults
      here; the reusables default to them, so a missing image fails at the container pull.
@@ -191,3 +198,4 @@ outlives the job. No data classification change.
 | Version | Date       | Author          | Change           |
 | ------- | ---------- | --------------- | ---------------- |
 | 1.0.0   | 2026-07-29 | Ryan Grippeling | Initial creation |
+| 1.1.0   | 2026-10-25 | Ryan Grippeling | Defaults move to the config 2.x image built by webgrip/semantic-release-config; monorepo image retired |

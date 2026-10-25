@@ -2,10 +2,11 @@ name: "[Action] Semantic Release (Monorepo)"
 description: >-
   Run semantic-release for a single monorepo package path (e.g. ops/docker/<image> or
   deploy/charts/<chart>) without committing a fabricated package.json. Expects to run in the
-  toolchain image (harbor.webgrip.dev/webgrip/semantic-release-monorepo:0.1.0 — see
+  toolchain image (harbor.webgrip.dev/webgrip/semantic-release:<config version> — see
   docs/adrs/0005-semantic-release-toolchain-image.md), which bakes in node, git, yq,
-  semantic-release 25, @webgrip/semantic-release-config and semantic-release-monorepo, so this
-  action installs nothing. Config is resolved by cosmiconfig upward from the package directory: a
+  semantic-release 25 and @webgrip/semantic-release-config, so this action installs nothing.
+  Config 2.x builds the train itself (makeConfig({ monorepo: true })); an image carrying config
+  1.x must also carry semantic-release-monorepo. Config is resolved by cosmiconfig upward from the package directory: a
   package-local .releaserc(.cjs) wins, otherwise the nearest ancestor config (usually the repo root
   .releaserc.js). Output contract: the resolved config must include an @semantic-release/exec
   successCmd that writes `version=${nextRelease.version}` (and optionally `tag=${nextRelease.gitTag}`)
@@ -33,10 +34,9 @@ inputs:
     default: ""
   monorepo:
     description: >-
-      Retained for caller compatibility and now a no-op: semantic-release-monorepo is baked into the
-      monorepo toolchain image, so there is nothing left to install conditionally. The shared config
-      still does not depend on it (2026-07-26 security cleanup) — the image carries it instead, which
-      keeps it out of every other consumer's dependency tree.
+      Retained for caller compatibility and a no-op: config 2.x builds monorepo trains itself, and a
+      config 1.x toolchain image carries semantic-release-monorepo baked in, so there is nothing to
+      install conditionally.
     required: false
     default: "false"
   forge-url:
