@@ -60,7 +60,7 @@ jobs:
 #          ls -la
 #          ls -la vendor || true
 #
-#      - uses: webgrip/workflows/.github/php/8.2/actions/composer-install@main
+#      - uses: webgrip/workflows/.github/php/8.2/actions/composer-install@v2.9.3
 #        with:
 #          composer_auth: >
 #            {
