@@ -1,3 +1,26 @@
+## [3.1.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v3.0.0...v3.1.0) (2026-10-26)
+
+### Added
+
+* add a CodeRabbit review workflow that posts to Forgejo ([8b5db7e](https://forgejo.webgrip.dev/webgrip/workflows/commit/8b5db7e2c1459d9d19c3812d1cde6b82b19f2bc0))
+
+### Docs
+
+* gate the CodeRabbit caller through enabled, not a job-level if ([5b5cea7](https://forgejo.webgrip.dev/webgrip/workflows/commit/5b5cea7d61f9aa48c4f3a32b247f50d3495034be))
+* **semantic-release:** stop pointing at a ci-runner toolchain bake ([254da6d](https://forgejo.webgrip.dev/webgrip/workflows/commit/254da6d16fdd8facbef258b6b9af793cc29311b3)), references [#163](https://forgejo.webgrip.dev/webgrip/workflows/issues/163)
+
+### Internal
+
+* **release:** pin internal refs to v2.8.3 [skip ci] ([fec5377](https://forgejo.webgrip.dev/webgrip/workflows/commit/fec5377edfef94b7836bb115c732dfee6421e010))
+* **release:** pin internal refs to v2.9.0 [skip ci] ([f12d392](https://forgejo.webgrip.dev/webgrip/workflows/commit/f12d39223bbba50410cd91a70836e96035168086))
+* **release:** pin internal refs to v2.9.1 [skip ci] ([74905d1](https://forgejo.webgrip.dev/webgrip/workflows/commit/74905d1b4068db04bbf80d72ff9a1ff2cde6ec75))
+* **release:** pin internal refs to v2.9.2 [skip ci] ([127b8aa](https://forgejo.webgrip.dev/webgrip/workflows/commit/127b8aa42ee77e804e26699a79d46e27b03f01e9))
+* **release:** pin internal refs to v2.9.3 [skip ci] ([4efc731](https://forgejo.webgrip.dev/webgrip/workflows/commit/4efc7318da3e18a601383c03d8f853b1c2a51417))
+* **release:** pin internal refs to v2.9.4 [skip ci] ([38ff85b](https://forgejo.webgrip.dev/webgrip/workflows/commit/38ff85babb5b92fbecab445a246145bcdf9320c2))
+* **release:** pin internal refs to v2.9.5 [skip ci] ([d1937d0](https://forgejo.webgrip.dev/webgrip/workflows/commit/d1937d0f9d6ef33f64ccec547b107b88fcfcb4ee))
+* **release:** pin internal refs to v2.9.6 [skip ci] ([93ff38f](https://forgejo.webgrip.dev/webgrip/workflows/commit/93ff38f11f2da0b33d2a4079fbbfd1b3cfe5399f))
+* **rust-semantic-release:** retire the Forgejo composite and its image pin ([7528ea6](https://forgejo.webgrip.dev/webgrip/workflows/commit/7528ea6916d1f6b49a03d902a1b2cb9fbb5af200))
+
 ## [3.0.0](https://forgejo.webgrip.dev/webgrip/workflows/compare/v2.9.6...v3.0.0) (2026-10-25)
 
 ### ⚠ BREAKING CHANGES
