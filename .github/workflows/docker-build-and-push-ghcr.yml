@@ -52,7 +52,7 @@ jobs:
     name: "Docker Build and Push (GHCR)"
     runs-on: [homelab, heavy]
     steps:
-      - uses: webgrip/workflows/.github/composite-actions/docker-build-push-ghcr@main
+      - uses: webgrip/workflows/.github/composite-actions/docker-build-push-ghcr@v3.2.0
         with:
           docker-context: ${{ inputs.docker-context }}
           docker-file: ${{ inputs.docker-file }}

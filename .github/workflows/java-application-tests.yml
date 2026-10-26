@@ -98,7 +98,7 @@ jobs:
 
       - name: Render summary
         if: ${{ always() }}
-        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@main
+        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@v3.2.0
         with:
           title: 'Java Tests'
           subtitle: 'Test execution for Maven and Gradle projects'

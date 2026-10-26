@@ -32,7 +32,7 @@ jobs:
       fail-fast: false
       matrix:
         prompt-path: ${{ fromJson(inputs.prompt-paths) }}
-    uses: webgrip/workflows/.github/workflows/github-issue-create-by-prompt.yml@main
+    uses: webgrip/workflows/.github/workflows/github-issue-create-by-prompt.yml@v3.2.0
     with:
       prompt-repository: ${{ inputs.prompt-repository }}
       prompt-path: ${{ matrix.prompt-path }}
