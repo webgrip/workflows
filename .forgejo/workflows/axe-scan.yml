@@ -112,7 +112,7 @@ jobs:
           # Run-id in the name: the runner's docker daemon is shared between repos.
           name="axe-${GITHUB_RUN_ID:-local}"
           docker rm -f "${name}" >/dev/null 2>&1 || true
-          docker run -d --name "${name}" -w /repo "${IMAGE}" sleep 1800
+          docker run -d --name "${name}" -w /repo "${IMAGE}" sleep infinity
           docker cp dist "${name}:/repo/dist"
           docker cp lighthouserc.json "${name}:/repo/lighthouserc.json"
           docker cp scripts "${name}:/repo/scripts"
