@@ -24,7 +24,7 @@ jobs:
     name: 'Static Analysis (PHPStan, PHPMD, PHPCS, Rector)'
     runs-on: docker
     container:
-      image: composer:2.8.5
+      image: composer:2.10.3@sha256:b6dcd72ca98fa19d0e5b8476de179859704891fad06dd9e0b96833d4c430a5fc
       env:
         COMPOSER_AUTH: >
           {
@@ -86,7 +86,7 @@ jobs:
     name: 'Composer Normalize'
     runs-on: docker
     container:
-      image: composer:2.8.5
+      image: composer:2.10.3@sha256:b6dcd72ca98fa19d0e5b8476de179859704891fad06dd9e0b96833d4c430a5fc
     steps:
       - name: 'Checkout (plain git — JS actions cannot run in this container)'
         env:

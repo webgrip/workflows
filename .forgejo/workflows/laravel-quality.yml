@@ -74,7 +74,7 @@ jobs:
     runs-on: docker
     container: ${{ inputs.runner-image }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Download artifact
         if: inputs.artifact-name != ''
@@ -85,7 +85,7 @@ jobs:
 
       - name: Cache composer
         # v4.1.2 deliberately: the pool execs node20 for JS actions; cache v5/v6 declare node24.
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/composer
           key: composer-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory)) }}
@@ -107,7 +107,7 @@ jobs:
         # PHPStan's default tmpDir lives under the system temp dir (/tmp/phpstan); persisting
         # it across runs keeps the result cache warm so analysis becomes incremental.
         # v4.1.2 deliberately: the pool execs node20 for JS actions; cache v5/v6 declare node24.
-        uses: actions/cache@v4.1.2
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: /tmp/phpstan
           key: phpstan-${{ hashFiles(format('{0}/composer.lock', inputs.working-directory)) }}-${{ github.sha }}

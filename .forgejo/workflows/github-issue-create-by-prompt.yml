@@ -54,7 +54,7 @@ jobs:
       # Checkout below authenticates with secrets.FORGEJO_TOKEN.
 
       - name: Checkout prompt repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: ${{ inputs.prompt-repository }}
           path: __prompt-repo
@@ -63,9 +63,9 @@ jobs:
           token: ${{ secrets.FORGEJO_TOKEN }}
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '24'
+          node-version: '24.22.1'
 
       # Forgejo: replaced actions/ai-inference@v1 (GitHub Models at models.github.ai) with a
       # direct OpenAI Chat Completions call. The prompt-file content is sent as the system/user

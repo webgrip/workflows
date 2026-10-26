@@ -15,7 +15,7 @@ runs:
   using: "composite"
   steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       with:
         fetch-depth: 0         # semantic-release needs the full history
 
@@ -26,9 +26,9 @@ runs:
         if [[ -f package.json ]];   then echo "is_node=true" >>"$GITHUB_OUTPUT"; fi
 
     - name: Set up Node.js
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
       with:
-        node-version: 22
+        node-version: 22.23.4
         # Only enable the npm cache when we actually have a lock-file
         cache: ${{ steps.detect.outputs.is_node == 'true' && 'npm' || '' }}
 
@@ -56,7 +56,7 @@ runs:
 
     - name: Set up Rust
       if: steps.detect.outputs.is_rust == 'true'
-      uses: actions-rs/toolchain@v1
+      uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af # v1.0.7
       with:
         toolchain: stable
         profile: minimal
@@ -64,7 +64,7 @@ runs:
 
     - name: Install cargo-release & git-cliff
       if: steps.detect.outputs.is_rust == 'true'
-      uses: cargo-bins/cargo-binstall@v1.12.7
+      uses: cargo-bins/cargo-binstall@8a2045612414e945291083f820cd50b4d8fc2218 # v1.26.0
       with:
         binary: "cargo-release git-cliff"
 
