@@ -17,7 +17,7 @@ on:
 jobs:
   release-publish:
     name: 'Publish'
-    uses: webgrip/workflows/.github/workflows/semantic-release.yml@main
+    uses: webgrip/workflows/.github/workflows/semantic-release.yml@v3.1.0
     with:
       use-bot-to-commit: true
     secrets:

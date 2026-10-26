@@ -77,7 +77,7 @@ jobs:
 #          ls -la
 #          ls -la vendor || true
 #
-#      - uses: webgrip/workflows/.forgejo/php/8.2/actions/composer-install@main
+#      - uses: webgrip/workflows/.forgejo/php/8.2/actions/composer-install@v3.1.0
 #        with:
 #          composer_auth: >
 #            {
