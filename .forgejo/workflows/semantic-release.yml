@@ -11,7 +11,7 @@ on:
         required: false
         type: string
       use-bot-to-commit:
-        description: 'Whether to use the Forgejo CI bot to commit changes'
+        description: 'Ignored: config 2.x releases are tags only and commit nothing. Kept so existing callers do not break.'
         required: false
         default: false
         type: boolean
@@ -118,7 +118,7 @@ jobs:
     container:
       image: ${{ inputs.toolchain-image }}
     permissions:
-      contents: write # For pushing commits/tags
+      contents: write # For pushing the release tag; config 2.x commits nothing
       pull-requests: write # If referencing or updating PRs
       issues: write # Needed to comment on issues/PRs
       statuses: write # (Optional) If you need to set commit statuses

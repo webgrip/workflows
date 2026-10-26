@@ -19,11 +19,11 @@ inputs:
     required: false
     default: "https://forgejo.webgrip.dev"
   git-user-name:
-    description: "Account name matching the token, used for push auth against the public host and for release commit-backs"
+    description: "Account name matching the token, used for push auth against the public host"
     required: false
     default: "webgrip-ci"
   git-user-email:
-    description: "Git email for release commit-backs (@semantic-release/git)"
+    description: "Git email for the commit taggedFiles writes on no branch (config 2.x commits nothing else)"
     required: false
     default: "ci@webgrip.nl"
   dry-run:

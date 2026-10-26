@@ -120,7 +120,7 @@ jobs:
     container:
       image: ${{ inputs.toolchain-image }}
     permissions:
-      contents: write # push release commit + tag
+      contents: write # push the release tag; config 2.x commits nothing
     outputs:
       version: ${{ steps.normalize.outputs.version }}
       tag: ${{ steps.release.outputs.tag }}
