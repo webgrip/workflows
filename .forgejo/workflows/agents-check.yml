@@ -26,6 +26,9 @@ jobs:
       MISE_IGNORED_CONFIG_PATHS: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - uses: https://github.com/jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
@@ -42,14 +45,35 @@ jobs:
           # Forgejo's parser wants a literal boolean for step-level continue-on-error, so a
           # non-blocking failure is turned into a warning here instead.
           BLOCKING: ${{ inputs.blocking }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -uo pipefail
-          tag=$(awk '/agent-standards(\.git)?$/ {found = 1; next} found && /ref:/ {print $2; exit}' apm.yml)
+          manifest=apm.yml
+          base=()
+          if [ -n "$BASE_REF" ]; then
+            if ! git rev-parse --verify --quiet "refs/remotes/origin/${BASE_REF}" >/dev/null; then
+              echo "the base branch is not in the checkout" >&2
+              exit 1
+            fi
+            if git show "refs/remotes/origin/${BASE_REF}:apm.yml" > "$RUNNER_TEMP/base-apm.yml" 2>/dev/null; then
+              manifest="$RUNNER_TEMP/base-apm.yml"
+            fi
+            base=(--base "refs/remotes/origin/${BASE_REF}")
+          fi
+          tag=$(awk '/agent-standards(\.git)?$/ {found = 1; next} found && /ref:/ {print $2; exit}' "$manifest")
           if [ -z "$tag" ]; then
-            echo "apm.yml pins no agent-standards package; adopt the standard first (agent-standards docs/adopting.md)." >&2
+            tag=$(awk '/agent-standards(\.git)?$/ {found = 1; next} found && /ref:/ {print $2; exit}' apm.yml)
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "apm.yml pins no agent-standards release; adopt the standard first (agent-standards docs/adopting.md)." >&2
             exit 1
           fi
-          if timeout 600 mise exec uv@0.12.24 -- uvx --from "git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@${tag}#subdirectory=cli" agentstd check; then
+          agentstd=(timeout 600 mise exec uv@0.12.24 -- uvx --from "git+https://forgejo.webgrip.dev/webgrip/agent-standards.git@${tag}#subdirectory=cli" agentstd)
+          if [ ${#base[@]} -gt 0 ] && ! "${agentstd[@]}" check --help 2>/dev/null | grep -q -- '--base'; then
+            echo "::warning::agent-standards ${tag} predates check --base; this run trusts the pull request's own .agentstd.toml"
+            base=()
+          fi
+          if "${agentstd[@]}" check "${base[@]}"; then
             exit 0
           fi
           if [ "$BLOCKING" = "true" ]; then

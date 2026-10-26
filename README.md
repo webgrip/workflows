@@ -232,7 +232,7 @@ Runs Go static analysis with `gofmt`, `go vet`, `golangci-lint`, `govulncheck`, 
 Runs Go test suites and uploads coverage and test output artifacts.
 
 #### `agents-check.yml` (Forgejo-only)
-Runs `agentstd check` from [agent-standards](https://forgejo.webgrip.dev/webgrip/agent-standards) at the tag the repository pins in `apm.yml`: generated agent files match `.apm` and `apm.lock.yaml`, `CLAUDE.md` imports nothing, no credential sits in MCP configuration, and the session budget holds. Non-blocking by default; pass `blocking: true` two weeks after adopting the standard.
+Runs `agentstd check` from [agent-standards](https://forgejo.webgrip.dev/webgrip/agent-standards) at the tag the repository pins in `apm.yml`: generated agent files match `.apm` and `apm.lock.yaml`, `CLAUDE.md` imports nothing, no credential sits in MCP configuration, every hook or MCP command is accounted for, and the session budget holds. On a pull request the tag comes from the base branch's `apm.yml` and the check runs with `--base`, so the pull request cannot pick an older agentstd or loosen its own policy, excludes or allowed hooks. The checkout keeps no credentials, because install can run code from the repository. Non-blocking by default; pass `blocking: true` two weeks after adopting the standard.
 
 ```yaml
 agents-check:
@@ -240,7 +240,7 @@ agents-check:
 ```
 
 #### `coderabbit-review.yml` (Forgejo-only)
-CodeRabbit reviews no Forgejo pull request, so this runs its CLI on the pull request's diff and posts the findings as one Forgejo review through `agentstd review` ([agent-standards docs/coderabbit.md](https://forgejo.webgrip.dev/webgrip/agent-standards/src/branch/main/docs/coderabbit.md)). Every run counts against the API key's seat (5 reviews per hour on Essentials), so trigger it on `opened`, `ready_for_review` and a label rather than on every push. Non-blocking unless the caller passes `blocking: true`.
+CodeRabbit reviews no Forgejo pull request, so this runs its CLI on the pull request's diff and posts the findings as one Forgejo review through `agentstd review` ([agent-standards docs/coderabbit.md](https://forgejo.webgrip.dev/webgrip/agent-standards/src/branch/main/docs/coderabbit.md)). Every run counts against the API key's seat (5 reviews per hour on Essentials), so trigger it on `opened`, `ready_for_review` and a label rather than on every push. Non-blocking unless the caller passes `blocking: true`. The review settings come from the base branch, and no event value is expanded into the script.
 
 ```yaml
 on:
