@@ -26,7 +26,7 @@ on:
           (helm, php, docker CLI).
         required: false
         # renovate: datasource=docker depName=harbor.webgrip.dev/webgrip/semantic-release
-        default: 'harbor.webgrip.dev/webgrip/semantic-release:2.1.3@sha256:983bb0e59654c57927d56c5e3fbc165f8d589ebab7a0ccfaa9a1ea4177721c0a'
+        default: 'harbor.webgrip.dev/webgrip/semantic-release:2.2.0@sha256:9dd1f016b42d841b3bbc00128833c7ca407dcce11d929422a21c973821879ab5'
         type: string
       dry-run:
         description: 'Run semantic-release with --dry-run (no tags, releases, or commits)'
