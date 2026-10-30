@@ -4,9 +4,19 @@ on:
   workflow_call:
     inputs:
       go-version:
-        description: 'Go version to install'
+        description: 'Go version to install. Empty reads go-version-file.'
         required: false
-        default: '1.24'
+        default: ''
+        type: string
+      go-version-file:
+        description: 'File the Go version is read from when go-version is empty: go.mod (its toolchain line, else its go line) or .go-version'
+        required: false
+        default: 'go.mod'
+        type: string
+      golangci-lint-version:
+        description: 'golangci-lint release to run (v2 line); a repository with a v1 configuration migrates it with golangci-lint migrate'
+        required: false
+        default: 'v2.15.0'
         type: string
 
 jobs:
@@ -20,6 +30,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ inputs.go-version }}
+          go-version-file: ${{ inputs.go-version == '' && inputs.go-version-file || '' }}
           cache: true
 
       - name: Ensure Go module exists
@@ -72,9 +83,9 @@ jobs:
         run: go vet ./...
 
       - id: golangci-lint
-        uses: golangci/golangci-lint-action@55c2c1448f86e01eaae002a5a3a9624417608d84 # v6.5.2
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
-          version: latest
+          version: ${{ inputs.golangci-lint-version }}
 
       - name: Run vulnerability scan
         id: vulnerability-scan
@@ -105,7 +116,7 @@ jobs:
           metadata: |
             [
               {"label":"Runner","value":"arc-runner-set"},
-              {"label":"Go version","value":"${{ inputs.go-version }}"}
+              {"label":"Go version","value":"${{ inputs.go-version || inputs.go-version-file }}"}
             ]
           checks: |
             [
