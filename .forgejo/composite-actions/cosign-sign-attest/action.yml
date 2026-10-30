@@ -288,6 +288,7 @@ runs:
         esac
 
     - name: Upload SBOM to Dependency-Track (fail-soft)
+      id: dt
       shell: bash
       env:
         DT_API_KEY: ${{ env.DT_API_KEY }}
@@ -297,7 +298,8 @@ runs:
       run: |
         set -euo pipefail
         if [ -z "${DT_API_KEY:-}" ]; then
-          echo "DT_API_KEY not set; skipping Dependency-Track upload"; exit 0
+          echo "DT_API_KEY not set; skipping Dependency-Track upload"
+          echo "outcome=skipped, no API key" >> "$GITHUB_OUTPUT"; exit 0
         fi
         # Fail-soft: DT may be unreachable from the runner (NetworkPolicy); cluster-side
         # Trivy Operator + Harbor scanner still cover this image, so never fail the build.
@@ -307,10 +309,12 @@ runs:
           -F autoCreate=true \
           -F "projectName=${PROJECT}" \
           -F "projectVersion=${VERSION}" \
-          -F "bom=@sbom.cdx.json;type=application/json" || echo 000)"
-        case "$code" in
-          200|201) echo "uploaded SBOM to Dependency-Track (${PROJECT}:${VERSION})" ;;
-          *) echo "WARN:  Dependency-Track upload returned HTTP ${code} (non-fatal)" ;;
+          -F "bom=@sbom.cdx.json;type=application/json" || true)"
+        case "${code:-000}" in
+          200|201) echo "uploaded SBOM to Dependency-Track (${PROJECT}:${VERSION})"
+                   echo "outcome=uploaded" >> "$GITHUB_OUTPUT" ;;
+          *) echo "WARN:  Dependency-Track upload returned HTTP ${code} (non-fatal)"
+             echo "outcome=failed, HTTP ${code}" >> "$GITHUB_OUTPUT" ;;
         esac
 
     - name: Summary
@@ -319,11 +323,13 @@ runs:
       env:
         IMAGE: ${{ steps.digest.outputs.image-with-digest }}
         COMPONENTS: ${{ steps.sbom.outputs.components }}
+        DT_OUTCOME: ${{ steps.dt.outputs.outcome || 'not reached' }}
       run: |
         {
           echo "## 🔐 Supply chain (Harbor)"
           echo ""
           echo "- Signed (cosign via OpenBao Transit): \`${IMAGE}\`"
-          echo "- CycloneDX SBOM attested in Harbor + uploaded to Dependency-Track (${COMPONENTS:-?} components)"
+          echo "- CycloneDX SBOM attested in Harbor (${COMPONENTS:-?} components)"
+          echo "- Dependency-Track upload: ${DT_OUTCOME}"
           echo "- Harbor-native SBOM accessory generation requested for the pushed digest (populates Harbor's SBOM column; fail-soft)"
         } >> "$GITHUB_STEP_SUMMARY"
