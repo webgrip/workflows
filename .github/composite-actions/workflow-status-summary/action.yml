@@ -39,8 +39,6 @@ runs:
         INPUT_NOTES: ${{ inputs.notes }}
       with:
         script: |
-          const core = require('@actions/core');
-
           const parseJson = (value, fallback) => {
             try {
               return JSON.parse(value || '');

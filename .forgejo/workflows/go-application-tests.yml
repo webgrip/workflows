@@ -4,9 +4,14 @@ on:
   workflow_call:
     inputs:
       go-version:
-        description: 'Go version to install'
+        description: 'Go version to install. Empty reads go-version-file.'
         required: false
-        default: '1.24'
+        default: ''
+        type: string
+      go-version-file:
+        description: 'File the Go version is read from when go-version is empty: go.mod (its toolchain line, else its go line) or .go-version'
+        required: false
+        default: 'go.mod'
         type: string
 
 jobs:
@@ -20,6 +25,7 @@ jobs:
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version: ${{ inputs.go-version }}
+          go-version-file: ${{ inputs.go-version == '' && inputs.go-version-file || '' }}
           cache: true
 
       - name: Ensure Go module exists
@@ -70,7 +76,7 @@ jobs:
           metadata: |
             [
               {"label":"Runner","value":"arc-runner-set"},
-              {"label":"Go version","value":"${{ inputs.go-version }}"}
+              {"label":"Go version","value":"${{ inputs.go-version || inputs.go-version-file }}"}
             ]
           checks: |
             [
