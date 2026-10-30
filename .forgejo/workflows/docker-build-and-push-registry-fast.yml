@@ -80,7 +80,7 @@ jobs:
     # that can reach LAN-only registries such as Harbor.
     runs-on: docker
     steps:
-      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-registry-fast@main
+      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-registry-fast@v3.3.2
         with:
           registry: ${{ inputs.registry }}
           docker-context: ${{ inputs.docker-context }}

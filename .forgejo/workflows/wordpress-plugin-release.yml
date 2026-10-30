@@ -114,7 +114,7 @@ jobs:
   release:
     name: 'Release'
     # Forgejo: rewritten self-reference from .github/ to .forgejo/ (ADR 0002 self-contained mirror).
-    uses: webgrip/workflows/.forgejo/workflows/semantic-release.yml@main
+    uses: webgrip/workflows/.forgejo/workflows/semantic-release.yml@v3.3.2
     with:
       release-type: ${{ inputs.release-type }}
       use-bot-to-commit: ${{ inputs.use-bot-to-commit }}

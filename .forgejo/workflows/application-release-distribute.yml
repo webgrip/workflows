@@ -28,7 +28,7 @@ on:
 jobs:
   release-distribute:
     name: 'Distribute'
-    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push.yml@main
+    uses: webgrip/workflows/.forgejo/workflows/docker-build-and-push.yml@v3.3.2
     secrets:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
       DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
