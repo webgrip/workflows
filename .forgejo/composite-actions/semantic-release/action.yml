@@ -50,6 +50,29 @@ inputs:
       those fatal. "false" skips the step.
     required: false
     default: "auto"
+  layout:
+    description: >-
+      How the repository versions (homelab ADR-0088). "single" runs semantic-release once at the
+      repository root. "trains" runs it once per directory that matches trains, all in this job,
+      with RELEASE_TRAIN (the directory's name) and RELEASE_TRAIN_PATH (its path) in the
+      environment, so one root .releaserc.cjs serves every train:
+      makeConfig({ monorepo: { name: process.env.RELEASE_TRAIN, path: process.env.RELEASE_TRAIN_PATH } }).
+      A train with no commit under its path since its last tag is skipped without running
+      semantic-release. "upstream" takes the version from version-command, and when the tag
+      v<version> does not exist yet, tags HEAD and publishes a forge release listing the commits
+      since the previous tag.
+    required: false
+    default: "single"
+  trains:
+    description: "Space-separated globs of the train directories for layout trains, e.g. 'skills/*' or 'packages/* apps/site'"
+    required: false
+    default: ""
+  version-command:
+    description: >-
+      Shell command that prints the bare version for layout upstream, run at the repository root,
+      e.g. '. ./build.env && echo "$KATA_VERSION-webgrip.$EXTENSION_REVISION"'
+    required: false
+    default: ""
 
 outputs:
   version:
@@ -58,6 +81,11 @@ outputs:
   tag:
     description: "Full git tag of the release, e.g. v1.0.14 (empty if none; needed as the checkout ref for tag-pinned follow-up jobs like helm-chart-push)"
     value: ${{ steps.semantic-release.outputs.tag }}
+  released:
+    description: >-
+      JSON array of the releases this run cut, one {"train", "version", "tag"} per release; train is
+      empty for layouts single and upstream. "[]" when nothing was released.
+    value: ${{ steps.semantic-release.outputs.released }}
 
 runs:
   using: "composite"
@@ -120,7 +148,7 @@ runs:
     # Start every repo from 0.0.0 (semantic-release otherwise hardcodes the first release to 1.0.0).
     # Idempotent: skipped once any v* tag exists. Needs the fetch-depth: 0 checkout above.
     - name: Seed baseline version tag (0.0.0)
-      if: inputs.dry-run != 'true'
+      if: inputs.dry-run != 'true' && inputs.layout == 'single'
       shell: bash
       run: |
         set -euo pipefail
@@ -153,6 +181,9 @@ runs:
         GIT_AUTHOR_EMAIL: ${{ inputs.git-user-email }}
         GIT_COMMITTER_NAME: ${{ inputs.git-user-name }}
         GIT_COMMITTER_EMAIL: ${{ inputs.git-user-email }}
+        RELEASE_LAYOUT: ${{ inputs.layout }}
+        RELEASE_TRAIN_GLOBS: ${{ inputs.trains }}
+        RELEASE_VERSION_COMMAND: ${{ inputs.version-command }}
       run: |
         set -euo pipefail
         forge_url="${{ inputs.forge-url }}"
@@ -208,39 +239,129 @@ runs:
         # remote one" — EXIT 0, nothing published. Aligning first narrows that window but cannot
         # close it: ploeg run 159 lost a release to a push that landed 19s after the align step and
         # 29s before this check, and the job went green. So detect the drop and re-run on the new
-        # tip. Same guard the monorepo composite carries, where sibling package jobs race by
-        # design; here the racer is an ordinary second push — rarer, and just as silent.
-        #
-        # Both symptoms lose before the tag exists, so reset-and-rerun is safe. The log grep is
+        # tip. Both symptoms lose before the tag exists, so reset-and-rerun is safe. The log grep is
         # what catches the behind-remote case, since rc alone cannot distinguish it from success.
         dry_run="${{ inputs.dry-run }}"
-        # Only a branch push can be reset onto a moved tip — on a tag or PR ref, origin/$REF_NAME is
-        # not a branch. Such a run cannot hit this race either, since nothing pushes to that ref.
         on_branch=false
         [[ "${GITHUB_REF:-}" == refs/heads/* ]] && on_branch=true
 
-        for attempt in 1 2 3; do
-          set +e
-          "$sr" "${args[@]}" 2>&1 | tee /tmp/semrel.log
-          rc=${PIPESTATUS[0]}
-          set -e
-          # A dry run publishes nothing, so a dropped release is not a dropped release: report the
-          # analysis and leave the validation gate green rather than failing it on a race.
-          if [ "$rc" -eq 0 ] && { [ "$dry_run" == "true" ] || ! grep -q 'is behind the remote one' /tmp/semrel.log; }; then
-            break
-          fi
-          if [ "$attempt" -lt 3 ] && [ "$on_branch" == true ] && [ "$dry_run" != "true" ] \
-             && grep -Eq 'fetch first|non-fast-forward|is behind the remote one' /tmp/semrel.log; then
-            echo "::warning::a concurrent push moved ${GITHUB_REF_NAME} mid-run (attempt ${attempt}); resetting onto the updated branch and retrying"
-            git -C "$GITHUB_WORKSPACE" fetch --tags origin "$GITHUB_REF_NAME"
-            git -C "$GITHUB_WORKSPACE" reset --hard "origin/$GITHUB_REF_NAME"
-            continue
-          fi
-          # Retries exhausted, or a non-retryable error. rc can still be 0 here (behind-remote on
-          # the final attempt) — that is a DROPPED release, not a success. Fail loudly.
-          [ "$rc" -eq 0 ] && rc=1
-          exit "$rc"
-        done
+        release_once() {
+          local output_file="$1" attempt rc
+          for attempt in 1 2 3; do
+            set +e
+            GITHUB_OUTPUT="$output_file" "$sr" "${args[@]}" 2>&1 | tee /tmp/semrel.log
+            rc=${PIPESTATUS[0]}
+            set -e
+            if [ "$rc" -eq 0 ] && { [ "$dry_run" == "true" ] || ! grep -q 'is behind the remote one' /tmp/semrel.log; }; then
+              return 0
+            fi
+            if [ "$attempt" -lt 3 ] && [ "$on_branch" == true ] && [ "$dry_run" != "true" ] \
+               && grep -Eq 'fetch first|non-fast-forward|is behind the remote one' /tmp/semrel.log; then
+              echo "::warning::a concurrent push moved ${GITHUB_REF_NAME} mid-run (attempt ${attempt}); resetting onto the updated branch and retrying"
+              git -C "$GITHUB_WORKSPACE" fetch --tags origin "$GITHUB_REF_NAME"
+              git -C "$GITHUB_WORKSPACE" reset --hard "origin/$GITHUB_REF_NAME"
+              continue
+            fi
+            [ "$rc" -eq 0 ] && rc=1
+            return "$rc"
+          done
+        }
+
+        released_lines="$(mktemp)"
+        record_release() {
+          local train="$1" output_file="$2" version tag
+          version="$(sed -n 's/^version=//p' "$output_file" | tail -1)"
+          tag="$(sed -n 's/^tag=//p' "$output_file" | tail -1)"
+          [[ -n "$version" ]] || return 0
+          printf '%s\t%s\t%s\n' "$train" "$version" "$tag" >> "$released_lines"
+        }
+
+        layout="${RELEASE_LAYOUT:-single}"
+        case "$layout" in
+          single)
+            run_output="$(mktemp)"
+            release_once "$run_output"
+            cat "$run_output" >> "$GITHUB_OUTPUT"
+            record_release "" "$run_output"
+            ;;
+          trains)
+            train_globs="${RELEASE_TRAIN_GLOBS}"
+            [[ -n "$train_globs" ]] || { echo "::error::layout trains needs the trains input, e.g. 'skills/*'"; exit 1; }
+            train_dirs=()
+            for pattern in $train_globs; do
+              for dir in $pattern; do
+                [[ -d "$dir" ]] && train_dirs+=("${dir%/}")
+              done
+            done
+            [[ ${#train_dirs[@]} -gt 0 ]] || { echo "::error::no directory matches trains '${train_globs}'"; exit 1; }
+            for dir in "${train_dirs[@]}"; do
+              name="$(basename "$dir")"
+              last_tag="$(git tag -l "${name}-v[0-9]*" --sort=-v:refname | head -1)"
+              if [[ -n "$last_tag" ]] && [[ "$(git rev-list --count "${last_tag}..HEAD" -- "$dir")" == "0" ]]; then
+                echo "${name}: no commit under ${dir} since ${last_tag}; skipped"
+                continue
+              fi
+              if [[ -z "$last_tag" ]] && [[ "$dry_run" != "true" ]]; then
+                root="$(git rev-list --max-parents=0 HEAD | tail -1)"
+                echo "${name}: no tag yet; seeding ${name}-v0.0.0 at root commit ${root}"
+                git tag "${name}-v0.0.0" "${root}"
+                git push origin "${name}-v0.0.0"
+              fi
+              echo "::group::train ${name} (${dir})"
+              run_output="$(mktemp)"
+              export RELEASE_TRAIN="$name" RELEASE_TRAIN_PATH="$dir"
+              release_once "$run_output"
+              record_release "$name" "$run_output"
+              echo "::endgroup::"
+            done
+            ;;
+          upstream)
+            version_command="${RELEASE_VERSION_COMMAND}"
+            [[ -n "$version_command" ]] || { echo "::error::layout upstream needs the version-command input"; exit 1; }
+            version="$(bash -euo pipefail -c "$version_command")"
+            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || { echo "::error::version-command printed '${version}', not a version"; exit 1; }
+            tag="v${version}"
+            api="${GITEA_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
+            release_status="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: token ${GITEA_TOKEN}" "${api}/releases/tags/${tag}")"
+            if [[ "$release_status" == "200" ]]; then
+              echo "${tag} is released already; nothing to do. Change the version source to release again."
+            elif [[ "$release_status" != "404" ]]; then
+              echo "::error::reading the release of ${tag} answered HTTP ${release_status}"
+              exit 1
+            elif [[ "$dry_run" == "true" ]]; then
+              echo "Dry run: would release ${tag} at $(git rev-parse HEAD)."
+            else
+              target="$(git rev-parse HEAD)"
+              if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
+                target="$(git rev-parse "${tag}^{commit}")"
+                echo "${tag} exists without a release; publishing the release on ${target}."
+              fi
+              previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude "${tag}" "${target}" 2>/dev/null || true)"
+              range="${target}"
+              [[ -n "$previous" ]] && range="${previous}..${target}"
+              notes="$(git log --no-merges --format='* %s (%h)' "$range")"
+              node -e '
+                const [tag, target, notes] = process.argv.slice(1);
+                process.stdout.write(JSON.stringify({ tag_name: tag, target_commitish: target, name: tag, body: notes || "No commits since the previous tag.", prerelease: false }));
+              ' "$tag" "$target" "$notes" > /tmp/upstream-release.json
+              curl -fsS -X POST -H "Authorization: token ${GITEA_TOKEN}" -H 'Content-Type: application/json' \
+                -d @/tmp/upstream-release.json "${api}/releases" >/dev/null
+              { echo "version=${version}"; echo "tag=${tag}"; } >> "$GITHUB_OUTPUT"
+              printf '\t%s\t%s\n' "$version" "$tag" >> "$released_lines"
+              echo "Released ${tag} on ${target} from the upstream version."
+            fi
+            ;;
+          *)
+            echo "::error::layout must be single, trains or upstream, not '${layout}'"
+            exit 1
+            ;;
+        esac
+
+        node -e '
+          const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean);
+          const released = lines.map((line) => { const [train, version, tag] = line.split("\t"); return { train, version, tag }; });
+          process.stdout.write(`released=${JSON.stringify(released)}\n`);
+        ' "$released_lines" >> "$GITHUB_OUTPUT"
 
     - name: Release summary
       if: always()
@@ -248,6 +369,8 @@ runs:
       env:
         VERSION: ${{ steps.semantic-release.outputs.version }}
         TAG: ${{ steps.semantic-release.outputs.tag }}
+        RELEASED: ${{ steps.semantic-release.outputs.released }}
+        LAYOUT: ${{ inputs.layout }}
         OUTCOME: ${{ steps.semantic-release.outcome }}
         DRY_RUN: ${{ inputs.dry-run }}
         FORGE_URL: ${{ inputs.forge-url }}
@@ -269,6 +392,12 @@ runs:
               echo "were already pushed, so re-running this job will not publish them. If the release page"
               echo "is missing, create it on the existing tag: [new release](${FORGE_URL}/${GITHUB_REPOSITORY}/releases/new?tag=${pushed})."
             fi
+          elif [[ "$LAYOUT" == "trains" ]] && [[ -n "$RELEASED" ]] && [[ "$RELEASED" != "[]" ]]; then
+            node -e '
+              for (const r of JSON.parse(process.env.RELEASED)) {
+                console.log(`- **${r.train}**: [\`${r.tag}\`](${process.env.FORGE_URL}/${process.env.GITHUB_REPOSITORY}/releases/tag/${r.tag})`);
+              }
+            '
           elif [[ -n "$VERSION" ]]; then
             echo "- **version**: \`${VERSION}\`"
             [[ -n "$TAG" ]] && echo "- **tag**: [\`${TAG}\`](${FORGE_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG})"
