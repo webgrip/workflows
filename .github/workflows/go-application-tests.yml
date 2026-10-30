@@ -69,7 +69,7 @@ jobs:
 
       - name: Render summary
         if: ${{ always() }}
-        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@main
+        uses: webgrip/workflows/.github/composite-actions/workflow-status-summary@v3.3.1
         with:
           title: 'Go Tests'
           subtitle: 'Test execution for Go modules'
