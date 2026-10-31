@@ -35,7 +35,7 @@ jobs:
     name: "Docker Build and Push"
     runs-on: docker
     steps:
-      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push@main
+      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push@v3.4.0
         with:
           docker-context: ${{ inputs.docker-context }}
           docker-file: ${{ inputs.docker-file }}

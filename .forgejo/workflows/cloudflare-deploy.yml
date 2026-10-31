@@ -292,7 +292,7 @@ jobs:
         run: pnpm exec wrangler deploy ${WRANGLER_ENV:+--env "${WRANGLER_ENV}"}
 
       - name: Verify the live edge
-        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/edge-verify@main
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/edge-verify@v3.4.0
         with:
           origin: ${{ inputs.apex-url }}
           probe-path: ${{ inputs.edge-probe-path }}
@@ -362,7 +362,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify staging
-        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/edge-verify@main
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/edge-verify@v3.4.0
         with:
           origin: ${{ steps.upload.outputs.staging-url }}
           probe-path: ${{ inputs.edge-probe-path }}
@@ -413,7 +413,7 @@ jobs:
           echo "Promoted ${VERSION_TAG} to production" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify the live edge
-        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/edge-verify@main
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/edge-verify@v3.4.0
         with:
           origin: ${{ inputs.apex-url }}
           probe-path: ${{ inputs.edge-probe-path }}

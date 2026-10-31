@@ -143,7 +143,7 @@ jobs:
           git checkout -B "$branch" "origin/$branch"
 
       - id: release
-        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/semantic-release-monorepo@main
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/semantic-release-monorepo@v3.4.0
         with:
           package-path: ${{ inputs.package-path }}
           package-name: ${{ inputs.package-name }}

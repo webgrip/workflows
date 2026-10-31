@@ -131,7 +131,7 @@ jobs:
     steps:
       - name: Build and push
         if: inputs.mirror-from-registry == ''
-        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-registry-fast@main
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/docker-build-push-registry-fast@v3.4.0
         with:
           registry: ${{ inputs.registry }}
           docker-context: ${{ inputs.docker-context }}
