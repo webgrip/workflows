@@ -2,7 +2,10 @@ name: '[Call] Cloudflare Static Deploy'
 
 # Deploys an assets-only Cloudflare Worker (a static site's dist/) with wrangler from
 # the consumer's own checkout: preview uploads on feature refs, production deploy plus
-# live-edge verification on the release ref. Extracted from twente.dev and webgrip.nl,
+# live-edge verification on the release ref. Artifact promotion (homelab ADR-0088) adds two
+# more: 'staging' uploads a release as a Workers version tagged with its git tag and serves it
+# on a preview alias, and 'promote' deploys that same version to production, so production runs
+# the bytes staging ran. Extracted from twente.dev and webgrip.nl,
 # whose deploy jobs were hand-synced copies of each other (twente.dev ADR-0003 named
 # this extraction as its Phase 2).
 #
@@ -28,8 +31,11 @@ on:
     inputs:
       environment:
         description: >-
-          Which deploy this call performs: 'preview' (wrangler versions upload) or
-          'production' (wrangler deploy + edge verification). Pass a LITERAL string:
+          Which deploy this call performs: 'preview' (wrangler versions upload),
+          'staging' (upload the release named by version-tag as a tagged version on the
+          staging-alias preview alias, then verify it), 'promote' (deploy the version tagged
+          version-tag to production, then verify the apex) or 'production' (build and
+          wrangler deploy + edge verification, the pre-promotion path). Pass a LITERAL string:
           Forgejo v15 evaluates a caller's with-expressions at flatten time with an
           EMPTY github context, so ref-dependent expressions come out wrong there.
           Ref routing happens inside this workflow instead (production-refs).
@@ -67,6 +73,19 @@ on:
         type: string
         required: false
         default: ''
+      version-tag:
+        description: >-
+          The release's git tag (e.g. v1.4.0). 'staging' checks it out, builds it and tags the
+          uploaded Workers version with it; 'promote' deploys the version carrying it. Required for
+          both.
+        type: string
+        required: false
+        default: ''
+      staging-alias:
+        description: "Preview alias a 'staging' upload is served on: https://<alias>-<worker>.<subdomain>.workers.dev"
+        type: string
+        required: false
+        default: 'staging'
       wrangler-env:
         description: "wrangler environment ([env.<name>] in wrangler.toml) passed as --env to the production job's deploy; empty deploys the top-level worker"
         type: string
@@ -272,79 +291,134 @@ jobs:
           WRANGLER_ENV: ${{ inputs.wrangler-env }}
         run: pnpm exec wrangler deploy ${WRANGLER_ENV:+--env "${WRANGLER_ENV}"}
 
-      - name: Smoke test the live edge
+      - name: Verify the live edge
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/edge-verify@main
+        with:
+          origin: ${{ inputs.apex-url }}
+          probe-path: ${{ inputs.edge-probe-path }}
+          probe-expect: ${{ inputs.edge-probe-expect }}
+          smoke-paths: ${{ inputs.smoke-paths }}
+          not-found-path: ${{ inputs.not-found-path }}
+          check-redirects: ${{ inputs.check-redirects }}
+          working-directory: ${{ inputs.working-directory }}
+
+  cfstaging:
+    name: 'Stage the release'
+    if: inputs.enabled && inputs.environment == 'staging'
+    runs-on: docker
+    environment: staging
+    permissions:
+      contents: read
+    outputs:
+      version-id: ${{ steps.upload.outputs.version-id }}
+      staging-url: ${{ steps.upload.outputs.staging-url }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ inputs.version-tag }}
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Enable pnpm
+        shell: bash
+        run: corepack enable
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: ${{ inputs.build-command }}
+
+      - name: Upload the release as a tagged version
+        id: upload
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         env:
-          APEX: ${{ inputs.apex-url }}
-          PROBE: ${{ inputs.edge-probe-path }}
-          PROBE_EXPECT: ${{ inputs.edge-probe-expect }}
-          SMOKE_PATHS: ${{ inputs.smoke-paths }}
-          NOT_FOUND_PATH: ${{ inputs.not-found-path }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_ENV: ${{ inputs.wrangler-env }}
+          VERSION_TAG: ${{ inputs.version-tag }}
+          STAGING_ALIAS: ${{ inputs.staging-alias }}
         run: |
           set -euo pipefail
+          [ -n "${VERSION_TAG}" ] || { echo "::error::version-tag is required to stage a release"; exit 1; }
+          pnpm exec wrangler versions upload ${WRANGLER_ENV:+--env "${WRANGLER_ENV}"} \
+            --tag "${VERSION_TAG}" --message "release ${VERSION_TAG}" \
+            --preview-alias "${STAGING_ALIAS}" | tee upload.log
+          version_id="$(grep -oiE 'version id: *[0-9a-f-]{36}' upload.log | grep -oE '[0-9a-f-]{36}' | head -1 || true)"
+          url="$(grep -oE "https://${STAGING_ALIAS}-[a-z0-9-]+\.[a-z0-9-]+\.workers\.dev" upload.log | head -1 || true)"
+          [ -n "${url}" ] || { echo "::error::wrangler printed no ${STAGING_ALIAS} alias URL. Preview URLs must be enabled for this Worker."; exit 1; }
+          echo "version-id=${version_id}" >> "$GITHUB_OUTPUT"
+          echo "staging-url=${url}" >> "$GITHUB_OUTPUT"
+          {
+            echo "Staged ${VERSION_TAG} as Workers version ${version_id:-unknown}"
+            echo "Staging: ${url}"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          # Wait for the edge before asserting anything: a route can take up to a
-          # minute to propagate after `wrangler deploy` reports success (twente.dev
-          # run 8 deployed fine and then failed here seconds later on a 522).
-          # Asserting immediately turns a healthy deploy into a red pipeline, which
-          # is how a smoke test stops being believed.
-          for attempt in $(seq 1 12); do
-            code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${PROBE}" || echo 000)"
-            [ "${code}" = "${PROBE_EXPECT}" ] && { echo "edge ready after ${attempt} attempt(s)"; break; }
-            echo "waiting for edge (${PROBE} -> ${code}, expected ${PROBE_EXPECT}, attempt ${attempt}/12)"
-            [ "${attempt}" = "12" ] && { echo "FAIL: edge never became ready"; exit 1; }
-            sleep 10
-          done
+      - name: Verify staging
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/edge-verify@main
+        with:
+          origin: ${{ steps.upload.outputs.staging-url }}
+          probe-path: ${{ inputs.edge-probe-path }}
+          probe-expect: ${{ inputs.edge-probe-expect }}
+          smoke-paths: ${{ inputs.smoke-paths }}
+          not-found-path: ${{ inputs.not-found-path }}
+          check-redirects: ${{ inputs.check-redirects }}
+          working-directory: ${{ inputs.working-directory }}
 
-          answers() {
-            local path="$1" want="$2" code attempt
-            for attempt in $(seq 1 6); do
-              code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${path}" || echo 000)"
-              [ "${code}" = "${want}" ] && break
-              [ "${attempt}" = "6" ] || sleep 10
-            done
-            echo "${path} -> ${code} (expected ${want}, attempt ${attempt}/6)"
-            [ "${code}" = "${want}" ]
-          }
+  cfpromote:
+    name: 'Promote to production'
+    if: inputs.enabled && inputs.environment == 'promote'
+    runs-on: docker
+    environment: production
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ inputs.version-tag }}
 
-          while IFS= read -r path; do
-            [ -n "${path}" ] || continue
-            answers "${path}" 200 || { echo "FAIL ${path} (expected 200)"; exit 1; }
-          done <<< "${SMOKE_PATHS}"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
 
-          if [ -n "${NOT_FOUND_PATH}" ]; then
-            answers "${NOT_FOUND_PATH}" 404 || { echo "FAIL: soft-404 — the error page is not served with 404"; exit 1; }
-          fi
+      - name: Enable pnpm
+        shell: bash
+        run: corepack enable
 
-      - name: Check every redirect rule against the live edge
-        if: inputs.check-redirects
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: pnpm install --frozen-lockfile
+
+      - name: Deploy the staged version
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         env:
-          APEX: ${{ inputs.apex-url }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WRANGLER_ENV: ${{ inputs.wrangler-env }}
+          VERSION_TAG: ${{ inputs.version-tag }}
         run: |
           set -euo pipefail
-          # Generated from the consumer's own public/_redirects, so a new redirect
-          # cannot ship without its check: "a new redirect without its smoke check is
-          # an unguarded promise" — and hand-mirrored lists proved they rot (three
-          # unchecked rules found in the 2026-09-03 audit).
-          if [ ! -f public/_redirects ]; then
-            echo "no public/_redirects — nothing to check"
-            exit 0
-          fi
-          answers() {
-            local path="$1" want="$2" code attempt
-            for attempt in $(seq 1 6); do
-              code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "${APEX}${path}" || echo 000)"
-              [ "${code}" = "${want}" ] && break
-              [ "${attempt}" = "6" ] || sleep 10
-            done
-            echo "${path} -> ${code} (expected ${want}, attempt ${attempt}/6)"
-            [ "${code}" = "${want}" ]
-          }
-          while read -r src target status _rest; do
-            case "${src}" in ''|'#'*) continue ;; esac
-            [ -n "${status}" ] || continue
-            answers "${src}" "${status}" || { echo "FAIL ${src}"; exit 1; }
-          done < public/_redirects
+          [ -n "${VERSION_TAG}" ] || { echo "::error::version-tag is required to promote a release"; exit 1; }
+          pnpm exec wrangler versions deploy ${WRANGLER_ENV:+--env "${WRANGLER_ENV}"} \
+            --version-tag "${VERSION_TAG}@100%" --message "promote ${VERSION_TAG}" --yes
+          echo "Promoted ${VERSION_TAG} to production" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify the live edge
+        uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/edge-verify@main
+        with:
+          origin: ${{ inputs.apex-url }}
+          probe-path: ${{ inputs.edge-probe-path }}
+          probe-expect: ${{ inputs.edge-probe-expect }}
+          smoke-paths: ${{ inputs.smoke-paths }}
+          not-found-path: ${{ inputs.not-found-path }}
+          check-redirects: ${{ inputs.check-redirects }}
+          working-directory: ${{ inputs.working-directory }}
