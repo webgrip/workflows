@@ -847,17 +847,37 @@ with `Authorization: Bearer <token>`; the operator marks each project scheduled 
 its queue runs them one at a time.
 
 The operator's webhook takes one project per request and has no "every project" form. With
-`projects` empty the action lists the caller's organisation through the Forgejo API and schedules
-every repository that carries `topic` (default `renovate`, the job's `discoverTopics`) and is
-neither archived nor a mirror, skipping the calling repository. A project the job does not own
-answers 404 and is skipped. Every project costs one executor pod (about 1 GB of disk writes), so
-pass `projects` when the consumers are known and few.
+`projects` empty the action schedules only the repositories that consume the released package.
+It lists the caller's organisation once through the Forgejo API, keeps the repositories that
+carry `topic` (default `renovate`, the job's `discoverTopics`) and are neither archived nor a
+mirror, and reads a few files of each through the raw and contents endpoints until one
+references the package. The package is the calling repository's name unless `package` names it:
 
-It never fails the job. An unreachable operator, a rejected token (401) or a failed listing ends
-as a `::warning::`, and Renovate picks the release up at its next scheduled run. It needs `node`
+| Package | Files read | A consumer references |
+| --- | --- | --- |
+| `workflows` | `.forgejo/workflows/*.y(a)ml`, `.github/workflows/*.y(a)ml` | `webgrip/workflows/.forgejo/(workflows\|composite-actions)/…@` (or `.github/`) |
+| `semantic-release-config` | `package.json`, then the workflow files and `mise.toml` | `"@webgrip/semantic-release-config":`, or the image `harbor.webgrip.dev/webgrip/semantic-release:` |
+| `renovate-config` | `renovate.json(5)`, `.renovaterc(.json/.json5)`, `.forgejo/renovate.json`, `.github/renovate.json` | `local>webgrip/renovate-config` or `webgrip/renovate-config` |
+| `agent-standards` | `apm.yml`, `mise.toml` | `webgrip/agent-standards` |
+
+The patterns follow the repo-config inventory in homelab-cluster, but the action does not call
+it. The rules are the `CONSUMER_RULES` map at the top of the step's script. A file that answers
+404 is absent; a file or directory that cannot be read otherwise leaves its repository
+unscheduled with a `::warning::`. The calling repository and the package's own repository are
+never scheduled. A package without rules schedules nothing and warns, so pass `projects` for
+those. `projects` is an explicit list that replaces discovery. A project the job does not own
+answers 404 and is skipped. Every project costs one executor pod (about 1 GB of disk writes).
+
+The step summary lists every scheduled repository with the file that made it a consumer, or
+`listed in projects`.
+
+It never fails the job. An unreachable operator, a rejected token (401), a failed listing or an
+unreadable file ends as a `::warning::`, and Renovate picks the release up at its next scheduled
+run. It needs `node`
 18 or newer on PATH, which the `semantic-release` and `node` images carry, and an in-cluster
 runner. `token` is the repository secret `RENOVATE_WEBHOOK_TOKEN`, bridged from OpenBao
-`renovate/webhook-auth` to the tooling repositories by homelab-cluster.
+`renovate/webhook-auth` to the tooling repositories by homelab-cluster. `forgejo-token` lists the
+organisation and reads the candidates' files; without it private repositories are invisible.
 `scripts/renovate-trigger.test.cjs` runs the step against a fake operator and forge.
 
 ```yaml

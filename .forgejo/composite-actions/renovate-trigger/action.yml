@@ -2,10 +2,11 @@ name: "[Action] Trigger Renovate on the repositories that consume a release"
 description: >-
   Asks the in-cluster renovate-operator to run Renovate now, through its schedule webhook, on
   each project of a RenovateJob, so a release of shared tooling reaches its consumers within
-  minutes instead of at the next cron. Without a projects list it schedules every
-  repository of the caller's organisation that carries the topic, except the caller itself.
-  It never fails the job: an unreachable operator, a rejected token or a failed listing ends
-  as a warning. Needs node 18 or newer on PATH and an in-cluster runner.
+  minutes instead of at the next cron. Without a projects list it schedules only the
+  repositories of the caller's organisation that carry the topic and reference the released
+  package in one of their files, never the caller itself. It never fails the job: an
+  unreachable operator, a rejected token, a failed listing or an unreadable file ends as a
+  warning. Needs node 18 or newer on PATH and an in-cluster runner.
 
 inputs:
   token:
@@ -24,15 +25,19 @@ inputs:
     required: false
     default: "webgrip-forgejo"
   projects:
-    description: "owner/repo projects to schedule, separated by spaces, commas or newlines; empty schedules every repository of the organisation that carries the topic"
+    description: "owner/repo projects to schedule, separated by spaces, commas or newlines; empty schedules the repositories of the organisation that carry the topic and consume the package"
     required: false
     default: ""
   topic:
     description: "Repository topic that selects the projects when projects is empty; matches the RenovateJob's discoverTopics"
     required: false
     default: "renovate"
+  package:
+    description: "Released package whose consumers are scheduled when projects is empty: workflows, semantic-release-config, renovate-config or agent-standards; empty takes the calling repository's name"
+    required: false
+    default: ""
   forgejo-token:
-    description: "Token that lists the organisation's repositories when projects is empty; defaults to the job token"
+    description: "Token that lists the organisation's repositories and reads their files when projects is empty; defaults to the job token"
     required: false
     default: ""
 
@@ -48,6 +53,7 @@ runs:
         RENOVATE_JOB: ${{ inputs.job }}
         RENOVATE_PROJECTS: ${{ inputs.projects }}
         RENOVATE_TOPIC: ${{ inputs.topic }}
+        RELEASED_PACKAGE: ${{ inputs.package }}
         LISTING_TOKEN: ${{ inputs.forgejo-token || github.token }}
       run: |
         if ! command -v node > /dev/null; then
@@ -56,20 +62,49 @@ runs:
         fi
         node - <<'JS'
         const env = process.env;
+        const fs = require('node:fs');
         const warn = message => console.log(`::warning::${message}`);
         const timeout = () => AbortSignal.timeout(10000);
+
+        const WORKFLOW_DIRECTORIES = ['.forgejo/workflows', '.github/workflows'];
+        const RENOVATE_FILES = ['renovate.json', 'renovate.json5', '.renovaterc', '.renovaterc.json', '.renovaterc.json5', '.forgejo/renovate.json', '.github/renovate.json'];
+        const WORKFLOW_FILES_PER_DIRECTORY = 50;
+        const CONSUMER_RULES = {
+          workflows: [
+            { files: WORKFLOW_DIRECTORIES, pattern: /webgrip\/workflows\/\.(?:forgejo|github)\/(?:workflows|composite-actions)\/[\w.\/-]+@/ },
+          ],
+          'semantic-release-config': [
+            { files: ['package.json'], pattern: /"@webgrip\/semantic-release-config"\s*:/ },
+            { files: [...WORKFLOW_DIRECTORIES, 'mise.toml'], pattern: /harbor\.webgrip\.dev\/webgrip\/semantic-release:/ },
+          ],
+          'renovate-config': [
+            { files: RENOVATE_FILES, pattern: /(?:local>)?webgrip\/renovate-config\b/ },
+          ],
+          'agent-standards': [
+            { files: ['apm.yml', 'mise.toml'], pattern: /webgrip\/agent-standards\b/ },
+          ],
+        };
+
+        const api = `${(env.GITHUB_SERVER_URL || '').replace(/\/$/, '')}/api/v1`;
+        const owner = env.GITHUB_REPOSITORY_OWNER || (env.GITHUB_REPOSITORY || '').split('/')[0];
+        const forgeHeaders = env.LISTING_TOKEN ? { Authorization: `token ${env.LISTING_TOKEN}` } : {};
 
         function splitProjects(text) {
           return [...new Set((text || '').split(/[\s,]+/).filter(Boolean))];
         }
 
-        async function listProjects() {
-          const api = `${(env.GITHUB_SERVER_URL || '').replace(/\/$/, '')}/api/v1`;
-          const owner = env.GITHUB_REPOSITORY_OWNER || (env.GITHUB_REPOSITORY || '').split('/')[0];
-          const headers = env.LISTING_TOKEN ? { Authorization: `token ${env.LISTING_TOKEN}` } : {};
+        function releasedPackage() {
+          return (env.RELEASED_PACKAGE || (env.GITHUB_REPOSITORY || '').split('/').pop() || '').trim();
+        }
+
+        function encodePath(path) {
+          return path.split('/').map(encodeURIComponent).join('/');
+        }
+
+        async function listCandidates() {
           const found = [];
           for (let page = 1; page <= 20; page++) {
-            const response = await fetch(`${api}/orgs/${encodeURIComponent(owner)}/repos?limit=50&page=${page}`, { headers, signal: timeout() });
+            const response = await fetch(`${api}/orgs/${encodeURIComponent(owner)}/repos?limit=50&page=${page}`, { headers: forgeHeaders, signal: timeout() });
             if (!response.ok) throw new Error(`listing ${owner}'s repositories answered HTTP ${response.status}`);
             const repositories = await response.json();
             for (const repository of repositories) {
@@ -83,6 +118,86 @@ runs:
           return found;
         }
 
+        class Unreadable extends Error {}
+
+        async function forgeGet(project, endpoint, path) {
+          let response;
+          try {
+            response = await fetch(`${api}/repos/${project}/${endpoint}/${encodePath(path)}`, { headers: forgeHeaders, signal: timeout() });
+          } catch (error) {
+            throw new Unreadable(`${path} (${error.cause?.code || error.name})`);
+          }
+          if (response.status === 404) return null;
+          if (!response.ok) throw new Unreadable(`${path} (HTTP ${response.status})`);
+          return response;
+        }
+
+        function repositoryReader(project) {
+          const texts = new Map();
+          const unreadable = [];
+          async function text(path) {
+            if (!texts.has(path)) {
+              texts.set(path, (async () => {
+                try {
+                  const response = await forgeGet(project, 'raw', path);
+                  return response ? await response.text() : null;
+                } catch (error) {
+                  if (!(error instanceof Unreadable)) throw error;
+                  unreadable.push(error.message);
+                  return null;
+                }
+              })());
+            }
+            return texts.get(path);
+          }
+          async function expand(path) {
+            if (!WORKFLOW_DIRECTORIES.includes(path)) return [path];
+            try {
+              const response = await forgeGet(project, 'contents', path);
+              const entries = response ? await response.json() : [];
+              if (!Array.isArray(entries)) return [];
+              return entries
+                .filter(entry => entry.type === 'file' && /\.ya?ml$/.test(entry.name || ''))
+                .map(entry => entry.path)
+                .slice(0, WORKFLOW_FILES_PER_DIRECTORY);
+            } catch (error) {
+              if (!(error instanceof Unreadable)) throw error;
+              unreadable.push(error.message);
+              return [];
+            }
+          }
+          return { text, expand, unreadable };
+        }
+
+        async function consumedFile(project, rules) {
+          const reader = repositoryReader(project);
+          for (const rule of rules) {
+            for (const entry of rule.files) {
+              for (const path of await reader.expand(entry)) {
+                const content = await reader.text(path);
+                if (content !== null && rule.pattern.test(content)) return { file: path, unreadable: reader.unreadable };
+              }
+            }
+          }
+          return { file: null, unreadable: reader.unreadable };
+        }
+
+        async function findConsumers(packageName) {
+          const rules = CONSUMER_RULES[packageName];
+          const candidates = await listCandidates();
+          const consumers = [];
+          for (const project of candidates) {
+            if (project === `${owner}/${packageName}`) continue;
+            const { file, unreadable } = await consumedFile(project, rules);
+            if (file) {
+              consumers.push({ project, reason: `\`${file}\` uses ${packageName}` });
+            } else if (unreadable.length > 0) {
+              warn(`renovate-trigger could not read ${unreadable.join(', ')} of ${project}; it is not scheduled`);
+            }
+          }
+          return { consumers, candidates: candidates.length };
+        }
+
         async function schedule(project) {
           const url = new URL('/webhook/v1/schedule', env.OPERATOR_URL);
           url.search = new URLSearchParams({ namespace: env.RENOVATE_NAMESPACE, job: env.RENOVATE_JOB, project }).toString();
@@ -94,43 +209,80 @@ runs:
           return response.status;
         }
 
+        function writeSummary(heading, rows) {
+          if (!env.GITHUB_STEP_SUMMARY) return;
+          const lines = [`### ${heading}`, ''];
+          if (rows.length > 0) {
+            lines.push('| Repository | Why | Result |', '| --- | --- | --- |');
+            for (const row of rows) lines.push(`| ${row.project} | ${row.reason} | ${row.result} |`);
+          } else {
+            lines.push('No repository was scheduled.');
+          }
+          try {
+            fs.appendFileSync(env.GITHUB_STEP_SUMMARY, `${lines.join('\n')}\n`);
+          } catch (error) {
+            warn(`renovate-trigger could not write the step summary (${error.code || error.name})`);
+          }
+        }
+
+        async function targets() {
+          const listed = splitProjects(env.RENOVATE_PROJECTS);
+          if (listed.length > 0) {
+            return { heading: 'Renovate scheduled on the listed projects', targets: listed.map(project => ({ project, reason: 'listed in `projects`' })) };
+          }
+          const packageName = releasedPackage();
+          if (!CONSUMER_RULES[packageName]) {
+            warn(`renovate-trigger knows no consumers of ${packageName || 'an unnamed package'}; pass projects or one of ${Object.keys(CONSUMER_RULES).join(', ')} as package`);
+            return null;
+          }
+          try {
+            const { consumers, candidates } = await findConsumers(packageName);
+            console.log(`renovate-trigger: ${consumers.length} of ${candidates} ${env.RENOVATE_TOPIC} repositories consume ${packageName}`);
+            return { heading: `Renovate scheduled on the consumers of ${packageName}`, targets: consumers };
+          } catch (error) {
+            warn(`renovate-trigger could not list projects (${error.message}); Renovate waits for its next scheduled run`);
+            return null;
+          }
+        }
+
         async function main() {
           if (!env.RENOVATE_WEBHOOK_TOKEN) {
             warn('renovate-trigger got no token; Renovate waits for its next scheduled run');
             return;
           }
-          let projects = splitProjects(env.RENOVATE_PROJECTS);
-          if (projects.length === 0) {
-            try {
-              projects = await listProjects();
-            } catch (error) {
-              warn(`renovate-trigger could not list projects (${error.message}); Renovate waits for its next scheduled run`);
-              return;
-            }
-          }
+          const plan = await targets();
+          if (!plan) return;
+          const rows = [];
           const counts = { scheduled: 0, unknown: 0 };
-          for (const project of projects) {
-            let status;
-            try {
-              status = await schedule(project);
-            } catch (error) {
-              warn(`renovate-operator at ${env.OPERATOR_URL} is unreachable (${error.cause?.code || error.name}); Renovate waits for its next scheduled run`);
-              return;
+          try {
+            for (const target of plan.targets) {
+              let status;
+              try {
+                status = await schedule(target.project);
+              } catch (error) {
+                warn(`renovate-operator at ${env.OPERATOR_URL} is unreachable (${error.cause?.code || error.name}); Renovate waits for its next scheduled run`);
+                return;
+              }
+              if (status === 200) {
+                counts.scheduled++;
+                rows.push({ ...target, result: 'scheduled' });
+                console.log(`scheduled ${target.project}: ${target.reason}`);
+              } else if (status === 404) {
+                counts.unknown++;
+                rows.push({ ...target, result: `not a project of ${env.RENOVATE_NAMESPACE}/${env.RENOVATE_JOB}` });
+                console.log(`skipped ${target.project}: not a project of ${env.RENOVATE_NAMESPACE}/${env.RENOVATE_JOB}`);
+              } else if (status === 401) {
+                warn(`renovate-operator rejected the token for ${env.RENOVATE_NAMESPACE}/${env.RENOVATE_JOB}; the bridged RENOVATE_WEBHOOK_TOKEN is stale or wrong`);
+                return;
+              } else {
+                rows.push({ ...target, result: `HTTP ${status}` });
+                warn(`scheduling ${target.project} answered HTTP ${status}`);
+              }
             }
-            if (status === 200) {
-              counts.scheduled++;
-              console.log(`scheduled ${project}`);
-            } else if (status === 404) {
-              counts.unknown++;
-              console.log(`skipped ${project}: not a project of ${env.RENOVATE_NAMESPACE}/${env.RENOVATE_JOB}`);
-            } else if (status === 401) {
-              warn(`renovate-operator rejected the token for ${env.RENOVATE_NAMESPACE}/${env.RENOVATE_JOB}; the bridged RENOVATE_WEBHOOK_TOKEN is stale or wrong`);
-              return;
-            } else {
-              warn(`scheduling ${project} answered HTTP ${status}`);
-            }
+            console.log(`renovate-trigger: ${counts.scheduled} scheduled, ${counts.unknown} skipped of ${plan.targets.length} on ${env.RENOVATE_NAMESPACE}/${env.RENOVATE_JOB}`);
+          } finally {
+            writeSummary(plan.heading, rows);
           }
-          console.log(`renovate-trigger: ${counts.scheduled} scheduled, ${counts.unknown} skipped of ${projects.length} on ${env.RENOVATE_NAMESPACE}/${env.RENOVATE_JOB}`);
         }
 
         main().catch(error => warn(`renovate-trigger stopped: ${error.message}`));
