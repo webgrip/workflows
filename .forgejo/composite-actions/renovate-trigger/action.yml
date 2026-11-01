@@ -1,0 +1,137 @@
+name: "[Action] Trigger Renovate on the repositories that consume a release"
+description: >-
+  Asks the in-cluster renovate-operator to run Renovate now, through its schedule webhook, on
+  each project of a RenovateJob, so a release of shared tooling reaches its consumers within
+  minutes instead of at the next cron. Without a projects list it schedules every
+  repository of the caller's organisation that carries the topic, except the caller itself.
+  It never fails the job: an unreachable operator, a rejected token or a failed listing ends
+  as a warning. Needs node 18 or newer on PATH and an in-cluster runner.
+
+inputs:
+  token:
+    description: "Bearer token the RenovateJob's webhook accepts (the first entry of OpenBao renovate/webhook-auth, bridged as RENOVATE_WEBHOOK_TOKEN)"
+    required: true
+  operator-url:
+    description: "Base URL of the renovate-operator webhook server"
+    required: false
+    default: "http://renovate-operator.renovate.svc.cluster.local:8082"
+  namespace:
+    description: "Namespace of the RenovateJob"
+    required: false
+    default: "renovate"
+  job:
+    description: "Name of the RenovateJob whose projects are scheduled"
+    required: false
+    default: "webgrip-forgejo"
+  projects:
+    description: "owner/repo projects to schedule, separated by spaces, commas or newlines; empty schedules every repository of the organisation that carries the topic"
+    required: false
+    default: ""
+  topic:
+    description: "Repository topic that selects the projects when projects is empty; matches the RenovateJob's discoverTopics"
+    required: false
+    default: "renovate"
+  forgejo-token:
+    description: "Token that lists the organisation's repositories when projects is empty; defaults to the job token"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Schedule Renovate
+      shell: bash
+      env:
+        RENOVATE_WEBHOOK_TOKEN: ${{ inputs.token }}
+        OPERATOR_URL: ${{ inputs.operator-url }}
+        RENOVATE_NAMESPACE: ${{ inputs.namespace }}
+        RENOVATE_JOB: ${{ inputs.job }}
+        RENOVATE_PROJECTS: ${{ inputs.projects }}
+        RENOVATE_TOPIC: ${{ inputs.topic }}
+        LISTING_TOKEN: ${{ inputs.forgejo-token || github.token }}
+      run: |
+        if ! command -v node > /dev/null; then
+          echo "::warning::renovate-trigger needs node on PATH; Renovate waits for its next scheduled run"
+          exit 0
+        fi
+        node - <<'JS'
+        const env = process.env;
+        const warn = message => console.log(`::warning::${message}`);
+        const timeout = () => AbortSignal.timeout(10000);
+
+        function splitProjects(text) {
+          return [...new Set((text || '').split(/[\s,]+/).filter(Boolean))];
+        }
+
+        async function listProjects() {
+          const api = `${(env.GITHUB_SERVER_URL || '').replace(/\/$/, '')}/api/v1`;
+          const owner = env.GITHUB_REPOSITORY_OWNER || (env.GITHUB_REPOSITORY || '').split('/')[0];
+          const headers = env.LISTING_TOKEN ? { Authorization: `token ${env.LISTING_TOKEN}` } : {};
+          const found = [];
+          for (let page = 1; page <= 20; page++) {
+            const response = await fetch(`${api}/orgs/${encodeURIComponent(owner)}/repos?limit=50&page=${page}`, { headers, signal: timeout() });
+            if (!response.ok) throw new Error(`listing ${owner}'s repositories answered HTTP ${response.status}`);
+            const repositories = await response.json();
+            for (const repository of repositories) {
+              if (repository.archived || repository.mirror) continue;
+              if (!(repository.topics || []).includes(env.RENOVATE_TOPIC)) continue;
+              if (repository.full_name === env.GITHUB_REPOSITORY) continue;
+              found.push(repository.full_name);
+            }
+            if (repositories.length < 50) break;
+          }
+          return found;
+        }
+
+        async function schedule(project) {
+          const url = new URL('/webhook/v1/schedule', env.OPERATOR_URL);
+          url.search = new URLSearchParams({ namespace: env.RENOVATE_NAMESPACE, job: env.RENOVATE_JOB, project }).toString();
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${env.RENOVATE_WEBHOOK_TOKEN}` },
+            signal: timeout(),
+          });
+          return response.status;
+        }
+
+        async function main() {
+          if (!env.RENOVATE_WEBHOOK_TOKEN) {
+            warn('renovate-trigger got no token; Renovate waits for its next scheduled run');
+            return;
+          }
+          let projects = splitProjects(env.RENOVATE_PROJECTS);
+          if (projects.length === 0) {
+            try {
+              projects = await listProjects();
+            } catch (error) {
+              warn(`renovate-trigger could not list projects (${error.message}); Renovate waits for its next scheduled run`);
+              return;
+            }
+          }
+          const counts = { scheduled: 0, unknown: 0 };
+          for (const project of projects) {
+            let status;
+            try {
+              status = await schedule(project);
+            } catch (error) {
+              warn(`renovate-operator at ${env.OPERATOR_URL} is unreachable (${error.cause?.code || error.name}); Renovate waits for its next scheduled run`);
+              return;
+            }
+            if (status === 200) {
+              counts.scheduled++;
+              console.log(`scheduled ${project}`);
+            } else if (status === 404) {
+              counts.unknown++;
+              console.log(`skipped ${project}: not a project of ${env.RENOVATE_NAMESPACE}/${env.RENOVATE_JOB}`);
+            } else if (status === 401) {
+              warn(`renovate-operator rejected the token for ${env.RENOVATE_NAMESPACE}/${env.RENOVATE_JOB}; the bridged RENOVATE_WEBHOOK_TOKEN is stale or wrong`);
+              return;
+            } else {
+              warn(`scheduling ${project} answered HTTP ${status}`);
+            }
+          }
+          console.log(`renovate-trigger: ${counts.scheduled} scheduled, ${counts.unknown} skipped of ${projects.length} on ${env.RENOVATE_NAMESPACE}/${env.RENOVATE_JOB}`);
+        }
+
+        main().catch(error => warn(`renovate-trigger stopped: ${error.message}`));
+        JS

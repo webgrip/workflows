@@ -838,6 +838,44 @@ jobs:
             CLOUDFLARE_ACCOUNT_ID=secret/data/cloudflare/dns/twente-dev-ro#account_id
 ```
 
+### `renovate-trigger`
+Runs Renovate now on the repositories that consume a release, instead of at the next hourly
+cron of the `webgrip-forgejo` RenovateJob. Call it after a release of shared tooling. It POSTs
+the renovate-operator schedule webhook
+(`/webhook/v1/schedule?namespace=<namespace>&job=<job>&project=<owner/repo>`) once per project
+with `Authorization: Bearer <token>`; the operator marks each project scheduled at priority 1 and
+its queue runs them one at a time.
+
+The operator's webhook takes one project per request and has no "every project" form. With
+`projects` empty the action lists the caller's organisation through the Forgejo API and schedules
+every repository that carries `topic` (default `renovate`, the job's `discoverTopics`) and is
+neither archived nor a mirror, skipping the calling repository. A project the job does not own
+answers 404 and is skipped. Every project costs one executor pod (about 1 GB of disk writes), so
+pass `projects` when the consumers are known and few.
+
+It never fails the job. An unreachable operator, a rejected token (401) or a failed listing ends
+as a `::warning::`, and Renovate picks the release up at its next scheduled run. It needs `node`
+18 or newer on PATH, which the `semantic-release` and `node` images carry, and an in-cluster
+runner. `token` is the repository secret `RENOVATE_WEBHOOK_TOKEN`, bridged from OpenBao
+`renovate/webhook-auth` to the tooling repositories by homelab-cluster.
+`scripts/renovate-trigger.test.cjs` runs the step against a fake operator and forge.
+
+```yaml
+  renovate:
+    needs: [release]
+    if: needs.release.outputs.version != ''
+    runs-on: docker
+    container:
+      image: harbor.webgrip.dev/webgrip/semantic-release:<pin>
+    steps:
+      - uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/renovate-trigger@<tag>
+        with:
+          token: ${{ secrets.RENOVATE_WEBHOOK_TOKEN }}
+          forgejo-token: ${{ secrets.WEBGRIP_CI_TOKEN }}
+```
+
+This repository calls it from `.forgejo/workflows/on_source_change.yml` after every release.
+
 ## 💡 Usage Examples
 
 ### PHP Project CI/CD Pipeline

@@ -46,6 +46,7 @@ jobs:
           scripts/toolchain-probe.test.cjs
           scripts/chart-version.test.cjs
           scripts/internal-refs.test.cjs
+          scripts/renovate-trigger.test.cjs
   release:
     needs: [policy]
     name: Semantic Release
