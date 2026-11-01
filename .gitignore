@@ -8,3 +8,5 @@ act_output/
 
 # APM dependencies
 apm_modules/
+
+scripts/node_modules/
