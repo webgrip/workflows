@@ -4,7 +4,7 @@
 * **Deciders**: Ryan Grippeling
 * **Date**: 2026-10-24
 * **Tags**: CI::ReusableWorkflows, Forgejo, SupplyChain, Release
-* **Version**: 1.0.0
+* **Version**: 1.0.1
 
 ---
 
@@ -94,3 +94,4 @@ The release rewrites the refs; main keeps `@main`.
 | Version | Date       | Author          | Change           |
 | ------- | ---------- | --------------- | ---------------- |
 | 1.0.0   | 2026-10-24 | Ryan Grippeling | Initial creation |
+| 1.0.1   | 2026-11-01 | Ryan Grippeling | The gate runs as the `policy` job, which now holds all five policy checks; the `internal-refs-policy` job named under Gate no longer exists |
