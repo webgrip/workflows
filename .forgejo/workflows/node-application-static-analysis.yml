@@ -8,6 +8,11 @@ on:
         required: false
         default: '22'
         type: string
+      runs-on:
+        description: 'Runner label: docker for the homelab runners, unfold-ci for the gVisor runners on the Unfold cluster'
+        required: false
+        default: 'docker'
+        type: string
       working-directory:
         description: 'Directory that contains package.json'
         required: false
@@ -55,7 +60,7 @@ permissions:
 jobs:
   static-analysis-run:
     name: 'Static Analysis (Prettier, ESLint, Typecheck, Audit, Knip, Outdated)'
-    runs-on: docker
+    runs-on: ${{ inputs.runs-on }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
@@ -90,7 +95,19 @@ jobs:
           echo 'PACKAGE_MANAGER=npm' >> "$GITHUB_ENV"
           echo 'package_manager=npm' >> "$GITHUB_OUTPUT"
 
+      - name: Check the runner's Node.js
+        id: runner-node
+        shell: bash
+        run: |
+          installed="$(node --version 2>/dev/null | sed -E 's/^v([0-9]+).*/\1/' || true)"
+          if [ "$installed" = "${{ inputs.node-version }}" ]; then
+            echo 'matches=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matches=false' >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        if: steps.runner-node.outputs.matches != 'true'
         with:
           node-version: ${{ inputs.node-version }}
 
