@@ -1,11 +1,10 @@
 name: "[Action] Semantic Release"
 description: >-
-  Cut a repository's release with semantic-release. Expects to run in the toolchain image
-  (harbor.webgrip.dev/webgrip/semantic-release:<config version> — see docs/adrs/0005-semantic-release-toolchain-image.md),
-  which bakes in node, git, yq, semantic-release 25 and @webgrip/semantic-release-config, so this
-  action installs nothing and this file is only about RELEASE semantics. Output contract: the
-  resolved config must include an @semantic-release/exec successCmd that writes
-  `version=${nextRelease.version}` (and optionally `tag=${nextRelease.gitTag}`) to $GITHUB_OUTPUT.
+  Cut a repository's release with webgrip-release, the command in @webgrip/semantic-release-config.
+  Run the job in harbor.webgrip.dev/webgrip/semantic-release:2.4.0 or newer, which carries the
+  command, semantic-release and the locked plugin set. This action maps its inputs onto the
+  command's options; the release behaviour, its tests and its documentation live in
+  webgrip/semantic-release-config.
 
 inputs:
   release-type:
@@ -93,316 +92,33 @@ runs:
     - name: Check out repo
       uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       with:
-        fetch-depth: 0 # semantic-release requires all commits/tags
+        fetch-depth: 0
         token: ${{ inputs.token || github.token }}
 
-    - name: Align to remote branch tip
-      if: inputs.align-to-remote-tip == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
-      shell: bash
-      run: |
-        set -euo pipefail
-        git fetch --tags origin "${GITHUB_REF_NAME}"
-        git checkout -B "${GITHUB_REF_NAME}" "origin/${GITHUB_REF_NAME}"
-
-    - name: Install consumer dependencies
-      if: inputs.install-dependencies != 'false'
-      shell: bash
-      env:
-        INSTALL_DEPENDENCIES: ${{ inputs.install-dependencies }}
-      run: |
-        set +e -u
-        strict=false
-        [[ "$INSTALL_DEPENDENCIES" == "true" ]] && strict=true
-
-        give_up() {
-          if [[ "$strict" == true ]]; then
-            echo "::error::$2 install-dependencies is true, so the release stops here."
-            exit 1
-          fi
-          echo "$1$2 install-dependencies is auto, so the release goes on."
-          exit 0
-        }
-        skip() { give_up "" "$1"; }
-        fail() { give_up "::warning::" "$1"; }
-
-        [[ -f package.json ]] || { echo "No package.json; nothing to install or build."; exit 0; }
-
-        if [[ ! -f package-lock.json && ! -f npm-shrinkwrap.json ]]; then
-          for lockfile in pnpm-lock.yaml yarn.lock bun.lock bun.lockb; do
-            [[ -f "$lockfile" ]] && skip "Unsupported lockfile ${lockfile}: only npm lockfiles are installed. Nothing installed, build not run."
-          done
-          skip "package.json has no lockfile. Nothing installed, build not run."
-        fi
-
-        echo "Installing consumer dependencies: npm ci"
-        npm ci --no-audit --no-fund || fail "npm ci exited $?. Build not run, because its dependencies are not installed."
-
-        if ! node -e 'process.exit(require("./package.json").scripts?.build ? 0 : 1)'; then
-          echo "No build script; nothing to build."
-          exit 0
-        fi
-        echo "Building the consumer: npm run build"
-        npm run build || fail "npm run build exited $?."
-        exit 0
-
-    # Start every repo from 0.0.0 (semantic-release otherwise hardcodes the first release to 1.0.0).
-    # Idempotent: skipped once any v* tag exists. Needs the fetch-depth: 0 checkout above.
-    - name: Seed baseline version tag (0.0.0)
-      if: inputs.dry-run != 'true' && inputs.layout == 'single'
-      shell: bash
-      run: |
-        set -euo pipefail
-        if [ -n "$(git tag -l 'v[0-9]*')" ]; then
-          echo "Release tags already exist (v*); skipping baseline seed."
-          exit 0
-        fi
-        root="$(git rev-list --max-parents=0 HEAD | tail -1)"
-        echo "No v* tag yet; seeding v0.0.0 at root commit ${root}."
-        git tag "v0.0.0" "${root}"
-        git push origin "v0.0.0"
-
-    - name: Run semantic-release
-      shell: bash
+    - name: Run webgrip-release
       id: semantic-release
+      shell: bash
       env:
-        # Required by @webgrip/semantic-release-config at load time (Forgejo is the sole release
-        # authority). Harmless for inline configs that don't read it.
-        SEMANTIC_RELEASE_GITEA: "true"
-        # Split addressing: the release API call stays in-cluster (github.server_url =
-        # http://forgejo-http.forgejo.svc.cluster.local:3000 on the runner) so it never hairpins
-        # out through the ingress, while the user-facing changelog/release links use the public
-        # host (forge-url) via --repository-url below.
-        GITEA_URL: ${{ github.server_url }}
-        GITEA_TOKEN: ${{ inputs.token || github.token }}
-        # GIT_CREDENTIALS is what semantic-release core reads to build an authenticated push URL
-        # for --repository-url. Components must be URL-encoded if they contain reserved characters.
-        GIT_CREDENTIALS: ${{ inputs.git-user-name }}:${{ inputs.token || github.token }}
-        GIT_AUTHOR_NAME: ${{ inputs.git-user-name }}
-        GIT_AUTHOR_EMAIL: ${{ inputs.git-user-email }}
-        GIT_COMMITTER_NAME: ${{ inputs.git-user-name }}
-        GIT_COMMITTER_EMAIL: ${{ inputs.git-user-email }}
+        RELEASE_TOKEN: ${{ inputs.token || github.token }}
+        FORGE_URL: ${{ inputs.forge-url }}
+        GIT_USER_NAME: ${{ inputs.git-user-name }}
+        GIT_USER_EMAIL: ${{ inputs.git-user-email }}
+        RELEASE_TYPE: ${{ inputs.release-type }}
         RELEASE_LAYOUT: ${{ inputs.layout }}
         RELEASE_TRAIN_GLOBS: ${{ inputs.trains }}
         RELEASE_VERSION_COMMAND: ${{ inputs.version-command }}
+        RELEASE_INSTALL_DEPENDENCIES: ${{ inputs.install-dependencies }}
+        RELEASE_DRY_RUN: ${{ inputs.dry-run }}
+        ALIGN_TO_REMOTE_TIP: ${{ inputs.align-to-remote-tip }}
       run: |
         set -euo pipefail
-        forge_url="${{ inputs.forge-url }}"
-
-        # semantic-release runs raw git commands (ls-remote during branch expansion, fetch, push)
-        # against --repository-url — the PUBLIC host. The checkout only persists an auth header for
-        # the in-cluster host, so on a PRIVATE repo the anonymous ls-remote 401s before
-        # GIT_CREDENTIALS ever applies. Grant git the same style of credential checkout uses,
-        # scoped to this checkout, and remove it on exit.
-        auth_b64="$(printf '%s:%s' "x-access-token" "${GITEA_TOKEN}" | base64 -w0)"
-        git config "http.${forge_url}/.extraheader" "AUTHORIZATION: basic ${auth_b64}"
-        trap 'git config --unset-all "http.'"${forge_url}"'/.extraheader" || true' EXIT
-
-        # The toolchain IS the image (ADR 0005): every dep prebaked flat from a committed lockfile,
-        # the shared config's npm overrides applied at the install root. This action installs
-        # NOTHING at runtime — an install here cannot apply a dependency's overrides (npm honors
-        # them only at the install root), which nests plugin versions semantic-release's loader
-        # prefers over the pinned pair; that is exactly how releases from 2026-07-31 to 2026-08-27
-        # shipped heading-only notes without one red job. No usable toolchain → no release.
-        # Probe rather than test for the file: pre-ADR-0005 ci-runners also export SEMREL_PREBAKED,
-        # at an sr24 tree with no shared config, which would pass an -x check and die at config load.
-        sr="${SEMREL_PREBAKED:-/nonexistent}/.bin/semantic-release"
-        if [[ ! -x "$sr" ]] || ! NODE_PATH="${SEMREL_PREBAKED:-}" node -e '
-              const v = require("semantic-release/package.json").version;
-              if (v.split(".")[0] !== "25") throw new Error("semantic-release " + v);
-              const config = require("@webgrip/semantic-release-config/package.json").version;
-              if (Number.parseInt(config, 10) < 2) require.resolve("semantic-release-helm3");
-            '; then
-          echo "::error::No usable prebaked release toolchain (SEMREL_PREBAKED='${SEMREL_PREBAKED:-}')."
-          echo "::error::Run this job in the toolchain image — add to the release job:"
+        if ! command -v webgrip-release >/dev/null 2>&1; then
+          echo "::error::webgrip-release is not on PATH, so this job does not run in a release toolchain image that carries it."
+          echo "::error::Run the release job in harbor.webgrip.dev/webgrip/semantic-release:2.4.0 or newer:"
           echo "::error::  container:"
-          echo "::error::    image: harbor.webgrip.dev/webgrip/semantic-release:2.1.2"
+          echo "::error::    image: harbor.webgrip.dev/webgrip/semantic-release:2.5.0"
           exit 1
         fi
-
-        # A repo's config is either its own file or, with none, semantic-release's defaults.
-        # --extends layers a release-type variant on top; --config selects the file outright.
-        args=(--repository-url "${forge_url}/${{ github.repository }}.git")
-        [[ "${{ inputs.dry-run }}" == "true" ]] && args+=(--dry-run)
-        rt="${{ inputs.release-type }}"
-        if [[ -n "$rt" ]]; then
-          for f in ".releaserc.${rt}.js" ".releaserc.${rt}.json"; do
-            [[ -f "$f" ]] && { args+=("--extends=./${f}"); break; }
-          done
-        else
-          for f in .releaserc.cjs .releaserc.js .releaserc.json; do
-            [[ -f "$f" ]] && { args+=("--config=./${f}"); break; }
-          done
-        fi
-
-        # A push landing between "Align to remote branch tip" and this command leaves the checkout
-        # behind origin, and semantic-release then aborts with "The local branch is behind the
-        # remote one" — EXIT 0, nothing published. Aligning first narrows that window but cannot
-        # close it: ploeg run 159 lost a release to a push that landed 19s after the align step and
-        # 29s before this check, and the job went green. So detect the drop and re-run on the new
-        # tip. Both symptoms lose before the tag exists, so reset-and-rerun is safe. The log grep is
-        # what catches the behind-remote case, since rc alone cannot distinguish it from success.
-        dry_run="${{ inputs.dry-run }}"
-        on_branch=false
-        [[ "${GITHUB_REF:-}" == refs/heads/* ]] && on_branch=true
-
-        release_once() {
-          local output_file="$1" attempt rc
-          for attempt in 1 2 3; do
-            set +e
-            GITHUB_OUTPUT="$output_file" "$sr" "${args[@]}" 2>&1 | tee /tmp/semrel.log
-            rc=${PIPESTATUS[0]}
-            set -e
-            if [ "$rc" -eq 0 ] && { [ "$dry_run" == "true" ] || ! grep -q 'is behind the remote one' /tmp/semrel.log; }; then
-              return 0
-            fi
-            if [ "$attempt" -lt 3 ] && [ "$on_branch" == true ] && [ "$dry_run" != "true" ] \
-               && grep -Eq 'fetch first|non-fast-forward|is behind the remote one' /tmp/semrel.log; then
-              echo "::warning::a concurrent push moved ${GITHUB_REF_NAME} mid-run (attempt ${attempt}); resetting onto the updated branch and retrying"
-              git -C "$GITHUB_WORKSPACE" fetch --tags origin "$GITHUB_REF_NAME"
-              git -C "$GITHUB_WORKSPACE" reset --hard "origin/$GITHUB_REF_NAME"
-              continue
-            fi
-            [ "$rc" -eq 0 ] && rc=1
-            return "$rc"
-          done
-        }
-
-        released_lines="$(mktemp)"
-        record_release() {
-          local train="$1" output_file="$2" version tag
-          version="$(sed -n 's/^version=//p' "$output_file" | tail -1)"
-          tag="$(sed -n 's/^tag=//p' "$output_file" | tail -1)"
-          [[ -n "$version" ]] || return 0
-          printf '%s\t%s\t%s\n' "$train" "$version" "$tag" >> "$released_lines"
-        }
-
-        layout="${RELEASE_LAYOUT:-single}"
-        case "$layout" in
-          single)
-            run_output="$(mktemp)"
-            release_once "$run_output"
-            cat "$run_output" >> "$GITHUB_OUTPUT"
-            record_release "" "$run_output"
-            ;;
-          trains)
-            train_globs="${RELEASE_TRAIN_GLOBS}"
-            [[ -n "$train_globs" ]] || { echo "::error::layout trains needs the trains input, e.g. 'skills/*'"; exit 1; }
-            train_dirs=()
-            for pattern in $train_globs; do
-              for dir in $pattern; do
-                [[ -d "$dir" ]] && train_dirs+=("${dir%/}")
-              done
-            done
-            [[ ${#train_dirs[@]} -gt 0 ]] || { echo "::error::no directory matches trains '${train_globs}'"; exit 1; }
-            for dir in "${train_dirs[@]}"; do
-              name="$(basename "$dir")"
-              last_tag="$(git tag -l "${name}-v[0-9]*" --sort=-v:refname | head -1)"
-              if [[ -n "$last_tag" ]] && [[ "$(git rev-list --count "${last_tag}..HEAD" -- "$dir")" == "0" ]]; then
-                echo "${name}: no commit under ${dir} since ${last_tag}; skipped"
-                continue
-              fi
-              if [[ -z "$last_tag" ]] && [[ "$dry_run" != "true" ]]; then
-                root="$(git rev-list --max-parents=0 HEAD | tail -1)"
-                echo "${name}: no tag yet; seeding ${name}-v0.0.0 at root commit ${root}"
-                git tag "${name}-v0.0.0" "${root}"
-                git push origin "${name}-v0.0.0"
-              fi
-              echo "::group::train ${name} (${dir})"
-              run_output="$(mktemp)"
-              export RELEASE_TRAIN="$name" RELEASE_TRAIN_PATH="$dir"
-              release_once "$run_output"
-              record_release "$name" "$run_output"
-              echo "::endgroup::"
-            done
-            ;;
-          upstream)
-            version_command="${RELEASE_VERSION_COMMAND}"
-            [[ -n "$version_command" ]] || { echo "::error::layout upstream needs the version-command input"; exit 1; }
-            version="$(bash -euo pipefail -c "$version_command")"
-            [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]] || { echo "::error::version-command printed '${version}', not a version"; exit 1; }
-            tag="v${version}"
-            api="${GITEA_URL}/api/v1/repos/${GITHUB_REPOSITORY}"
-            release_status="$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: token ${GITEA_TOKEN}" "${api}/releases/tags/${tag}")"
-            if [[ "$release_status" == "200" ]]; then
-              echo "${tag} is released already; nothing to do. Change the version source to release again."
-            elif [[ "$release_status" != "404" ]]; then
-              echo "::error::reading the release of ${tag} answered HTTP ${release_status}"
-              exit 1
-            elif [[ "$dry_run" == "true" ]]; then
-              echo "Dry run: would release ${tag} at $(git rev-parse HEAD)."
-            else
-              target="$(git rev-parse HEAD)"
-              if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
-                target="$(git rev-parse "${tag}^{commit}")"
-                echo "${tag} exists without a release; publishing the release on ${target}."
-              fi
-              previous="$(git describe --tags --abbrev=0 --match 'v[0-9]*' --exclude "${tag}" "${target}" 2>/dev/null || true)"
-              range="${target}"
-              [[ -n "$previous" ]] && range="${previous}..${target}"
-              notes="$(git log --no-merges --format='* %s (%h)' "$range")"
-              node -e '
-                const [tag, target, notes] = process.argv.slice(1);
-                process.stdout.write(JSON.stringify({ tag_name: tag, target_commitish: target, name: tag, body: notes || "No commits since the previous tag.", prerelease: false }));
-              ' "$tag" "$target" "$notes" > /tmp/upstream-release.json
-              curl -fsS -X POST -H "Authorization: token ${GITEA_TOKEN}" -H 'Content-Type: application/json' \
-                -d @/tmp/upstream-release.json "${api}/releases" >/dev/null
-              { echo "version=${version}"; echo "tag=${tag}"; } >> "$GITHUB_OUTPUT"
-              printf '\t%s\t%s\n' "$version" "$tag" >> "$released_lines"
-              echo "Released ${tag} on ${target} from the upstream version."
-            fi
-            ;;
-          *)
-            echo "::error::layout must be single, trains or upstream, not '${layout}'"
-            exit 1
-            ;;
-        esac
-
-        node -e '
-          const lines = require("fs").readFileSync(process.argv[1], "utf8").split("\n").filter(Boolean);
-          const released = lines.map((line) => { const [train, version, tag] = line.split("\t"); return { train, version, tag }; });
-          process.stdout.write(`released=${JSON.stringify(released)}\n`);
-        ' "$released_lines" >> "$GITHUB_OUTPUT"
-
-    - name: Release summary
-      if: always()
-      shell: bash
-      env:
-        VERSION: ${{ steps.semantic-release.outputs.version }}
-        TAG: ${{ steps.semantic-release.outputs.tag }}
-        RELEASED: ${{ steps.semantic-release.outputs.released }}
-        LAYOUT: ${{ inputs.layout }}
-        OUTCOME: ${{ steps.semantic-release.outcome }}
-        DRY_RUN: ${{ inputs.dry-run }}
-        FORGE_URL: ${{ inputs.forge-url }}
-      run: |
-        set -euo pipefail
-        {
-          echo "### Semantic Release"
-          echo
-          if [[ "$DRY_RUN" == "true" ]]; then
-            echo "Dry run — no tag, release or commit was pushed."
-          elif [[ "$OUTCOME" == "failure" ]]; then
-            # A failure after "Created tag" means the tag and release commit are already pushed;
-            # a re-run will not publish them (semantic-release sees the tag), so say so.
-            pushed="$(sed 's/\x1b\[[0-9;]*m//g' /tmp/semrel.log 2>/dev/null | grep -oE 'Created tag [^ ]+' | tail -1 | cut -d' ' -f3 || true)"
-            echo "**semantic-release failed.** See the job log for the failing step."
-            if [[ -n "$pushed" ]]; then
-              echo
-              echo "The tag [\`${pushed}\`](${FORGE_URL}/${GITHUB_REPOSITORY}/src/tag/${pushed}) and its release commit"
-              echo "were already pushed, so re-running this job will not publish them. If the release page"
-              echo "is missing, create it on the existing tag: [new release](${FORGE_URL}/${GITHUB_REPOSITORY}/releases/new?tag=${pushed})."
-            fi
-          elif [[ "$LAYOUT" == "trains" ]] && [[ -n "$RELEASED" ]] && [[ "$RELEASED" != "[]" ]]; then
-            node -e '
-              for (const r of JSON.parse(process.env.RELEASED)) {
-                console.log(`- **${r.train}**: [\`${r.tag}\`](${process.env.FORGE_URL}/${process.env.GITHUB_REPOSITORY}/releases/tag/${r.tag})`);
-              }
-            '
-          elif [[ -n "$VERSION" ]]; then
-            echo "- **version**: \`${VERSION}\`"
-            [[ -n "$TAG" ]] && echo "- **tag**: [\`${TAG}\`](${FORGE_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG})"
-          else
-            echo "No release cut for this run (no releasable commits, or the config emitted no"
-            echo "\`version=\` to \`\$GITHUB_OUTPUT\` from its exec successCmd)."
-          fi
-        } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+        align=--align
+        [[ "${ALIGN_TO_REMOTE_TIP}" == "true" ]] || align=--no-align
+        webgrip-release "$align"

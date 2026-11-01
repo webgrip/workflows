@@ -8,7 +8,6 @@ const { spawnSync } = require('node:child_process');
 const { parse } = require('yaml');
 
 const composites = {
-  'semantic-release': 'semantic-release-helm3',
   'semantic-release-monorepo': 'semantic-release-monorepo',
 };
 

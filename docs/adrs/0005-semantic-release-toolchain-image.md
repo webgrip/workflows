@@ -4,7 +4,7 @@
 * **Deciders**: Ryan Grippeling
 * **Date**: 2026-07-29
 * **Tags**: CI::ReusableWorkflows, Forgejo, SupplyChain, Performance
-* **Version**: 1.1.0
+* **Version**: 1.3.0
 
 ---
 
@@ -206,3 +206,4 @@ outlives the job. No data classification change.
 | 1.0.0   | 2026-07-29 | Ryan Grippeling | Initial creation |
 | 1.1.0   | 2026-10-25 | Ryan Grippeling | Defaults move to the config 2.x image built by webgrip/semantic-release-config; monorepo image retired |
 | 1.2.0   | 2026-10-25 | Ryan Grippeling | Follow-up 3 done: the ci-runner host image no longer bakes a toolchain |
+| 1.3.0   | 2026-11-01 | Ryan Grippeling | The `semantic-release` composite runs `webgrip-release` from the 2.4.0+ image instead of its own release script; the `SEMREL_PREBAKED` probe is gone from it |
