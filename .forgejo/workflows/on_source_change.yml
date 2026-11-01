@@ -74,3 +74,14 @@ jobs:
         uses: https://forgejo.webgrip.dev/webgrip/workflows/.forgejo/composite-actions/semantic-release@main
         with:
           token: ${{ secrets.WEBGRIP_CI_TOKEN }}
+  renovate:
+    needs: [release]
+    if: needs.release.outputs.version != ''
+    runs-on: docker
+    container: harbor.webgrip.dev/dockerhub/library/node:24.22.1-trixie@sha256:f1e034976f948cf212ef1f659c12e5dd58ac7eab947831813e81a62401ca38be
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: ./.forgejo/composite-actions/renovate-trigger
+        with:
+          token: ${{ secrets.RENOVATE_WEBHOOK_TOKEN }}
+          forgejo-token: ${{ secrets.WEBGRIP_CI_TOKEN }}
