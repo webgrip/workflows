@@ -46,12 +46,12 @@ inputs:
     # and anything already consuming these attestations. Renovate will raise the major as a PR —
     # treat it as a coordinated migration, not a version bump.
     # renovate: datasource=github-releases depName=sigstore/cosign
-    default: "v2.4.3"
+    default: "v2.6.5"
   syft-version:
     description: "Syft release to install"
     required: false
     # renovate: datasource=github-releases depName=anchore/syft
-    default: "v1.48.0"
+    default: "v1.55.0"
   openbao-addr:
     description: "In-cluster OpenBao address (Vault-compatible API)"
     required: false

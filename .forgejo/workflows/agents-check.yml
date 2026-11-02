@@ -30,9 +30,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: https://github.com/jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
+      - uses: https://github.com/jdx/mise-action@6612f0ef07ed2a736cd1e00a94a065522dd41195 # v5.2.5
         with:
-          version: 2026.10.21
+          version: 2026.10.25
           # No mise install here: with a mise.lock in the caller, mise-action adds --locked,
           # which refuses uv@0.12.24 when that lock does not list it. mise exec installs it.
           install: false

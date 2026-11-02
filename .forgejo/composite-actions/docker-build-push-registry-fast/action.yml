@@ -83,7 +83,7 @@ inputs:
     # a FLOATING tag that upstream repoints; without the digest, the thing bootstrapping every build
     # in this org could change under us with no commit anywhere.
     # renovate: datasource=docker depName=moby/buildkit versioning=docker
-    default: "harbor.webgrip.dev/dockerhub/moby/buildkit:buildx-stable-1@sha256:2f5adac4ecd194d9f8c10b7b5d7bceb5186853db1b26e5abd3a657af0b7e26ec"
+    default: "harbor.webgrip.dev/dockerhub/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea"
   buildkitd-endpoint:
     description: >-
       Address of a long-lived BuildKit daemon to build against instead of starting a throwaway one.
@@ -100,7 +100,7 @@ inputs:
       BuildKit's own default is docker.io/docker/buildkit-syft-scanner at the floating `stable-1` tag.
     required: false
     # renovate: datasource=docker depName=docker/buildkit-syft-scanner versioning=docker
-    default: "harbor.webgrip.dev/dockerhub/docker/buildkit-syft-scanner:stable-1@sha256:79e7b013cbec16bbb436f312819a49a4a57752b2270c1a9332ae1a10fcc82a68"
+    default: "harbor.webgrip.dev/dockerhub/docker/buildkit-syft-scanner:stable-1@sha256:873a7458c3c8ac8e32c7b796c10e1600b07b963d2aa000a72a2d97aaaa2d6315"
   binfmt-image:
     description: "binfmt installer image, used only when a non-amd64 platform is requested."
     required: false
