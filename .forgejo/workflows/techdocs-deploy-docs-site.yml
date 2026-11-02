@@ -51,6 +51,11 @@ on:
         description: 'Run zensical build --strict (broken links fail the build). Flip on once a repo''s links are clean.'
         required: false
         default: 'false'
+      theme:
+        type: string
+        description: 'Zensical theme the site is built with, over whatever mkdocs.yml names; empty = the theme mkdocs.yml names'
+        required: false
+        default: 'webgrip'
     secrets:
       TECHDOCS_S3_ACCESS_KEY_ID:
         description: 'Garage techdocs-publish access key id (OpenBao garage/techdocs)'
@@ -88,9 +93,19 @@ jobs:
         if: ${{ inputs.enabled == 'true' }}
         # --clean every run: upstream recommends against CI caches while the
         # caching layer is in flux; --strict (opt-in) aborts on broken links.
+        # The theme is set here, not in each repo's mkdocs.yml: an overlay that
+        # INHERITs mkdocs.yml and names the theme, so the MkDocs (techdocs) lane
+        # that reads the same mkdocs.yml never sees a theme it cannot load.
+        env:
+          DOCS_THEME: ${{ inputs.theme }}
         run: |
           cd ${{ inputs.source-dir }}
-          zensical build --clean ${{ inputs.strict == 'true' && '--strict' || '' }}
+          config=mkdocs.yml
+          if [ -n "$DOCS_THEME" ]; then
+            config=.zensical-theme.yml
+            printf 'INHERIT: mkdocs.yml\ntheme:\n  name: %s\n' "$DOCS_THEME" > "$config"
+          fi
+          zensical build --clean -f "$config" ${{ inputs.strict == 'true' && '--strict' || '' }}
           test -f "${{ inputs.site-dir }}/index.html"
 
       - name: Graft agent affordances + legacy-URL redirect stubs
