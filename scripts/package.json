@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "devDependencies": {
-    "@webgrip/semantic-release-config": "2.5.0",
+    "@webgrip/semantic-release-config": "2.5.2",
     "yaml": "2.9.0"
   }
 }
