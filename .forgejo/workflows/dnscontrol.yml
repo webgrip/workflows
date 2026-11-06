@@ -22,7 +22,7 @@ on:
         type: string
         required: false
         # renovate: datasource=github-releases depName=StackExchange/dnscontrol
-        default: '5.7.1'
+        default: '5.7.2'
       push-refs:
         description: "Space-separated full refs on which mode 'push' may apply; any other ref only previews"
         type: string
