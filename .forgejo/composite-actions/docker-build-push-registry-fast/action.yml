@@ -83,7 +83,7 @@ inputs:
     # a FLOATING tag that upstream repoints; without the digest, the thing bootstrapping every build
     # in this org could change under us with no commit anywhere.
     # renovate: datasource=docker depName=moby/buildkit versioning=docker
-    default: "harbor.webgrip.dev/dockerhub/moby/buildkit:buildx-stable-1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea"
+    default: "harbor.webgrip.dev/dockerhub/moby/buildkit:buildx-stable-1@sha256:c5f8862f52499773af85bc07695b2379ef08e8002352b0df2c4864c91d78dabe"
   buildkitd-endpoint:
     description: >-
       Address of a long-lived BuildKit daemon to build against instead of starting a throwaway one.

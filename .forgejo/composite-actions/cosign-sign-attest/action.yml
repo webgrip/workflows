@@ -51,7 +51,7 @@ inputs:
     description: "Syft release to install"
     required: false
     # renovate: datasource=github-releases depName=anchore/syft
-    default: "v1.55.0"
+    default: "v1.56.0"
   openbao-addr:
     description: "In-cluster OpenBao address (Vault-compatible API)"
     required: false
@@ -112,7 +112,7 @@ runs:
     # mirror and 404s on these (as it does on actions/github-script). Pin to the canonical source.
     - name: Install cosign
       if: steps.tools.outputs.cosign != 'true'
-      uses: https://github.com/sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      uses: https://github.com/sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       with:
         cosign-release: ${{ inputs.cosign-version }}
 
