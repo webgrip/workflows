@@ -14,6 +14,11 @@ on:
         type: string
         required: false
         default: 'harbor.webgrip.dev/webgrip/rust-ci-runner:1.4.0'
+      runs-on:
+        description: 'Runner label: docker runs the job in runner-image on the homelab runners; any other label is a host-mode runner whose own container is that toolchain image, so container is left out'
+        type: string
+        required: false
+        default: 'docker'
       working-directory:
         description: 'Repo-relative cargo workspace root'
         type: string
@@ -80,10 +85,10 @@ on:
 jobs:
   rust-quality:
     name: 'Rust: fmt, clippy, tests'
-    runs-on: docker
-    container: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runs-on }}
+    container: ${{ inputs.runs-on == 'docker' && inputs.runner-image || '' }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: https://forgejo.webgrip.dev/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Cache cargo registry and build output
         # restore-keys give a partial hit when Cargo.lock moves: unchanged dependencies
@@ -91,7 +96,7 @@ jobs:
         # v4.1.2 deliberately: the runner execs a literal `node` from PATH regardless of
         # an action's declared runtime, and the pool exports externals/node20. v5/v6
         # declare node24.
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: https://forgejo.webgrip.dev/actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ${{ inputs.cargo-home }}/registry
@@ -141,7 +146,7 @@ jobs:
 
       - name: Upload wasm artifact
         if: inputs.wasm-package != ''
-        uses: forgejo/upload-artifact@v4
+        uses: https://forgejo.webgrip.dev/forgejo/upload-artifact@v4
         with:
           name: ${{ inputs.wasm-artifact-name }}
           path: ${{ inputs.wasm-artifact-path || format('{0}/target/{1}/release/*.wasm', inputs.working-directory, inputs.wasm-target) }}
