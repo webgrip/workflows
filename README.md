@@ -307,6 +307,8 @@ Re-verify this behaviour after a Forgejo upgrade with `.forgejo/workflows/probe-
 Rationale and the live-observed failure: [ADR 0003](docs/adrs/0003-hard-gate-quality-workflows.md)
 ("Conditions are a workflow input").
 
+All four take a `runs-on` input, default `docker`, where the job runs in `runner-image` on the homelab runners. Any other label is a host-mode runner whose own container is the toolchain image, such as the gVisor toolchain runners on the Unfold cluster, so the job runs without `container:`. Their actions are named by full `https://forgejo.webgrip.dev/...` URL, because a bare name resolves against Forgejo's in-cluster address, which runners outside the homelab cannot reach.
+
 #### `rust-quality.yml`
 `cargo fmt --check` → `clippy` → `test` for one cargo workspace, with an optional wasm build
 (`wasm-package` input) uploaded as an artifact for sibling jobs. One job on purpose: the wasm

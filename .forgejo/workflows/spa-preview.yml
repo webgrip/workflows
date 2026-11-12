@@ -14,6 +14,11 @@ on:
         type: string
         required: false
         default: 'harbor.webgrip.dev/webgrip/node-ci-runner:1.0.0'
+      runs-on:
+        description: 'Runner label: docker runs the job in runner-image on the homelab runners; any other label is a host-mode runner whose own container is that toolchain image, so container is left out'
+        type: string
+        required: false
+        default: 'docker'
       build-command:
         description: 'Build command(s), run at the repo root with PREVIEW_SLUG and PREVIEW_BASE exported (base your bundle on PREVIEW_BASE)'
         type: string
@@ -99,14 +104,14 @@ jobs:
     # Space-padding both sides makes the ref match whole-token (refs/heads/main must not match
     # refs/heads/maintenance). github.ref is trustworthy here (runner-evaluated).
     if: inputs.enabled && !contains(format(' {0} ', inputs.skip-refs), format(' {0} ', github.ref))
-    runs-on: docker
-    container: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runs-on }}
+    container: ${{ inputs.runs-on == 'docker' && inputs.runner-image || '' }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: https://forgejo.webgrip.dev/actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Download artifact
         if: inputs.artifact-name != ''
-        uses: forgejo/download-artifact@v4
+        uses: https://forgejo.webgrip.dev/forgejo/download-artifact@v4
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ inputs.artifact-path }}
