@@ -692,6 +692,10 @@ whole repository. (For per-package trains in a monorepo, use `semantic-release-m
   Renovate-watched. Override with an image built `FROM` it if your `prepareCmd` needs
   helm/php/docker, or pin a config 1.x image while your `.releaserc.cjs` still uses `changelog`,
   `changelogTitle` or `extraAssets`
+- `runs-on` (default `docker`) - Runner label. `docker` runs the job in `toolchain-image` on the
+  homelab runners; any other label is a host-mode runner whose own container is that toolchain
+  image, so the job runs without `container:`. The composite's actions are named by full
+  `https://forgejo.webgrip.dev/...` URL so runners outside the homelab can fetch them
 - `config-version` (default `1`) - Pin of `@webgrip/semantic-release-config`, for the no-image
   fallback only; inside the toolchain image the image tag *is* the version
 - `dry-run` (default `false`) - `--dry-run`: no tags, releases, or commits

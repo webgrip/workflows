@@ -47,7 +47,7 @@ jobs:
     name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runs-on }}
     steps:
-      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: https://forgejo.webgrip.dev/actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
 
       - name: Detect package manager
         id: detect-package-manager
@@ -91,7 +91,7 @@ jobs:
             echo 'matches=false' >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: https://forgejo.webgrip.dev/actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         if: steps.runner-node.outputs.matches != 'true'
         with:
           node-version: ${{ inputs.node-version }}
@@ -160,7 +160,7 @@ jobs:
 
       - name: Upload coverage artifact
         if: ${{ always() }}
-        uses: forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e # v4
+        uses: https://forgejo.webgrip.dev/forgejo/upload-artifact@16871d9e8cfcf27ff31822cac382bbb5450f1e1e # v4
         with:
           name: node-coverage
           path: ${{ inputs.working-directory }}/${{ inputs.coverage-directory }}
