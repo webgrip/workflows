@@ -176,7 +176,11 @@ jobs:
 
       - name: Enable pnpm
         shell: bash
-        run: corepack enable
+        run: |
+          bin="$RUNNER_TEMP/corepack-bin"
+          mkdir -p "$bin"
+          corepack enable --install-directory "$bin"
+          echo "$bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         shell: bash
@@ -270,7 +274,11 @@ jobs:
 
       - name: Enable pnpm
         shell: bash
-        run: corepack enable
+        run: |
+          bin="$RUNNER_TEMP/corepack-bin"
+          mkdir -p "$bin"
+          corepack enable --install-directory "$bin"
+          echo "$bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         shell: bash
@@ -323,7 +331,11 @@ jobs:
 
       - name: Enable pnpm
         shell: bash
-        run: corepack enable
+        run: |
+          bin="$RUNNER_TEMP/corepack-bin"
+          mkdir -p "$bin"
+          corepack enable --install-directory "$bin"
+          echo "$bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         shell: bash
@@ -390,7 +402,11 @@ jobs:
 
       - name: Enable pnpm
         shell: bash
-        run: corepack enable
+        run: |
+          bin="$RUNNER_TEMP/corepack-bin"
+          mkdir -p "$bin"
+          corepack enable --install-directory "$bin"
+          echo "$bin" >> "$GITHUB_PATH"
 
       - name: Install dependencies
         shell: bash
