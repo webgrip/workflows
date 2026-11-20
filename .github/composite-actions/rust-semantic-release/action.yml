@@ -28,7 +28,7 @@ runs:
     - name: Set up Node.js
       uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
       with:
-        node-version: 22.23.4
+        node-version: 22.23.5
         # Only enable the npm cache when we actually have a lock-file
         cache: ${{ steps.detect.outputs.is_node == 'true' && 'npm' || '' }}
 
@@ -64,7 +64,7 @@ runs:
 
     - name: Install cargo-release & git-cliff
       if: steps.detect.outputs.is_rust == 'true'
-      uses: cargo-bins/cargo-binstall@851112458b5f28a29e5bc14a690c3f283d9dcc6f # v1.26.2
+      uses: cargo-bins/cargo-binstall@5885714d0a40a14b2535c6ffc051fd8e49aa9665 # v1.27.0
       with:
         binary: "cargo-release git-cliff"
 
